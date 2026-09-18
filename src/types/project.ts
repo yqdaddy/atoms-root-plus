@@ -1,0 +1,108 @@
+/**
+ * 项目与虚拟文件系统类型定义。
+ * Demo 阶段约定单文件应用：files 通常只含 ENTRY_FILE_PATH 一个节点，
+ * 但结构保留多文件扩展能力（后续迭代可扩展 css/js 分离文件）。
+ */
+
+export type IsoDateTime = string; // ISO 8601 UTC 字符串，如 "2026-09-18T08:00:00.000Z"
+
+export type FileLanguage = 'html' | 'css' | 'javascript' | 'json' | 'text';
+
+/** 约定的应用入口文件路径 */
+export const ENTRY_FILE_PATH = '/index.html';
+
+/** 虚拟文件系统节点 */
+export interface FileNode {
+  /** 虚拟路径，约定以 "/" 开头，如 "/index.html" */
+  path: string;
+  /** 文件文本内容（UTF-8） */
+  content: string;
+  /** 语言标记，供编辑器高亮与组装器使用 */
+  language: FileLanguage;
+  /** 最近更新时间 */
+  updatedAt: IsoDateTime;
+}
+
+export type ProjectStatus = 'draft' | 'generating' | 'ready' | 'error';
+
+export type ChatRole = 'user' | 'assistant' | 'system';
+
+export interface ChatMessage {
+  id: string;
+  role: ChatRole;
+  /** 消息文本。流式输出完成后才写入持久层，本字段不存在半截状态 */
+  content: string;
+  createdAt: IsoDateTime;
+  /** assistant 消息可指向本次生成的代码快照 id，用于历史版本回看 */
+  artifactId?: string;
+}
+
+/**
+ * 额外授予沙箱的能力标志。默认空数组（仅 allow-scripts，见铁律 2）。
+ * 允许集合被刻意收窄：凡是可能扩大同源能力或导航能力的标志一律不在类型里出现。
+ */
+export type SandboxAllowFlag = 'allow-forms' | 'allow-modals';
+
+export interface PreviewConfig {
+  /** 额外 sandbox 能力，需产品明确需求后才可写入 */
+  extraSandboxFlags: SandboxAllowFlag[];
+  /** 预览尺寸模式：跟随内容自适应高度，或固定设备视口 */
+  sizeMode: 'autoHeight' | 'fixed';
+  /** sizeMode 为 fixed 时生效 */
+  fixedViewport?: { width: number; height: number };
+}
+
+export const DEFAULT_PREVIEW_CONFIG: PreviewConfig = {
+  extraSandboxFlags: [],
+  sizeMode: 'autoHeight',
+};
+
+/** 项目聚合根：元信息 + 虚拟文件 + 对话历史 + 预览配置 */
+export interface Project {
+  /** UUID v4，宿主生成 */
+  id: string;
+  name: string;
+  description: string;
+  status: ProjectStatus;
+  /** path 到 FileNode 的映射。读取入口永远走 ENTRY_FILE_PATH */
+  files: Record<string, FileNode>;
+  /** 对话历史，按 createdAt 升序 */
+  chat: ChatMessage[];
+  preview: PreviewConfig;
+  createdAt: IsoDateTime;
+  updatedAt: IsoDateTime;
+}
+
+/** 项目列表页使用的轻量摘要，持久化在索引 key 中，避免列表页反序列化全部项目 */
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  status: ProjectStatus;
+  updatedAt: IsoDateTime;
+  /** 入口文件字节数，用于列表页体积提示与 quota 预估 */
+  entryBytes: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isIsoDateTime(value: unknown): value is IsoDateTime {
+  return typeof value === 'string' && !Number.isNaN(Date.parse(value));
+}
+
+/** Project 结构守卫：迁移与读取路径统一用它验证数据形状 */
+export function isProject(value: unknown): value is Project {
+  if (!isRecord(value)) return false;
+  if (typeof value.id !== 'string' || value.id.length === 0) return false;
+  if (typeof value.name !== 'string') return false;
+  if (typeof value.description !== 'string') return false;
+  if (value.status !== 'draft' && value.status !== 'generating' && value.status !== 'ready' && value.status !== 'error') {
+    return false;
+  }
+  if (!isRecord(value.files) || !isRecord(value.files[ENTRY_FILE_PATH])) return false;
+  if (!Array.isArray(value.chat)) return false;
+  if (!isRecord(value.preview)) return false;
+  if (!isIsoDateTime(value.createdAt) || !isIsoDateTime(value.updatedAt)) return false;
+  return true;
+}

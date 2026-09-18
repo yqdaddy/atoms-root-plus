@@ -1,0 +1,102 @@
+@import "tailwindcss";
+@import "@fontsource-variable/space-grotesk";
+@import "@fontsource/jetbrains-mono";
+
+@theme {
+  /* Atom brand colors */
+  --color-atom-50: #effcf6;
+  --color-atom-100: #d7f7e8;
+  --color-atom-200: #aef0d3;
+  --color-atom-300: #77e5b8;
+  --color-atom-400: #3dd598;
+  --color-atom-500: #16bf80;
+  --color-atom-600: #0b9c68;
+  --color-atom-700: #0b7c55;
+  --color-atom-800: #0d6245;
+  --color-atom-900: #0d513a;
+  --color-atom-950: #032e20;
+
+  /* Font families */
+  --font-display: "Space Grotesk", var(--font-sans);
+  --font-sans: "Space Grotesk", "PingFang SC", "HarmonyOS Sans SC", "MiSans",
+    "Microsoft YaHei", "Noto Sans SC", system-ui, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", "Menlo",
+    "Consolas", monospace;
+
+  /* Font sizes */
+  --text-display-xl: 42px;
+  --text-title-lg: 20px;
+  --text-title-sm: 14px;
+  --text-body: 14px;
+  --text-body-sm: 13px;
+  --text-caption: 12px;
+
+  /* Border radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  /* Easing */
+  --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Dark mode colors (default) */
+  --color-bg-base: #09090b;
+  --color-bg-surface: #18181b;
+  --color-bg-elevated: #202024;
+  --color-bg-inset: #0e0e10;
+  --color-border-default: #27272a;
+  --color-border-strong: #3f3f46;
+  --color-text-primary: #f4f4f5;
+  --color-text-secondary: #a1a1aa;
+  --color-text-tertiary: #71717a;
+  --color-placeholder: #a1a1aa;
+  --color-accent: #16bf80;
+  --color-accent-hover: #3dd598;
+  --color-text-on-accent: #09090b;
+  --color-focus-ring: #3dd598;
+
+  /* Semantic colors */
+  --color-success: #3dd598;
+  --color-warning: #fbbf24;
+  --color-danger: #f87171;
+  --color-info: #38bdf8;
+}
+
+/* Base styles */
+html {
+  font-family: var(--font-sans);
+  background-color: var(--color-bg-base);
+  color: var(--color-text-primary);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Focus ring utility */
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* Scrollbar styling for dark mode */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg-surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-tertiary);
+}
