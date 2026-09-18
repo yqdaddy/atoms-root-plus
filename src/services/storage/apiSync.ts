@@ -6,8 +6,8 @@
 import type { Project, ProjectSummary } from '../../types/project';
 import type { StorageEnvelope } from '../../types/storage';
 
-/** API 基础 URL（开发环境默认 localhost:3000） */
-const API_BASE = import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? 'http://localhost:3000' : '');
+/** API 基础 URL（开发环境使用相对路径，走 Vite 代理） */
+const API_BASE = import.meta.env.VITE_API_BASE || '';
 
 /** API 可用性状态 */
 let apiAvailable = false;

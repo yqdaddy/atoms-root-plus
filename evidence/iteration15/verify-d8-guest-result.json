@@ -1,0 +1,80 @@
+{
+  "timestamp": "2026-09-18T16:02:13.051Z",
+  "mode": "guest",
+  "s2": {
+    "pass": false,
+    "stageMessages": [
+      {
+        "msg": "把一句需求，变成能跑的应用。描述想法，AI 团队生成网页应用，即时预览。",
+        "atSec": 0
+      },
+      {
+        "msg": "正在分析需求...生成中，请稍候...",
+        "atSec": 0
+      },
+      {
+        "msg": "正在分析需求...",
+        "atSec": 0
+      },
+      {
+        "msg": "生成中，请稍候...",
+        "atSec": 0
+      },
+      {
+        "msg": "正在生成代码...生成中，请稍候...",
+        "atSec": 4
+      },
+      {
+        "msg": "正在生成代码...",
+        "atSec": 4
+      },
+      {
+        "msg": "正在审查代码...生成中，请稍候...",
+        "atSec": 65
+      },
+      {
+        "msg": "正在审查代码...",
+        "atSec": 65
+      },
+      {
+        "msg": "支持多轮修改，生成结果自动保存在本地。0/2000",
+        "atSec": 135
+      },
+      {
+        "msg": "支持多轮修改，生成结果自动保存在本地。",
+        "atSec": 135
+      },
+      {
+        "msg": "生成的代码存在 1 个问题",
+        "atSec": 135
+      }
+    ],
+    "evidence": [
+      "url: http://localhost:5176/",
+      "elapsed: 181s, reached=false",
+      "TIMEOUT: http://localhost:5176/"
+    ],
+    "apiCalls": [
+      {
+        "url": "/api/auth/me",
+        "status": 401,
+        "t": "2026-09-18T16:02:20.354Z"
+      },
+      {
+        "url": "/api/llm/generate",
+        "status": 200,
+        "t": "2026-09-18T16:02:22.001Z"
+      }
+    ],
+    "consoleErrors": [
+      "console: Access to fetch at 'http://localhost:3000/api/health' from origin 'http://localhost:5176' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource.",
+      "console: Failed to load resource: net::ERR_FAILED",
+      "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)"
+    ]
+  },
+  "s3": {
+    "pass": false,
+    "evidence": []
+  },
+  "defects": []
+}

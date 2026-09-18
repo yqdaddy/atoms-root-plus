@@ -18,9 +18,103 @@
 
 ## 当前迭代
 
-- 轮次：Iteration 14（端到端测试与发布）
-- 状态：进行中
-- 负责角色：dev-atoms-reality-checker（验证）+ 后端架构师（部署）
+- 轮次：Iteration 16（部署配置）
+- 状态：待启动
+- 负责角色：后端架构师 + 用户
+
+## 本轮发现缺陷
+
+- D-8（major，用户实测发现）：前端代理缺失 + SSE 事件格式不匹配
+  - D-8a：vite.config.ts 无 /api 代理 → 已添加 server.proxy ✅
+  - D-8b：前后端 SSE 格式不匹配 → liveEngine.ts 添加转换层 ✅
+
+- D-9（Blocker，reality-checker 发现）：AuthPage hooks 顺序错误 → useMemo 移到条件渲染前 ✅
+
+- D-10（Major，reality-checker 发现）：apiSync.ts DEV 模式直连 localhost:3000 → 改为相对路径 ✅
+
+- D-11（Minor）：LLM 生成 HTML 校验问题（非本迭代范围）
+
+## 验证结果
+
+- D-8a/D-8b：PASS（阶段消息转换正确，SSE 流式输出正常）
+- D-9：PASS（注册页不白屏，注册成功跳转首页）
+- D-10：PASS（网络日志全部走代理，无 CORS 错误）
+- P0 通过率：100%
+
+## 经验总结
+
+1. React hooks 规则：所有 hooks 必须在条件语句之前调用，否则 hooks 数量不一致导致崩溃
+2. Vite 代理配置：DEV 模式下 API 请求应使用相对路径，让 Vite 代理转发，避免硬编码 localhost 导致 CORS
+3. SSE 事件协议：前后端需保持一致，格式转换层可解决历史遗留问题
+4. 独立验证价值：D-9、D-10 均由 reality-checker 发现，执行者自测无法覆盖这些边界问题
+
+## 下轮 prompt 升级点
+
+1. 部署配置：GitHub Pages（前端）+ Linux 服务器（后端）
+2. 生产环境配置：.env.production、API_BASE 环境变量
+
+## Iteration 16（待启动）
+
+- 轮次：Iteration 16（部署配置）
+- 状态：待启动
+- 负责角色：后端架构师 + 用户
+
+## next-iteration 指令
+
+**Iteration 15 已完成，所有 P0 缺陷已修复验证通过。**
+
+Iteration 16 待完成：
+1. **部署配置**
+   - 前端 → GitHub Pages（免费静态托管）
+   - 后端 → 用户 Linux 服务器
+2. **Git 推送**（需用户手动执行或提供 GitHub 用户名）
+3. **生产构建测试**
+
+需要用户提供：
+- GitHub 用户名
+- Linux 服务器 IP/域名及 SSH 访问方式
+
+## 迭代历史
+
+### Iteration 15（用户测试与缺陷修复，已完成）
+- 发现缺陷：
+  - D-8（major）：前端代理缺失 + SSE 格式不匹配 → 已修复
+  - D-9（Blocker）：AuthPage hooks 顺序错误 → 已修复
+  - D-10（Major）：apiSync.ts DEV 模式直连 → 已修复
+- 验证结果：P0 通过率 100%（reality-checker 独立验证）
+- 经验：
+  1. React hooks 必须在条件语句前调用
+  2. Vite DEV 模式 API 应使用相对路径走代理
+  3. SSE 事件格式需前后端一致或加转换层
+  4. 独立验证能发现执行者自测覆盖不到的边界问题
+
+### Iteration 14（端到端测试与发布准备，已完成）
+- 产出：
+  - 端到端测试验证：
+    - 后端健康检查：`curl localhost:3000/api/health` → `{"status":"ok"}`
+    - 用户注册：POST /api/auth/register → 创建用户成功
+    - 用户登录：POST /api/auth/login → 返回用户信息
+    - LLM 生成：POST /api/llm/generate → 三阶段流水线完整执行（analysis → generate → review → done）
+    - 生成的计数器应用：包含加减按钮、重置功能、键盘支持、Tailwind 样式
+  - Git 初始化：
+    - `git init` → 创建本地仓库
+    - `git add .` → 暂存 135 个文件
+    - `git commit` → 首次提交（20255 行代码）
+  - 生产构建：
+    - 前端：dist/ 912KB（gzip 204KB）
+    - 后端：dist-server/ 60KB
+- 验证结果：
+  - 端到端测试：4/4 PASS
+  - 生产构建：2/2 PASS
+  - Git 初始化：2/2 PASS
+- 遗留项：
+  - GitHub 推送：需要用户手动执行（gh CLI 登录失效）
+  - 部署上线：需要用户选择平台（Vercel/Cloudflare/Docker）
+- 经验总结：
+  1. 端到端测试需覆盖完整流程：用户注册 → 登录 → LLM 生成 → HTML 输出
+  2. 生产构建需同时构建前端和后端
+  3. GitHub CLI 需定期验证登录状态
+- 项目状态：功能完成，可提交笔试
 
 ## 迭代历史
 
@@ -387,13 +481,11 @@
 
 ## next-iteration 指令
 
-**项目核心功能已全部完成，架构已升级为后端代理模式。**
+**Iteration 14 已完成。项目已可提交笔试。**
 
-待完成项（笔试提交要求）：
-1. 配置 `.env` 文件（填入实际 API Key）
-2. 端到端测试真实生成流程
-3. 部署上线（GitHub Pages / Vercel / Cloudflare）
-4. Git 初始化并推送 GitHub
+等待用户手动操作：
+1. GitHub 推送（gh CLI 需重新登录）
+2. 部署上线（Vercel/Cloudflare/Docker）
 
 
 ---

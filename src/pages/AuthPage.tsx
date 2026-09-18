@@ -114,6 +114,12 @@ export default function AuthPage({ mode }: AuthPageProps) {
     }
   }, [username, password, confirmPassword, mode, register, login, navigate]);
 
+  // tabButtons 必须在条件渲染之前，否则 hooks 数量不一致导致 React 崩溃
+  const tabButtons = useMemo(() => [
+    { key: 'login' as const, label: '登录' },
+    { key: 'register' as const, label: '注册' },
+  ], []);
+
   // 渲染态
   if (isLoading) {
     // loading 态：骨架屏
@@ -133,11 +139,6 @@ export default function AuthPage({ mode }: AuthPageProps) {
       </div>
     );
   }
-
-  const tabButtons = useMemo(() => [
-    { key: 'login' as const, label: '登录' },
-    { key: 'register' as const, label: '注册' },
-  ], []);
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4">

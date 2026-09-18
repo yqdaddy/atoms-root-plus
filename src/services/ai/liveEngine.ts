@@ -10,24 +10,49 @@ import {
   type GenerateOptions,
   type StreamEventHandler,
   type StreamEvent,
+  type PipelineStage,
+  type DeltaPhase,
 } from './types';
+
+/* ---------------- 格式转换 ---------------- */
+
+/**
+ * 后端 stage 到前端 PipelineStage 映射
+ */
+const STAGE_MAP: Record<string, PipelineStage> = {
+  analysis: 'analyzing',
+  generate: 'generating',
+  review: 'reviewing',
+};
+
+/**
+ * 后端 stage 到前端 DeltaPhase 映射
+ * review 阶段的输出也归入 generate phase
+ */
+const STAGE_TO_PHASE: Record<string, DeltaPhase> = {
+  analysis: 'analyze',
+  generate: 'generate',
+  review: 'generate',
+};
+
+/**
+ * 后端 stage 到中文消息映射
+ */
+const STAGE_MESSAGES: Record<string, string> = {
+  analysis: '正在分析需求...',
+  generate: '正在生成代码...',
+  review: '正在审查代码...',
+};
 
 /* ---------------- SSE 解析 ---------------- */
 
 /**
- * 解析后端返回的 SSE 事件流。
- * 事件格式：
- *   event: stage
- *   data: {"runId":"r_xxx","stage":"analyzing",...}
- *
- *   event: delta
- *   data: {"runId":"r_xxx","phase":"analyze","text":"..."}
- *
- *   event: done
- *   data: {"runId":"r_xxx","html":"...",...}
- *
- *   event: error
- *   data: {"runId":"r_xxx","code":"...","message":"...",...}
+ * 解析后端返回的 SSE 事件流并进行格式转换。
+ * 后端格式 → 前端格式转换：
+ *   stage: { stage: 'analysis' } → { runId, stage: 'analyzing', attempt: 1, message }
+ *   delta: { content, stage } → { runId, phase, text }
+ *   done: { fullHtml } → { runId, html }
+ *   error: { error } → { runId, code, message, retryable, fallbackToDemo }
  */
 async function parseSSEStream(
   response: Response,
@@ -38,6 +63,7 @@ async function parseSSEStream(
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
   let chunkCount = 0;
+  const runId = `run-${Date.now()}`;
 
   try {
     for (;;) {
@@ -86,21 +112,64 @@ async function parseSSEStream(
         if (eventType && eventData) {
           try {
             const payload = JSON.parse(eventData);
-            // 根据事件类型构造对应的 StreamEvent
+            // 转换后端格式到前端格式
             let event: StreamEvent;
             switch (eventType) {
-              case 'stage':
-                event = { type: 'stage', payload };
+              case 'stage': {
+                // 后端: { stage: 'analysis' } → 前端: { runId, stage: 'analyzing', attempt, message }
+                const backendStage = payload.stage as string;
+                const frontendStage = STAGE_MAP[backendStage] || 'analyzing';
+                event = {
+                  type: 'stage',
+                  payload: {
+                    runId,
+                    stage: frontendStage,
+                    attempt: 1,
+                    message: STAGE_MESSAGES[backendStage] || `${backendStage} 阶段`,
+                  },
+                };
                 break;
-              case 'delta':
-                event = { type: 'delta', payload };
+              }
+              case 'delta': {
+                // 后端: { content, stage } → 前端: { runId, phase, text }
+                const backendStage = payload.stage as string;
+                event = {
+                  type: 'delta',
+                  payload: {
+                    runId,
+                    phase: STAGE_TO_PHASE[backendStage] || 'generate',
+                    text: payload.content || '',
+                  },
+                };
                 break;
-              case 'done':
-                event = { type: 'done', payload };
+              }
+              case 'done': {
+                // 后端: { fullHtml } → 前端: { runId, html, warnings, stats }
+                event = {
+                  type: 'done',
+                  payload: {
+                    runId,
+                    html: payload.fullHtml || '',
+                    warnings: [],
+                    stats: { mode: 'live', inputTokens: 0, outputTokens: 0, durationMs: 0, rounds: 1 },
+                  },
+                };
                 break;
-              case 'error':
-                event = { type: 'error', payload };
+              }
+              case 'error': {
+                // 后端: { error } → 前端: { runId, code, message, retryable, fallbackToDemo }
+                event = {
+                  type: 'error',
+                  payload: {
+                    runId,
+                    code: 'PARSE_FAILED' as const,
+                    message: payload.error || '生成失败',
+                    retryable: true,
+                    fallbackToDemo: false,
+                  },
+                };
                 break;
+              }
               default:
                 console.warn('[liveEngine] 未知事件类型', eventType);
                 continue;

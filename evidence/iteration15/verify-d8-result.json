@@ -1,0 +1,32 @@
+{
+  "timestamp": "2026-09-18T15:58:15.433Z",
+  "username": "e2e_verify_1789747095433",
+  "s1": {
+    "pass": false,
+    "evidence": []
+  },
+  "s2": {
+    "pass": false,
+    "stageMessages": [],
+    "evidence": [],
+    "apiCalls": [
+      {
+        "url": "/api/auth/me",
+        "status": 401,
+        "t": "2026-09-18T15:58:30.606Z"
+      }
+    ],
+    "consoleErrors": [
+      "console: Access to fetch at 'http://localhost:3000/api/health' from origin 'http://localhost:5176' has been blocked by CORS policy: Response to preflight request doesn't pass access control check: No 'Access-Control-Allow-Origin' header is present on the requested resource.",
+      "console: Failed to load resource: net::ERR_FAILED",
+      "console: Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+      "console: React has detected a change in the order of Hooks called by %s. This will lead to bugs and errors if not fixed. For more information, read the Rules of Hooks: https://react.dev/link/rules-of-hooks\n\n   Previous render            Next render\n   ------------------------------------------------------\n%s",
+      "pageerror: Rendered more hooks than during the previous render."
+    ]
+  },
+  "s3": {
+    "pass": false,
+    "evidence": []
+  },
+  "fatal": "page.fill: Timeout 30000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('#username')\u001b[22m\n"
+}
