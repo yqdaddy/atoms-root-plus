@@ -18,11 +18,45 @@
 
 ## 当前迭代
 
+- 轮次：项目已完成
+- 状态：已完成
+- 负责角色：无
+
+## next-iteration 指令
+
+**项目已全部完成，可提交笔试。**
+
+后续操作（用户自行完成）：
+1. `git remote add origin https://github.com/用户名/atoms-root-plus.git`
+2. `git push -u origin main`
+3. 在 GitHub 启用 Pages（Settings → Pages → GitHub Actions）
+4. 参考 `docs/deploy-guide.md` 部署后端到 Linux 服务器
+
+## Iteration 16（部署配置，已完成）
+
 - 轮次：Iteration 16（部署配置）
-- 状态：待启动
+- 状态：已完成
 - 负责角色：后端架构师 + 用户
 
-## 本轮发现缺陷
+## 产出
+
+- 生产构建测试通过（前端 912KB gzip 204KB，后端 60KB）
+- 部署文档：docs/deploy-guide.md
+- GitHub Actions 工作流：.github/workflows/deploy.yml
+
+## 遗留项（用户自行完成）
+
+- Git 推送到 GitHub
+- 服务器部署
+
+## 经验总结
+
+1. 部署配置可提前准备，用户只需提供最终信息即可快速部署
+2. GitHub Actions 可实现前端自动部署，后端需手动配置
+
+## 项目状态
+
+**✅ 项目已完成，可提交笔试。**
 
 - D-8（major，用户实测发现）：前端代理缺失 + SSE 事件格式不匹配
   - D-8a：vite.config.ts 无 /api 代理 → 已添加 server.proxy ✅
@@ -53,13 +87,7 @@
 1. 部署配置：GitHub Pages（前端）+ Linux 服务器（后端）
 2. 生产环境配置：.env.production、API_BASE 环境变量
 
-## Iteration 16（待启动）
-
-- 轮次：Iteration 16（部署配置）
-- 状态：待启动
-- 负责角色：后端架构师 + 用户
-
-## next-iteration 指令
+## 本轮发现缺陷
 
 **Iteration 15 已完成，所有 P0 缺陷已修复验证通过。**
 
@@ -75,6 +103,11 @@ Iteration 16 待完成：
 - Linux 服务器 IP/域名及 SSH 访问方式
 
 ## 迭代历史
+
+### Iteration 16（部署配置，已完成）
+- 产出：生产构建 + 部署文档 + GitHub Actions 工作流
+- 遗留：用户自行推送和服务器部署
+- 项目状态：✅ 已完成，可提交笔试
 
 ### Iteration 15（用户测试与缺陷修复，已完成）
 - 发现缺陷：
