@@ -24,13 +24,14 @@
 
 ## next-iteration 指令
 
-**项目已全部完成，可提交笔试。**
+**项目已全部完成并推送到 GitHub。**
 
-后续操作（用户自行完成）：
-1. `git remote add origin https://github.com/用户名/atoms-root-plus.git`
-2. `git push -u origin main`
-3. 在 GitHub 启用 Pages（Settings → Pages → GitHub Actions）
-4. 参考 `docs/deploy-guide.md` 部署后端到 Linux 服务器
+- 仓库地址：https://github.com/yqdaddy/atoms-root-plus
+- 本地测试：http://localhost:5176（前端）+ http://localhost:3000（后端）
+
+待用户完成：
+1. 启用 GitHub Pages（Settings → Pages → Source: GitHub Actions）
+2. 部署后端到 Linux 服务器（参考 `docs/deploy-guide.md`）
 
 ## Iteration 16（部署配置，已完成）
 
