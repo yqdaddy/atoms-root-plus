@@ -11,6 +11,7 @@ export default defineConfig({
     },
   },
   server: {
+    host: true, // 监听 0.0.0.0，允许局域网访问
     port: 5176,
     proxy: {
       '/api': {

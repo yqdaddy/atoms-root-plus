@@ -73,6 +73,7 @@ console.log(
 serve({
   fetch: app.fetch,
   port,
+  hostname: '127.0.0.1', // 仅监听本机回环：开发由 Vite 代理转发，生产由 nginx 反代，不直接对外
 });
 
 console.log(`Server running on http://localhost:${port}`);
