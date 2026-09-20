@@ -50,10 +50,12 @@ function ProjectCard({
   summary,
   onOpen,
   onDelete,
+  onRename,
 }: {
   summary: ProjectSummary;
   onOpen: () => void;
   onDelete: () => void;
+  onRename: () => void;
 }) {
   const [showMenu, setShowMenu] = useState(false);
 
@@ -102,6 +104,17 @@ function ProjectCard({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
+                    onRename();
+                    setShowMenu(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-base)] hover:text-[var(--color-text-primary)]"
+                >
+                  <Icon icon="lucide:pencil" width={14} height={14} />
+                  重命名
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
                     onDelete();
                     setShowMenu(false);
                   }}
@@ -131,10 +144,13 @@ export default function ProjectsPage() {
   const summaries = useProjectStore((state) => state.summaries);
   const switchProject = useProjectStore((state) => state.switchProject);
   const deleteProject = useProjectStore((state) => state.deleteProject);
+  const updateProjectName = useProjectStore((state) => state.updateProjectName);
   const newProject = useProjectStore((state) => state.newProject);
   const initialize = useProjectStore((state) => state.initialize);
 
   const [isLoading, setIsLoading] = useState(true);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
 
   // F-002: 项目列表页守卫 - 未登录时跳转到登录页
   useEffect(() => {
@@ -165,6 +181,26 @@ export default function ProjectsPage() {
     if (confirm(`确定删除项目「${name}」吗？此操作不可恢复。`)) {
       deleteProject(id);
     }
+  };
+
+  const handleRenameProject = (id: string, currentName: string) => {
+    setRenamingId(id);
+    setRenameValue(currentName || '未命名项目');
+  };
+
+  const handleRenameSubmit = (id: string) => {
+    // 先切换到该项目，然后更新名称
+    switchProject(id);
+    const trimmedName = renameValue.trim();
+    if (trimmedName) {
+      updateProjectName(trimmedName);
+    }
+    setRenamingId(null);
+  };
+
+  const handleRenameCancel = () => {
+    setRenamingId(null);
+    setRenameValue('');
   };
 
   const handleNewProject = () => {
@@ -229,11 +265,53 @@ export default function ProjectsPage() {
                 summary={summary}
                 onOpen={() => handleOpenProject(summary.id)}
                 onDelete={() => handleDeleteProject(summary.id, summary.name)}
+                onRename={() => handleRenameProject(summary.id, summary.name)}
               />
             ))}
           </div>
         )}
       </main>
+
+      {/* 重命名对话框 */}
+      {renamingId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div
+            className="bg-[var(--color-bg-surface)] border border-[var(--color-border-default)] rounded-xl p-6 w-full max-w-md shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-4">重命名项目</h2>
+            <input
+              type="text"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleRenameSubmit(renamingId);
+                } else if (e.key === 'Escape') {
+                  handleRenameCancel();
+                }
+              }}
+              className="w-full px-4 py-3 rounded-lg bg-[var(--color-bg-base)] border border-[var(--color-border-default)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-accent)] outline-none transition-colors"
+              placeholder="输入项目名称"
+              autoFocus
+            />
+            <div className="flex justify-end gap-3 mt-4">
+              <button
+                onClick={handleRenameCancel}
+                className="px-4 py-2 rounded-lg text-[14px] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-base)] transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => handleRenameSubmit(renamingId)}
+                className="px-4 py-2 rounded-lg text-[14px] bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] transition-colors"
+              >
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
