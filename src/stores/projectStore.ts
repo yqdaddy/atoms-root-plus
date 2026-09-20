@@ -18,9 +18,21 @@ import {
 } from '../services/storage/apiSync';
 import { persistProjectDetail } from '../services/storage/localPersistence';
 
-/** 生成 UUID v4 */
+/** 生成 UUID v4（兼容非安全上下文，如局域网 HTTP） */
 function generateId(): string {
-  return crypto.randomUUID();
+  // 优先用原生 API（localhost/HTTPS 安全上下文）
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // fallback：手动构造 UUID v4
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  const b6 = bytes[6] ?? 0;
+  const b8 = bytes[8] ?? 0;
+  bytes[6] = (b6 & 0x0f) | 0x40; // version 4
+  bytes[8] = (b8 & 0x3f) | 0x80; // variant
+  const h = (i: number) => (bytes[i] ?? 0).toString(16).padStart(2, '0');
+  return `${h(0)}${h(1)}${h(2)}${h(3)}-${h(4)}${h(5)}-${h(6)}${h(7)}-${h(8)}${h(9)}-${h(10)}${h(11)}${h(12)}${h(13)}${h(14)}${h(15)}`;
 }
 
 /** 获取当前 ISO 时间戳 */
