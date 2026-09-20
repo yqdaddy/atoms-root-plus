@@ -2,88 +2,28 @@
 
 ## 架构
 
-- **前端**：GitHub Pages（静态托管）
-- **后端**：Linux 服务器（Node.js + SQLite）
+单入口部署：nginx 托管前端静态产物，并将 `/api` 反向代理到 Node 后端。
 
-## 前端部署（GitHub Pages）
-
-### 1. 创建 GitHub 仓库
-
-```bash
-# 在 GitHub 网页创建仓库：https://github.com/new
-# 仓库名：atoms-root-plus
+```
+浏览器 ──http/https──▶ nginx（80/443，唯一对外端口）
+                        ├── /            → dist/ 静态文件（含 SPA fallback）
+                        └── /api/        → http://127.0.0.1:3000（Node 后端，仅监听本机）
 ```
 
-### 2. 推送代码
-
-```bash
-git remote add origin https://github.com/你的用户名/atoms-root-plus.git
-git branch -M main
-git push -u origin main
-```
-
-### 3. 启用 GitHub Pages
-
-1. 进入仓库 Settings → Pages
-2. Source 选择 `GitHub Actions`
-
-### 4. 创建部署 Workflow
-
-创建 `.github/workflows/deploy.yml`：
-
-```yaml
-name: Deploy to GitHub Pages
-
-on:
-  push:
-    branches: [main]
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-      
-      - run: npm ci
-      
-      - run: npm run build
-      
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
-      
-      - uses: actions/deploy-pages@v4
-```
-
-### 5. 配置前端 API 地址
-
-创建 `.env.production`：
-
-```env
-VITE_API_BASE=https://你的服务器域名/api
-```
+- 前端构建产物：`npm run build` 输出 `dist/`
+- 后端：Node.js + SQLite，只监听 `127.0.0.1:3000`，不直接对外
 
 ## 后端部署（Linux 服务器）
 
 ### 1. 服务器要求
 
 - Node.js 18+
-- 端口 3000 开放
+- nginx
 
 ### 2. 上传代码
 
 ```bash
-# 本地打包
+# 本地打包（后端只需运行时文件）
 tar -czvf atoms-backend.tar.gz dist-server/ package.json package-lock.json .env.example
 
 # 上传到服务器
@@ -93,10 +33,8 @@ scp atoms-backend.tar.gz user@服务器IP:/home/user/
 ### 3. 服务器配置
 
 ```bash
-# SSH 登录服务器
 ssh user@服务器IP
 
-# 解压
 mkdir -p /home/user/atoms
 cd /home/user/atoms
 tar -xzvf ../atoms-backend.tar.gz
@@ -113,57 +51,106 @@ nano .env
 # LLM_MODEL=agnes-3.0-flash
 # AUTH_SESSION_SECRET=随机密钥
 
-# 启动服务
-node dist-server/index.js
-```
-
-### 4. 使用 PM2 守护进程
-
-```bash
+# 使用 PM2 守护进程
 npm install -g pm2
 pm2 start dist-server/index.js --name atoms-api
 pm2 save
 pm2 startup
 ```
 
-### 5. Nginx 反向代理（可选）
+## 前端部署（nginx 静态托管）
+
+### 1. 构建并上传
+
+```bash
+# 本地构建
+npm run build
+
+# 上传产物到服务器
+scp -r dist/ user@服务器IP:/var/www/atoms/
+```
+
+### 2. nginx 配置
 
 ```nginx
 server {
     listen 80;
     server_name 你的域名;
-    
-    location /api {
+
+    root /var/www/atoms;
+    index index.html;
+
+    # API 反向代理（SSE 流式必须关闭缓冲）
+    location /api/ {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Connection '';
+
+        # SSE 关键：禁用缓冲，流式事件逐块透传
+        proxy_buffering off;
+        proxy_cache off;
+
+        # LLM 生成耗时较长，放宽超时
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+
+    # 前端静态资源（带哈希，长缓存）
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # SPA fallback：其余路由返回 index.html
+    location / {
+        try_files $uri $uri/ /index.html;
     }
 }
+```
+
+配置要点：
+
+- `proxy_buffering off`：SSE 流式输出必须逐块转发，开启缓冲会导致生成过程卡住直到结束才一次性输出
+- `proxy_read_timeout 300s`：LLM 生成可能持续数分钟，默认 60s 会中途断流
+- `proxy_set_header Connection ''`：保持长连接以支持流式响应
+
+### 3. 重载 nginx
+
+```bash
+sudo nginx -t && sudo nginx -s reload
 ```
 
 ## 验证部署
 
 ```bash
-# 检查前端
-curl https://你的用户名.github.io/atoms-root-plus/
+# 检查前端页面
+curl http://你的域名/
 
-# 检查后端
-curl https://你的域名/api/health
+# 检查 API
+curl http://你的域名/api/health
+
+# 检查 SSE 流式（应看到事件逐条输出而非一次性到达）
+curl -N -X POST http://你的域名/api/llm/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"做一个计数器"}'
 ```
 
 ## 常见问题
 
-### CORS 错误
+### 生成过程卡住，结束后一次性输出
 
-确保后端 CORS 配置正确（server/index.ts 已配置）。
+nginx 反代未关闭缓冲。确认 `/api/` 的 location 中有 `proxy_buffering off;`。
+
+### 生成到一半断开
+
+`proxy_read_timeout` 太短。LLM 生成可能持续数分钟，建议 300s 以上。
 
 ### API 连接失败
 
-检查防火墙是否开放 3000 端口。
+检查后端进程：`pm2 status`。确认后端监听 `127.0.0.1:3000`：`curl http://127.0.0.1:3000/api/health`。
 
-### 前端空白
+### 刷新页面 404
 
-检查 VITE_API_BASE 是否正确配置。
+SPA fallback 未配置。确认 `location /` 中有 `try_files $uri $uri/ /index.html;`。
