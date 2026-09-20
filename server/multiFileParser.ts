@@ -128,6 +128,117 @@ export function parseMultiFileOutput(text: string): MultiFileOutput {
 }
 
 /**
+ * 跳过一个 JSON 字符串字面量。
+ * start 指向起始引号，返回结束引号之后的位置；字符串未闭合时返回文本长度。
+ * 正确处理反斜杠转义（如 \" 与 \\），因此文件内容中的引号不会干扰边界判断。
+ */
+function skipJsonString(text: string, start: number): number {
+  let i = start + 1;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '\\') {
+      i += 2; // 跳过转义符与被转义的字符
+      continue;
+    }
+    if (ch === '"') {
+      return i + 1;
+    }
+    i++;
+  }
+  return text.length;
+}
+
+/**
+ * 从 start（指向 "{"）开始寻找配对的 "}"。
+ * 扫描时跳过字符串字面量，避免文件内容中的花括号干扰配对。
+ * 找不到配对（输出在字符串中途被截断）时返回 -1。
+ */
+function findMatchingBrace(text: string, start: number): number {
+  let depth = 0;
+  let i = start;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '"') {
+      i = skipJsonString(text, i);
+      continue;
+    }
+    if (ch === '{') {
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        return i;
+      }
+    }
+    i++;
+  }
+  return -1;
+}
+
+/**
+ * 逐文件边界扫描：从（可能截断的）JSON 文本中抢救所有结构完整的文件对象。
+ *
+ * 原理：
+ * 1. 以字符为单位扫描，字符串字面量整体跳过，文件内容中的花括号与引号不会干扰定位
+ * 2. 遇到能闭合的对象就尝试 JSON.parse 并按文件结构校验，通过则收入抢救结果
+ * 3. 无法闭合的对象（最后一个被截断的文件，或外层包裹对象）下潜一层继续扫描，
+ *    其内部已完成的文件对象仍可被找到
+ * 4. 被截断文件的未闭合字符串会被整体跳到文本末尾，不完整尾部自然被丢弃
+ */
+function salvageCompleteFiles(text: string): GeneratedFile[] {
+  const salvaged: GeneratedFile[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '"') {
+      i = skipJsonString(text, i);
+      continue;
+    }
+    if (ch === '{') {
+      const end = findMatchingBrace(text, i);
+      if (end !== -1) {
+        const candidate = text.slice(i, end + 1);
+        try {
+          const parsed: unknown = JSON.parse(candidate);
+          if (isValidFile(parsed)) {
+            salvaged.push(parsed);
+            i = end + 1;
+            continue;
+          }
+        } catch {
+          // 不是合法的 JSON 文件对象（如外层包裹对象），下潜继续扫描
+        }
+      }
+      // 无法闭合或不是文件对象：下潜一层，继续寻找内部的文件对象
+      i++;
+      continue;
+    }
+    i++;
+  }
+  return salvaged;
+}
+
+/**
+ * 截断修复：从因 max_tokens 耗尽而中途截断的多文件 JSON 输出中抢救已完成的文件。
+ *
+ * 逐文件边界扫描（容忍字符串中途截断），丢弃不完整尾部；
+ * 抢救结果必须包含入口文件 /index.html 才值得采纳（否则组装后无法预览）。
+ * 对完整输入同样安全：完整 JSON 中的每个文件对象也能被逐个扫描出来，结果不丢失。
+ *
+ * @param text LLM 输出的原始文本（可能包含 markdown 围栏）
+ * @returns 抢救成功返回多文件结构；完全无法抢救（无任何完整文件或缺入口文件）返回 null
+ */
+export function repairTruncatedMultiFileOutput(text: string): MultiFileOutput | null {
+  const cleanText = stripMarkdownFence(text);
+  const salvaged = salvageCompleteFiles(cleanText);
+  const hasIndexHtml = salvaged.some(f => f.path === '/index.html');
+  if (!hasIndexHtml) {
+    return null;
+  }
+  return { files: salvaged };
+}
+
+/**
  * 流式多文件解析器。
  * 支持增量追加文本，在 JSON 完整后解析。
  */

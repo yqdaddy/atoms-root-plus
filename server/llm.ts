@@ -7,6 +7,7 @@
 
 import {
   parseMultiFileOutput,
+  repairTruncatedMultiFileOutput,
   toFileNodeRecord,
   generateFileTreeSummary,
   formatAffectedFiles,
@@ -114,8 +115,11 @@ pass 为 true 时 repairInstructions 必须是空数组，missingFiles 必须是
 
 /**
  * SSE 事件类型
+ *
+ * warning：非致命异常通知（当前仅截断抢救）。前端未知事件类型会安全忽略，
+ * 该事件为协议预留，供前端后续展示抢救提示。
  */
-export type LLMEventType = 'stage' | 'delta' | 'approval_required' | 'done' | 'error';
+export type LLMEventType = 'stage' | 'delta' | 'approval_required' | 'done' | 'error' | 'warning';
 
 export interface LLMEvent {
   type: LLMEventType;
@@ -128,6 +132,7 @@ export interface LLMEvent {
     files?: Record<string, { path: string; content: string; language: FileLanguage; updatedAt: string }>; // 多文件结构
     message?: string;
     sessionId?: string; // 会话 ID，用于批准后继续
+    rescuedFiles?: string[]; // 截断抢救成功时，被恢复的文件路径列表（warning 事件）
   };
 }
 
@@ -497,16 +502,37 @@ export async function continueAfterApproval(
 
     if (combinedSignal.aborted) return;
 
-    // 解析多文件输出
+    // 解析多文件输出；解析失败时尝试截断抢救：输出可能因 max_tokens 耗尽中途
+    // 截断，残缺 JSON 中通常仍有结构完整的文件，抢救出含入口文件的集合即可
+    // 继续走正常管线交付，只有完全无法抢救时才作废本次生成
     let multiFileOutput: MultiFileOutput;
+    let rescueNotice: string | null = null;
+    let rescuedPaths: string[] = [];
     try {
       multiFileOutput = parseMultiFileOutput(generatedOutput);
     } catch (parseError) {
       const errorMsg = parseError instanceof Error ? parseError.message : '输出解析失败';
       console.error('[continueAfterApproval] 多文件解析失败:', errorMsg);
-      pendingSessions.delete(sessionId);
-      onEvent({ type: 'error', payload: { message: `生成输出格式错误: ${errorMsg}` } });
-      return;
+
+      const rescued = repairTruncatedMultiFileOutput(generatedOutput);
+      if (!rescued) {
+        // 抢救不出任何可用文件（无完整文件或缺 /index.html），维持原错误路径
+        pendingSessions.delete(sessionId);
+        onEvent({ type: 'error', payload: { message: `生成输出格式错误: ${errorMsg}` } });
+        return;
+      }
+
+      rescuedPaths = rescued.files.map(f => f.path);
+      rescueNotice = `输出因长度限制被截断，已恢复 ${rescuedPaths.length} 个已完成文件`;
+      console.warn('[continueAfterApproval] 截断抢救成功:', rescueNotice, rescuedPaths.join(', '));
+      multiFileOutput = rescued;
+    }
+
+    if (rescueNotice) {
+      // 结构化 warning 事件入协议（前端 default 分支安全忽略，协议留档供后续消费）；
+      // 同时以 delta 落入 generate 阶段的显示文本，让用户当场看到抢救结果
+      onEvent({ type: 'warning', payload: { message: rescueNotice, rescuedFiles: rescuedPaths } });
+      onEvent({ type: 'delta', payload: { text: `\n\n${rescueNotice}，不完整的文件已丢弃。`, phase: 'generate' } });
     }
 
     // 合并文件：迭代模式下保留未变更文件
