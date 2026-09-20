@@ -1,0 +1,34 @@
+[
+  {
+    "name": "注册进入工作区",
+    "pass": true
+  },
+  {
+    "name": "提交提示词",
+    "pass": true
+  },
+  {
+    "name": "批准面板出现",
+    "pass": true
+  },
+  {
+    "name": "生成完成",
+    "pass": true,
+    "detail": "+107s"
+  },
+  {
+    "name": "预览含真实应用",
+    "pass": true,
+    "detail": "len=18463 real=true"
+  },
+  {
+    "name": "刷新后数据恢复",
+    "pass": true,
+    "detail": "iframeLen=18463"
+  },
+  {
+    "name": "项目列表有记录",
+    "pass": true,
+    "detail": "我的项目 1 个项目 新建项目 未命名项目 已完成 刚刚"
+  }
+]
