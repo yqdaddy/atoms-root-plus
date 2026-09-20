@@ -206,6 +206,34 @@ const ENGINEER_SYSTEM_PROMPT = `你是 Atoms 平台的前端工程师。你根�
 ## 输出前自检
 输出结束前逐条确认：所有标签闭合；<script> 内无语法错误；功能清单中 priority 为 must 的功能全部有对应实现；无白名单外资源。`;
 
+/** 迭代模式的工程师追加指令 */
+const ENGINEER_ITERATION_PROMPT = `## 迭代修改模式
+
+你正在修改一个已有项目。必须遵循以下原则：
+
+### 核心原则
+1. **最小变更**：只修改用户要求的部分，不改动其他代码
+2. **保持一致性**：延续现有代码的风格、命名、结构
+3. **增量修改**：基于现有代码修改，不要重写整个文件
+
+### 输出规则
+- 只输出**被修改的文件**，未修改的文件不要输出
+- 保留所有未涉及变更的代码片段
+- 新增功能时，尽量复用现有组件和样式
+- 删除功能时，清理相关代码但保留其他部分
+
+### 禁止行为
+- 不要重新生成整个项目
+- 不要改变现有代码的命名风格
+- 不要添加用户未要求的新功能
+- 不要删除用户未要求删除的功能
+
+### 自检清单
+输出前确认：
+- 我只修改了用户要求的部分
+- 未修改的代码保持原样
+- 变更是增量式的，不是重写`;
+
 /** 审查者系统提示词 */
 const REVIEWER_SYSTEM_PROMPT = `你是 Atoms 平台的质量审查者。你审查多文件项目是否合格交付。你不重写代码，只输出审查结论。
 
@@ -595,13 +623,16 @@ export async function continueAfterApproval(
       ? features
       : JSON.stringify(features, null, 2);
 
-    // 构建工程师消息
-    const generateMessages: ChatMessage[] = [
-      { role: 'system', content: ENGINEER_SYSTEM_PROMPT },
-    ];
-
     // 判断是否为迭代模式
     const isIteration = currentFiles && Object.keys(currentFiles).length > 0;
+
+    // 构建工程师消息：迭代模式使用增强 prompt
+    const systemPrompt = isIteration
+      ? ENGINEER_SYSTEM_PROMPT + '\n\n' + ENGINEER_ITERATION_PROMPT
+      : ENGINEER_SYSTEM_PROMPT;
+    const generateMessages: ChatMessage[] = [
+      { role: 'system', content: systemPrompt },
+    ];
 
     // 构建对话上下文附加块
     const chatContextSection = chatContextBlock
@@ -616,7 +647,7 @@ export async function continueAfterApproval(
 
       generateMessages.push({
         role: 'user',
-        content: `## 功能清单\n${featureListStr}\n\n## 当前项目文件\n${affectedFilesContent}\n\n## 用户修改需求\n${prompt}${chatContextSection}\n\n请根据修改需求更新需要变更的文件（只输出变更的文件，未变更的文件不需要输出）。`,
+        content: `## 功能清单\n${featureListStr}\n\n## 当前项目文件\n${affectedFilesContent}\n\n## 用户修改需求\n${prompt}${chatContextSection}\n\n请根据修改需求，**增量修改**需要变更的文件。只输出被修改的文件，未修改的文件不要输出。保持现有代码风格一致。`,
       });
     } else {
       // 首次生成模式
@@ -700,21 +731,22 @@ export async function continueAfterApproval(
     if (combinedSignal.aborted) return;
 
     // 组装单文件 HTML（用于向后兼容和预览）
-    // 从入口文件开始，内联所有引用
-    const indexFile = multiFileOutput.files.find(f => f.path === '/index.html');
+    // 使用 finalFiles（合并后的完整文件集），确保迭代模式下也能正确组装
+    const allFiles = Object.values(finalFiles);
+    const indexFile = allFiles.find(f => f.path === '/index.html');
     let assembledHtml = indexFile?.content || '';
 
     // 简单内联 CSS 和 JS 引用
     if (indexFile) {
       // 内联 CSS
-      for (const file of multiFileOutput.files.filter(f => f.language === 'css')) {
+      for (const file of allFiles.filter(f => f.language === 'css')) {
         const relativePath = '.' + file.path;
         const linkPattern = new RegExp(`<link[^>]*href=["']${escapeRegExp(relativePath)}["'][^>]*>`, 'gi');
         assembledHtml = assembledHtml.replace(linkPattern, `<style>\n${file.content}\n</style>`);
       }
 
       // 内联 JS
-      for (const file of multiFileOutput.files.filter(f => f.language === 'javascript')) {
+      for (const file of allFiles.filter(f => f.language === 'javascript')) {
         const relativePath = '.' + file.path;
         const scriptPattern = new RegExp(`<script[^>]*src=["']${escapeRegExp(relativePath)}["'][^>]*>\\s*<\\/script>`, 'gi');
         assembledHtml = assembledHtml.replace(scriptPattern, `<script>\n${file.content}\n</script>`);
