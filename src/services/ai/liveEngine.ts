@@ -240,9 +240,8 @@ async function runPipeline(
       hasCurrentHtml: Boolean(options.currentHtml),
     });
 
-    // 开发环境直接请求后端（绕过 Vite 代理对 SSE 的兼容问题）
-    const apiBase = import.meta.env.DEV ? 'http://localhost:3000' : '';
-    const response = await fetch(`${apiBase}/api/llm/generate`, {
+    // 统一走反向代理：开发环境由 Vite 代理转发，生产环境同源直出
+    const response = await fetch('/api/llm/generate', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -380,8 +379,7 @@ export async function approveAndContinue(
   try {
     console.log('[liveEngine] 批准后继续生成', { sessionId });
 
-    const apiBase = import.meta.env.DEV ? 'http://localhost:3000' : '';
-    const response = await fetch(`${apiBase}/api/llm/approve`, {
+    const response = await fetch('/api/llm/approve', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
