@@ -18,6 +18,7 @@ createRoot(document.getElementById('root')!).render(
         <Route path="/login" element={<App />} />
         <Route path="/register" element={<App />} />
         <Route path="/workspace" element={<App />} />
+        <Route path="/projects" element={<App />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,
