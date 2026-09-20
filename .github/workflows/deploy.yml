@@ -46,7 +46,7 @@ jobs:
             --exclude='data' \
             --exclude='node_modules' \
             --exclude='logs' \
-            dist-server/ package.json package-lock.json .env.example ecosystem.config.js \
+            dist-server/ package.json package-lock.json .env.example ecosystem.config.cjs \
             ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ secrets.BACKEND_PATH }}/
 
           ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
