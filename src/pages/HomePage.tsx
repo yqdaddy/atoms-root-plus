@@ -248,7 +248,7 @@ export default function HomePage() {
   const [inputValue, setInputValue] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [viewTab, setViewTab] = useState<'preview' | 'code'>('preview');
-  const [deviceMode, setDeviceMode] = useState<'desktop' | 'mobile'>('desktop');
+  // deviceMode 已移至 SandboxFrame 组件（通过 useSettingsStore）
   const [showConsole, setShowConsole] = useState(false);
   // 当前正在生成的消息 ID（用于跟踪 UI 状态）
   const [pendingMessageId, setPendingMessageId] = useState<string | null>(null);
@@ -1146,29 +1146,7 @@ export default function HomePage() {
               {/* Divider */}
               <div className="w-px h-5 bg-[var(--color-border-default)] mx-2" />
 
-              {/* Device mode toggle */}
-              <button
-                onClick={() => setDeviceMode('desktop')}
-                className={`p-1.5 rounded transition-colors ${
-                  deviceMode === 'desktop'
-                    ? 'bg-[var(--color-bg-base)] text-[var(--color-text-primary)]'
-                    : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
-                }`}
-                title="桌面模式"
-              >
-                <Icon icon="lucide:monitor" width={16} height={16} />
-              </button>
-              <button
-                onClick={() => setDeviceMode('mobile')}
-                className={`p-1.5 rounded transition-colors ${
-                  deviceMode === 'mobile'
-                    ? 'bg-[var(--color-bg-base)] text-[var(--color-text-primary)]'
-                    : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
-                }`}
-                title="移动模式"
-              >
-                <Icon icon="lucide:smartphone" width={16} height={16} />
-              </button>
+              {/* 设备切换已移至 SandboxFrame 组件内 */}
             </div>
 
             <div className="flex items-center gap-1">
@@ -1222,19 +1200,11 @@ export default function HomePage() {
           <div className="flex-1 overflow-hidden flex flex-col">
             {viewTab === 'preview' ? (
               <>
-                <div className={`flex-1 flex items-center justify-center p-4 ${
-                  deviceMode === 'mobile' ? 'bg-[var(--color-bg-surface)]' : ''
-                }`}>
+                <div className="flex-1 flex items-center justify-center p-4">
                   {generatedHtml ? (
-                    deviceMode === 'mobile' ? (
-                      <div className="w-[375px] h-[667px] rounded-[2rem] border-8 border-[var(--color-border-strong)] overflow-hidden shadow-2xl bg-white">
-                        <SandboxFrame html={generatedHtml} files={currentProject?.files} />
-                      </div>
-                    ) : (
-                      <div className="w-full h-full">
-                        <SandboxFrame html={generatedHtml} files={currentProject?.files} />
-                      </div>
-                    )
+                    <div className="w-full h-full">
+                      <SandboxFrame html={generatedHtml} files={currentProject?.files} />
+                    </div>
                   ) : (
                     <div className="text-center text-[var(--color-text-tertiary)]">
                       <Icon icon="lucide:monitor-play" width={48} height={48} className="mx-auto mb-4 opacity-50" />
