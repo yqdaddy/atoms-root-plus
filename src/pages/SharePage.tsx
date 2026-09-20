@@ -1,6 +1,6 @@
 /**
  * 分享预览页
- * 从 URL 参数读取分享 ID，从 localStorage 恢复 HTML 并渲染
+ * 从 URL 参数读取分享 ID，从服务器获取 HTML 并渲染
  */
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -15,21 +15,32 @@ export default function SharePage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!id) {
-      setError('无效的分享链接');
+    let cancelled = false;
+
+    async function fetchShare() {
+      if (!id) {
+        setError('无效的分享链接');
+        setLoading(false);
+        return;
+      }
+
+      const data = await loadShare(id);
+      if (cancelled) return;
+
+      if (!data) {
+        setError('分享链接不存在或已过期');
+        setLoading(false);
+        return;
+      }
+
+      setShareData(data);
       setLoading(false);
-      return;
     }
 
-    const data = loadShare(id);
-    if (!data) {
-      setError('分享链接不存在或已过期');
-      setLoading(false);
-      return;
-    }
-
-    setShareData(data);
-    setLoading(false);
+    fetchShare();
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   if (loading) {
@@ -50,7 +61,7 @@ export default function SharePage() {
           <Icon icon="lucide:alert-circle" width={48} height={48} className="text-[var(--color-error)]" />
           <h1 className="text-xl font-semibold text-[var(--color-text-primary)]">{error}</h1>
           <p className="text-[var(--color-text-secondary)]">
-            分享链接仅在 7 天内有效，且需要在同一浏览器中打开。
+            分享链接有效期 7 天，任何设备均可打开。
           </p>
           <button
             onClick={() => navigate('/')}
@@ -64,9 +75,9 @@ export default function SharePage() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--color-bg-base)] flex flex-col">
+    <div className="h-screen bg-[var(--color-bg-base)] flex flex-col">
       {/* 顶部提示栏 */}
-      <div className="h-12 flex items-center justify-between px-4 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+      <div className="h-12 flex items-center justify-between px-4 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shrink-0">
         <div className="flex items-center gap-2">
           <Icon icon="lucide:share-2" width={16} height={16} className="text-[var(--color-accent)]" />
           <span className="text-sm text-[var(--color-text-secondary)]">
@@ -83,7 +94,7 @@ export default function SharePage() {
       </div>
 
       {/* 预览内容 */}
-      <div className="flex-1">
+      <div className="flex-1 min-h-0">
         {shareData?.html && (
           <iframe
             srcDoc={shareData.html}

@@ -1097,11 +1097,15 @@ export default function HomePage() {
                 </button>
                 {generatedHtml && (
                   <button
-                    onClick={() => {
-                      const shareId = saveShare(generatedHtml, currentProject?.name);
-                      const shareUrl = getShareUrl(shareId);
-                      navigator.clipboard.writeText(shareUrl);
-                      toast.success('分享链接已复制到剪贴板');
+                    onClick={async () => {
+                      try {
+                        const shareId = await saveShare(generatedHtml, currentProject?.name);
+                        const shareUrl = getShareUrl(shareId);
+                        navigator.clipboard.writeText(shareUrl);
+                        toast.success('分享链接已复制到剪贴板');
+                      } catch {
+                        toast.error('分享失败，请稍后重试');
+                      }
                     }}
                     className="flex items-center gap-1 text-[11px] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]"
                   >
@@ -1169,11 +1173,15 @@ export default function HomePage() {
               {/* Share link */}
               {generatedHtml && (
                 <button
-                  onClick={() => {
-                    const shareId = saveShare(generatedHtml, currentProject?.name);
-                    const shareUrl = getShareUrl(shareId);
-                    navigator.clipboard.writeText(shareUrl);
-                    toast.success('分享链接已复制');
+                  onClick={async () => {
+                    try {
+                      const shareId = await saveShare(generatedHtml, currentProject?.name);
+                      const shareUrl = getShareUrl(shareId);
+                      navigator.clipboard.writeText(shareUrl);
+                      toast.success('分享链接已复制');
+                    } catch {
+                      toast.error('分享失败，请稍后重试');
+                    }
                   }}
                   className="p-1.5 rounded text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-colors"
                   title="分享链接"

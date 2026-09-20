@@ -26,7 +26,7 @@ if (!existsSync(DATA_DIR)) {
 }
 
 // 初始化数据库（WAL 模式）
-const db = new Database(DB_PATH);
+export const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 
 // ============ 表结构 ============

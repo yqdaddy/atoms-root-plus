@@ -1,94 +1,70 @@
 /**
  * 分享功能工具函数
- * 使用 localStorage 存储分享内容，生成可恢复的分享链接
+ * 使用服务器存储，生成可跨设备访问的分享链接
  */
-
-/** 分享存储前缀 */
-const SHARE_PREFIX = 'atoms-share-';
-
-/** 分享 ID 长度 */
-const SHARE_ID_LENGTH = 8;
-
-/** 分享有效期（毫秒）：7 天 */
-const SHARE_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** 分享数据结构 */
 export interface ShareData {
+  /** 分享 ID */
+  id: string;
   /** HTML 内容 */
   html: string;
   /** 创建时间戳 */
   createdAt: number;
   /** 项目名称（可选） */
   projectName?: string;
+  /** 过期时间 */
+  expiresAt?: number;
 }
 
 /**
- * 生成随机分享 ID
- */
-function generateShareId(): string {
-  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  let id = '';
-  for (let i = 0; i < SHARE_ID_LENGTH; i++) {
-    id += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return id;
-}
-
-/**
- * 保存分享内容到 localStorage
+ * 保存分享内容到服务器
  * @param html HTML 内容
  * @param projectName 项目名称（可选）
  * @returns 分享 ID
  */
-export function saveShare(html: string, projectName?: string): string {
-  const id = generateShareId();
-  const data: ShareData = {
-    html,
-    createdAt: Date.now(),
-    ...(projectName ? { projectName } : {}),
-  };
-  
-  const key = `${SHARE_PREFIX}${id}`;
-  localStorage.setItem(key, JSON.stringify(data));
-  
-  return id;
+export async function saveShare(html: string, projectName?: string): Promise<string> {
+  const response = await fetch('/api/share', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ html, projectName }),
+  });
+
+  if (!response.ok) {
+    throw new Error('保存分享失败');
+  }
+
+  const data = await response.json();
+  return data.id;
 }
 
 /**
- * 从 localStorage 读取分享内容
+ * 从服务器读取分享内容
  * @param id 分享 ID
  * @returns 分享数据，如果不存在或已过期则返回 null
  */
-export function loadShare(id: string): ShareData | null {
-  const key = `${SHARE_PREFIX}${id}`;
-  const raw = localStorage.getItem(key);
-  
-  if (!raw) {
-    return null;
-  }
-  
+export async function loadShare(id: string): Promise<ShareData | null> {
   try {
-    const data: ShareData = JSON.parse(raw);
-    
-    // 检查是否过期
-    if (Date.now() - data.createdAt > SHARE_EXPIRY_MS) {
-      localStorage.removeItem(key);
+    const response = await fetch(`/api/share/${id}`);
+
+    if (response.status === 404 || response.status === 410) {
       return null;
     }
-    
-    return data;
+
+    if (!response.ok) {
+      throw new Error('获取分享失败');
+    }
+
+    const data = await response.json();
+    return {
+      id: data.id,
+      html: data.html,
+      projectName: data.projectName,
+      createdAt: data.createdAt,
+    };
   } catch {
     return null;
   }
-}
-
-/**
- * 删除分享内容
- * @param id 分享 ID
- */
-export function deleteShare(id: string): void {
-  const key = `${SHARE_PREFIX}${id}`;
-  localStorage.removeItem(key);
 }
 
 /**
@@ -97,29 +73,5 @@ export function deleteShare(id: string): void {
  * @returns 完整的分享 URL
  */
 export function getShareUrl(id: string): string {
-  return `${window.location.origin}/#/share/${id}`;
-}
-
-/**
- * 清理所有过期的分享数据
- */
-export function cleanupExpiredShares(): void {
-  const keys = Object.keys(localStorage);
-  const now = Date.now();
-  
-  for (const key of keys) {
-    if (key.startsWith(SHARE_PREFIX)) {
-      const raw = localStorage.getItem(key);
-      if (raw) {
-        try {
-          const data: ShareData = JSON.parse(raw);
-          if (now - data.createdAt > SHARE_EXPIRY_MS) {
-            localStorage.removeItem(key);
-          }
-        } catch {
-          localStorage.removeItem(key);
-        }
-      }
-    }
-  }
+  return `${window.location.origin}/share/${id}`;
 }
