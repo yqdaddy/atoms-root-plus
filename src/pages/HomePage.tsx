@@ -1166,18 +1166,19 @@ export default function HomePage() {
                 <Icon icon="lucide:refresh-cw" width={16} height={16} />
               </button>
 
-              {/* Open in new tab */}
+              {/* Share link */}
               {generatedHtml && (
                 <button
                   onClick={() => {
-                    const blob = new Blob([generatedHtml], { type: 'text/html' });
-                    const url = URL.createObjectURL(blob);
-                    window.open(url, '_blank');
+                    const shareId = saveShare(generatedHtml, currentProject?.name);
+                    const shareUrl = getShareUrl(shareId);
+                    navigator.clipboard.writeText(shareUrl);
+                    toast.success('分享链接已复制');
                   }}
                   className="p-1.5 rounded text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-colors"
-                  title="在新标签页打开"
+                  title="分享链接"
                 >
-                  <Icon icon="lucide:external-link" width={16} height={16} />
+                  <Icon icon="lucide:share" width={16} height={16} />
                 </button>
               )}
 
