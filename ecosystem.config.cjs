@@ -1,7 +1,7 @@
 module.exports = {
   apps: [{
     name: 'atoms-backend',
-    script: 'dist-server/index.js',
+    script: 'index.js',
     // 内存超 180MB 自动重启，防止 OOM
     max_memory_restart: '180M',
     // Node.js 内存优化参数
