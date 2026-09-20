@@ -1,22 +1,14 @@
-name: Deploy to GitHub Pages
+name: Deploy to Server
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: true
-
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,21 +22,71 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
+      - name: Build frontend
         run: npm run build
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
+      - name: Build backend
+        run: npm run build:server
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Setup SSH
+        uses: webfactory/ssh-agent-action@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add server to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Create deployment package
+        run: |
+          mkdir -p deploy/backend
+          cp -r dist-server deploy/backend/
+          cp package.json package-lock.json deploy/backend/
+          cp .env.example deploy/backend/.env.example
+
+      - name: Deploy frontend
+        run: |
+          rsync -avz --delete dist/ ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ secrets.FRONTEND_PATH }}/
+
+      - name: Deploy backend
+        run: |
+          # 同步后端代码（保留 .env 和 data 目录）
+          rsync -avz --delete --exclude='.env' --exclude='data' deploy/backend/ ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ secrets.BACKEND_PATH }}/
+
+          # 如果 .env 不存在，从示例创建
+          ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
+            if [ ! -f ${{ secrets.BACKEND_PATH }}/.env ]; then
+              cp ${{ secrets.BACKEND_PATH }}/.env.example ${{ secrets.BACKEND_PATH }}/.env
+              echo '⚠️ 请手动编辑 ${{ secrets.BACKEND_PATH }}/.env 填入真实配置'
+            fi
+          "
+
+      - name: Install backend dependencies
+        run: |
+          ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
+            cd ${{ secrets.BACKEND_PATH }}
+            npm install --production
+          "
+
+      - name: Restart backend service
+        run: |
+          ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
+            # 检查 pm2 是否安装
+            if ! command -v pm2 &> /dev/null; then
+              npm install -g pm2
+            fi
+
+            # 重启或启动服务
+            cd ${{ secrets.BACKEND_PATH }}
+            pm2 delete atoms-backend 2>/dev/null || true
+            pm2 start dist-server/index.js --name atoms-backend
+            pm2 save
+          "
+
+      - name: Verify deployment
+        run: |
+          echo "✅ 部署完成！"
+          echo "前端: http://${{ secrets.SERVER_HOST }}/"
+          echo "后端: http://${{ secrets.SERVER_HOST }}/api/health"
+          ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "curl -s http://localhost:3000/api/health || echo '后端启动中...'"
