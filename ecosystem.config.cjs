@@ -4,8 +4,8 @@ module.exports = {
     script: 'index.js',
     // 内存超 180MB 自动重启，防止 OOM
     max_memory_restart: '180M',
-    // Node.js 内存优化参数
-    node_args: '--max-old-space-size=128 --max-semi-space-size=1',
+    // Node.js 内存优化参数 + 加载 .env
+    node_args: '--env-file=.env --max-old-space-size=128 --max-semi-space-size=1',
     // 生产环境
     env: {
       NODE_ENV: 'production',
