@@ -1,0 +1,1068 @@
+event: stage
+data: {"phase":"analysis"}
+
+event: delta
+data: {"text":"{\n","phase":"analysis"}
+
+event: delta
+data: {"text":"  \"","phase":"analysis"}
+
+event: delta
+data: {"text":"appTitle","phase":"analysis"}
+
+event: delta
+data: {"text":"\": \"","phase":"analysis"}
+
+event: delta
+data: {"text":"专注番茄","phase":"analysis"}
+
+event: delta
+data: {"text":"钟\",","phase":"analysis"}
+
+event: delta
+data: {"text":"\n ","phase":"analysis"}
+
+event: delta
+data: {"text":" \"app","phase":"analysis"}
+
+event: delta
+data: {"text":"Type\":","phase":"analysis"}
+
+event: delta
+data: {"text":" \"tool","phase":"analysis"}
+
+event: delta
+data: {"text":"\",\n","phase":"analysis"}
+
+event: delta
+data: {"text":"  \"","phase":"analysis"}
+
+event: delta
+data: {"text":"summary","phase":"analysis"}
+
+event: delta
+data: {"text":"\":","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"一个","phase":"analysis"}
+
+event: delta
+data: {"text":"简洁","phase":"analysis"}
+
+event: delta
+data: {"text":"的","phase":"analysis"}
+
+event: delta
+data: {"text":"浏览器","phase":"analysis"}
+
+event: delta
+data: {"text":"番茄","phase":"analysis"}
+
+event: delta
+data: {"text":"钟","phase":"analysis"}
+
+event: delta
+data: {"text":"，","phase":"analysis"}
+
+event: delta
+data: {"text":"支持","phase":"analysis"}
+
+event: delta
+data: {"text":"设置","phase":"analysis"}
+
+event: delta
+data: {"text":"时长","phase":"analysis"}
+
+event: delta
+data: {"text":"、","phase":"analysis"}
+
+event: delta
+data: {"text":"开始","phase":"analysis"}
+
+event: delta
+data: {"text":"/","phase":"analysis"}
+
+event: delta
+data: {"text":"暂停","phase":"analysis"}
+
+event: delta
+data: {"text":"及","phase":"analysis"}
+
+event: delta
+data: {"text":"倒计时","phase":"analysis"}
+
+event: delta
+data: {"text":"显示","phase":"analysis"}
+
+event: delta
+data: {"text":"。","phase":"analysis"}
+
+event: delta
+data: {"text":"\",","phase":"analysis"}
+
+event: delta
+data: {"text":"\n","phase":"analysis"}
+
+event: delta
+data: {"text":" ","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"features","phase":"analysis"}
+
+event: delta
+data: {"text":"\":","phase":"analysis"}
+
+event: delta
+data: {"text":" [","phase":"analysis"}
+
+event: delta
+data: {"text":"\n","phase":"analysis"}
+
+event: delta
+data: {"text":"   ","phase":"analysis"}
+
+event: delta
+data: {"text":" {","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"id","phase":"analysis"}
+
+event: delta
+data: {"text":"\":","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"F","phase":"analysis"}
+
+event: delta
+data: {"text":"1","phase":"analysis"}
+
+event: delta
+data: {"text":"\",","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"name","phase":"analysis"}
+
+event: delta
+data: {"text":"\":","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"倒计时","phase":"analysis"}
+
+event: delta
+data: {"text":"显示","phase":"analysis"}
+
+event: delta
+data: {"text":"\",","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"description","phase":"analysis"}
+
+event: delta
+data: {"text":"\":","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"页面","phase":"analysis"}
+
+event: delta
+data: {"text":"中央","phase":"analysis"}
+
+event: delta
+data: {"text":"以大","phase":"analysis"}
+
+event: delta
+data: {"text":"号","phase":"analysis"}
+
+event: delta
+data: {"text":"字体","phase":"analysis"}
+
+event: delta
+data: {"text":"清晰","phase":"analysis"}
+
+event: delta
+data: {"text":"显示","phase":"analysis"}
+
+event: delta
+data: {"text":"剩余","phase":"analysis"}
+
+event: delta
+data: {"text":"时间","phase":"analysis"}
+
+event: delta
+data: {"text":"（","phase":"analysis"}
+
+event: delta
+data: {"text":"MM","phase":"analysis"}
+
+event: delta
+data: {"text":":","phase":"analysis"}
+
+event: delta
+data: {"text":"SS","phase":"analysis"}
+
+event: delta
+data: {"text":"），","phase":"analysis"}
+
+event: delta
+data: {"text":"随","phase":"analysis"}
+
+event: delta
+data: {"text":"时间","phase":"analysis"}
+
+event: delta
+data: {"text":"流逝","phase":"analysis"}
+
+event: delta
+data: {"text":"自动","phase":"analysis"}
+
+event: delta
+data: {"text":"更新","phase":"analysis"}
+
+event: delta
+data: {"text":"。","phase":"analysis"}
+
+event: delta
+data: {"text":"\",","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"priority","phase":"analysis"}
+
+event: delta
+data: {"text":"\":","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"must","phase":"analysis"}
+
+event: delta
+data: {"text":"\"","phase":"analysis"}
+
+event: delta
+data: {"text":" },","phase":"analysis"}
+
+event: delta
+data: {"text":"\n","phase":"analysis"}
+
+event: delta
+data: {"text":"   ","phase":"analysis"}
+
+event: delta
+data: {"text":" {","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"id","phase":"analysis"}
+
+event: delta
+data: {"text":"\":","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"F","phase":"analysis"}
+
+event: delta
+data: {"text":"2","phase":"analysis"}
+
+event: delta
+data: {"text":"\",","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"name","phase":"analysis"}
+
+event: delta
+data: {"text":"\":","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"开始","phase":"analysis"}
+
+event: delta
+data: {"text":"与","phase":"analysis"}
+
+event: delta
+data: {"text":"暂停","phase":"analysis"}
+
+event: delta
+data: {"text":"按钮","phase":"analysis"}
+
+event: delta
+data: {"text":"\",","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"description","phase":"analysis"}
+
+event: delta
+data: {"text":"\":","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"提供一个","phase":"analysis"}
+
+event: delta
+data: {"text":"主要","phase":"analysis"}
+
+event: delta
+data: {"text":"操作","phase":"analysis"}
+
+event: delta
+data: {"text":"按钮","phase":"analysis"}
+
+event: delta
+data: {"text":"，","phase":"analysis"}
+
+event: delta
+data: {"text":"点击","phase":"analysis"}
+
+event: delta
+data: {"text":"后","phase":"analysis"}
+
+event: delta
+data: {"text":"在","phase":"analysis"}
+
+event: delta
+data: {"text":"“","phase":"analysis"}
+
+event: delta
+data: {"text":"开始","phase":"analysis"}
+
+event: delta
+data: {"text":"”","phase":"analysis"}
+
+event: delta
+data: {"text":"和","phase":"analysis"}
+
+event: delta
+data: {"text":"“","phase":"analysis"}
+
+event: delta
+data: {"text":"暂停","phase":"analysis"}
+
+event: delta
+data: {"text":"”","phase":"analysis"}
+
+event: delta
+data: {"text":"两种","phase":"analysis"}
+
+event: delta
+data: {"text":"状态","phase":"analysis"}
+
+event: delta
+data: {"text":"间","phase":"analysis"}
+
+event: delta
+data: {"text":"切换","phase":"analysis"}
+
+event: delta
+data: {"text":"，","phase":"analysis"}
+
+event: delta
+data: {"text":"控制","phase":"analysis"}
+
+event: delta
+data: {"text":"计时","phase":"analysis"}
+
+event: delta
+data: {"text":"器的","phase":"analysis"}
+
+event: delta
+data: {"text":"运行","phase":"analysis"}
+
+event: delta
+data: {"text":"与","phase":"analysis"}
+
+event: delta
+data: {"text":"停止","phase":"analysis"}
+
+event: delta
+data: {"text":"。","phase":"analysis"}
+
+event: delta
+data: {"text":"\",","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"priority","phase":"analysis"}
+
+event: delta
+data: {"text":"\":","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"must","phase":"analysis"}
+
+event: delta
+data: {"text":"\"","phase":"analysis"}
+
+event: delta
+data: {"text":" },","phase":"analysis"}
+
+event: delta
+data: {"text":"\n","phase":"analysis"}
+
+event: delta
+data: {"text":"   ","phase":"analysis"}
+
+event: delta
+data: {"text":" {","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"id","phase":"analysis"}
+
+event: delta
+data: {"text":"\":","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"F","phase":"analysis"}
+
+event: delta
+data: {"text":"3","phase":"analysis"}
+
+event: delta
+data: {"text":"\",","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"name","phase":"analysis"}
+
+event: delta
+data: {"text":"\":","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"重置","phase":"analysis"}
+
+event: delta
+data: {"text":"功能","phase":"analysis"}
+
+event: delta
+data: {"text":"\",","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"description","phase":"analysis"}
+
+event: delta
+data: {"text":"\":","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"提供","phase":"analysis"}
+
+event: delta
+data: {"text":"重置","phase":"analysis"}
+
+event: delta
+data: {"text":"按钮","phase":"analysis"}
+
+event: delta
+data: {"text":"，","phase":"analysis"}
+
+event: delta
+data: {"text":"点击","phase":"analysis"}
+
+event: delta
+data: {"text":"后","phase":"analysis"}
+
+event: delta
+data: {"text":"清除","phase":"analysis"}
+
+event: delta
+data: {"text":"当前","phase":"analysis"}
+
+event: delta
+data: {"text":"计时","phase":"analysis"}
+
+event: delta
+data: {"text":"状态","phase":"analysis"}
+
+event: delta
+data: {"text":"，","phase":"analysis"}
+
+event: delta
+data: {"text":"将","phase":"analysis"}
+
+event: delta
+data: {"text":"倒计时","phase":"analysis"}
+
+event: delta
+data: {"text":"恢复","phase":"analysis"}
+
+event: delta
+data: {"text":"至","phase":"analysis"}
+
+event: delta
+data: {"text":"用户","phase":"analysis"}
+
+event: delta
+data: {"text":"设定的","phase":"analysis"}
+
+event: delta
+data: {"text":"初始","phase":"analysis"}
+
+event: delta
+data: {"text":"时长","phase":"analysis"}
+
+event: delta
+data: {"text":"。","phase":"analysis"}
+
+event: delta
+data: {"text":"\",","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"priority","phase":"analysis"}
+
+event: delta
+data: {"text":"\":","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"must","phase":"analysis"}
+
+event: delta
+data: {"text":"\"","phase":"analysis"}
+
+event: delta
+data: {"text":" },","phase":"analysis"}
+
+event: delta
+data: {"text":"\n","phase":"analysis"}
+
+event: delta
+data: {"text":"   ","phase":"analysis"}
+
+event: delta
+data: {"text":" {","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"id","phase":"analysis"}
+
+event: delta
+data: {"text":"\":","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"F","phase":"analysis"}
+
+event: delta
+data: {"text":"4","phase":"analysis"}
+
+event: delta
+data: {"text":"\",","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"name","phase":"analysis"}
+
+event: delta
+data: {"text":"\":","phase":"analysis"}
+
+event: delta
+data: {"text":" \"时长","phase":"analysis"}
+
+event: delta
+data: {"text":"自定义\",","phase":"analysis"}
+
+event: delta
+data: {"text":" \"description","phase":"analysis"}
+
+event: delta
+data: {"text":"\": \"","phase":"analysis"}
+
+event: delta
+data: {"text":"允许用户","phase":"analysis"}
+
+event: delta
+data: {"text":"通过","phase":"analysis"}
+
+event: delta
+data: {"text":"输入","phase":"analysis"}
+
+event: delta
+data: {"text":"框","phase":"analysis"}
+
+event: delta
+data: {"text":"或","phase":"analysis"}
+
+event: delta
+data: {"text":"滑块","phase":"analysis"}
+
+event: delta
+data: {"text":"自定义","phase":"analysis"}
+
+event: delta
+data: {"text":"工作","phase":"analysis"}
+
+event: delta
+data: {"text":"时长","phase":"analysis"}
+
+event: delta
+data: {"text":"和","phase":"analysis"}
+
+event: delta
+data: {"text":"休息","phase":"analysis"}
+
+event: delta
+data: {"text":"时长","phase":"analysis"}
+
+event: delta
+data: {"text":"，","phase":"analysis"}
+
+event: delta
+data: {"text":"并","phase":"analysis"}
+
+event: delta
+data: {"text":"实时","phase":"analysis"}
+
+event: delta
+data: {"text":"应用到","phase":"analysis"}
+
+event: delta
+data: {"text":"倒计时","phase":"analysis"}
+
+event: delta
+data: {"text":"中","phase":"analysis"}
+
+event: delta
+data: {"text":"。","phase":"analysis"}
+
+event: delta
+data: {"text":"\",","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"priority","phase":"analysis"}
+
+event: delta
+data: {"text":"\":","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"nice","phase":"analysis"}
+
+event: delta
+data: {"text":"\"","phase":"analysis"}
+
+event: delta
+data: {"text":" }","phase":"analysis"}
+
+event: delta
+data: {"text":"\n","phase":"analysis"}
+
+event: delta
+data: {"text":" ","phase":"analysis"}
+
+event: delta
+data: {"text":" ],","phase":"analysis"}
+
+event: delta
+data: {"text":"\n","phase":"analysis"}
+
+event: delta
+data: {"text":" ","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"inter","phase":"analysis"}
+
+event: delta
+data: {"text":"actions","phase":"analysis"}
+
+event: delta
+data: {"text":"\":","phase":"analysis"}
+
+event: delta
+data: {"text":" [","phase":"analysis"}
+
+event: delta
+data: {"text":"\n","phase":"analysis"}
+
+event: delta
+data: {"text":"   ","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"点击","phase":"analysis"}
+
+event: delta
+data: {"text":"按钮","phase":"analysis"}
+
+event: delta
+data: {"text":"切换","phase":"analysis"}
+
+event: delta
+data: {"text":"计时","phase":"analysis"}
+
+event: delta
+data: {"text":"器","phase":"analysis"}
+
+event: delta
+data: {"text":"运行","phase":"analysis"}
+
+event: delta
+data: {"text":"状态","phase":"analysis"}
+
+event: delta
+data: {"text":"并","phase":"analysis"}
+
+event: delta
+data: {"text":"更新","phase":"analysis"}
+
+event: delta
+data: {"text":"按钮","phase":"analysis"}
+
+event: delta
+data: {"text":"文本","phase":"analysis"}
+
+event: delta
+data: {"text":"\",","phase":"analysis"}
+
+event: delta
+data: {"text":"\n","phase":"analysis"}
+
+event: delta
+data: {"text":"   ","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"修改","phase":"analysis"}
+
+event: delta
+data: {"text":"时长","phase":"analysis"}
+
+event: delta
+data: {"text":"参数","phase":"analysis"}
+
+event: delta
+data: {"text":"后","phase":"analysis"}
+
+event: delta
+data: {"text":"自动","phase":"analysis"}
+
+event: delta
+data: {"text":"重置","phase":"analysis"}
+
+event: delta
+data: {"text":"倒计时","phase":"analysis"}
+
+event: delta
+data: {"text":"显示","phase":"analysis"}
+
+event: delta
+data: {"text":"\",","phase":"analysis"}
+
+event: delta
+data: {"text":"\n","phase":"analysis"}
+
+event: delta
+data: {"text":"   ","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"重置","phase":"analysis"}
+
+event: delta
+data: {"text":"操作","phase":"analysis"}
+
+event: delta
+data: {"text":"将","phase":"analysis"}
+
+event: delta
+data: {"text":"时间和","phase":"analysis"}
+
+event: delta
+data: {"text":"状态","phase":"analysis"}
+
+event: delta
+data: {"text":"恢复","phase":"analysis"}
+
+event: delta
+data: {"text":"默认","phase":"analysis"}
+
+event: delta
+data: {"text":"\"","phase":"analysis"}
+
+event: delta
+data: {"text":"\n","phase":"analysis"}
+
+event: delta
+data: {"text":" ","phase":"analysis"}
+
+event: delta
+data: {"text":" ],","phase":"analysis"}
+
+event: delta
+data: {"text":"\n","phase":"analysis"}
+
+event: delta
+data: {"text":" ","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"ass","phase":"analysis"}
+
+event: delta
+data: {"text":"um","phase":"analysis"}
+
+event: delta
+data: {"text":"ptions","phase":"analysis"}
+
+event: delta
+data: {"text":"\":","phase":"analysis"}
+
+event: delta
+data: {"text":" [","phase":"analysis"}
+
+event: delta
+data: {"text":"\n","phase":"analysis"}
+
+event: delta
+data: {"text":"   ","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"默认","phase":"analysis"}
+
+event: delta
+data: {"text":"工作","phase":"analysis"}
+
+event: delta
+data: {"text":"时长","phase":"analysis"}
+
+event: delta
+data: {"text":"为","phase":"analysis"}
+
+event: delta
+data: {"text":" ","phase":"analysis"}
+
+event: delta
+data: {"text":"2","phase":"analysis"}
+
+event: delta
+data: {"text":"5","phase":"analysis"}
+
+event: delta
+data: {"text":" ","phase":"analysis"}
+
+event: delta
+data: {"text":"分钟","phase":"analysis"}
+
+event: delta
+data: {"text":"，","phase":"analysis"}
+
+event: delta
+data: {"text":"休息","phase":"analysis"}
+
+event: delta
+data: {"text":"时长","phase":"analysis"}
+
+event: delta
+data: {"text":"为","phase":"analysis"}
+
+event: delta
+data: {"text":" ","phase":"analysis"}
+
+event: delta
+data: {"text":"5","phase":"analysis"}
+
+event: delta
+data: {"text":" ","phase":"analysis"}
+
+event: delta
+data: {"text":"分钟","phase":"analysis"}
+
+event: delta
+data: {"text":"\",","phase":"analysis"}
+
+event: delta
+data: {"text":"\n","phase":"analysis"}
+
+event: delta
+data: {"text":"   ","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"页面","phase":"analysis"}
+
+event: delta
+data: {"text":"加载","phase":"analysis"}
+
+event: delta
+data: {"text":"时","phase":"analysis"}
+
+event: delta
+data: {"text":"计时","phase":"analysis"}
+
+event: delta
+data: {"text":"器","phase":"analysis"}
+
+event: delta
+data: {"text":"处于","phase":"analysis"}
+
+event: delta
+data: {"text":"停止","phase":"analysis"}
+
+event: delta
+data: {"text":"状态","phase":"analysis"}
+
+event: delta
+data: {"text":"\",","phase":"analysis"}
+
+event: delta
+data: {"text":"\n","phase":"analysis"}
+
+event: delta
+data: {"text":"   ","phase":"analysis"}
+
+event: delta
+data: {"text":" \"","phase":"analysis"}
+
+event: delta
+data: {"text":"不支持","phase":"analysis"}
+
+event: delta
+data: {"text":"跨","phase":"analysis"}
+
+event: delta
+data: {"text":"页面","phase":"analysis"}
+
+event: delta
+data: {"text":"刷新","phase":"analysis"}
+
+event: delta
+data: {"text":"保持","phase":"analysis"}
+
+event: delta
+data: {"text":"计时","phase":"analysis"}
+
+event: delta
+data: {"text":"，","phase":"analysis"}
+
+event: delta
+data: {"text":"但","phase":"analysis"}
+
+event: delta
+data: {"text":"可使用","phase":"analysis"}
+
+event: delta
+data: {"text":"本地","phase":"analysis"}
+
+event: delta
+data: {"text":"存储","phase":"analysis"}
+
+event: delta
+data: {"text":"保存","phase":"analysis"}
+
+event: delta
+data: {"text":"设置","phase":"analysis"}
+
+event: delta
+data: {"text":"\"","phase":"analysis"}
+
+event: delta
+data: {"text":"\n","phase":"analysis"}
+
+event: delta
+data: {"text":" ","phase":"analysis"}
+
+event: delta
+data: {"text":" ]","phase":"analysis"}
+
+event: delta
+data: {"text":"\n","phase":"analysis"}
+
+event: delta
+data: {"text":"}","phase":"analysis"}
+
+event: approval_required
+data: {"sessionId":"cf408c98-f7a5-460e-9add-53aa5363f5a9","analysis":"{\n  \"appTitle\": \"专注番茄钟\",\n  \"appType\": \"tool\",\n  \"summary\": \"一个简洁的浏览器番茄钟，支持设置时长、开始/暂停及倒计时显示。\",\n  \"features\": [\n    { \"id\": \"F1\", \"name\": \"倒计时显示\", \"description\": \"页面中央以大号字体清晰显示剩余时间（MM:SS），随时间流逝自动更新。\", \"priority\": \"must\" },\n    { \"id\": \"F2\", \"name\": \"开始与暂停按钮\", \"description\": \"提供一个主要操作按钮，点击后在“开始”和“暂停”两种状态间切换，控制计时器的运行与停止。\", \"priority\": \"must\" },\n    { \"id\": \"F3\", \"name\": \"重置功能\", \"description\": \"提供重置按钮，点击后清除当前计时状态，将倒计时恢复至用户设定的初始时长。\", \"priority\": \"must\" },\n    { \"id\": \"F4\", \"name\": \"时长自定义\", \"description\": \"允许用户通过输入框或滑块自定义工作时长和休息时长，并实时应用到倒计时中。\", \"priority\": \"nice\" }\n  ],\n  \"interactions\": [\n    \"点击按钮切换计时器运行状态并更新按钮文本\",\n    \"修改时长参数后自动重置倒计时显示\",\n    \"重置操作将时间和状态恢复默认\"\n  ],\n  \"assumptions\": [\n    \"默认工作时长为 25 分钟，休息时长为 5 分钟\",\n    \"页面加载时计时器处于停止状态\",\n    \"不支持跨页面刷新保持计时，但可使用本地存储保存设置\"\n  ]\n}","features":{"appTitle":"专注番茄钟","appType":"tool","summary":"一个简洁的浏览器番茄钟，支持设置时长、开始/暂停及倒计时显示。","features":[{"id":"F1","name":"倒计时显示","description":"页面中央以大号字体清晰显示剩余时间（MM:SS），随时间流逝自动更新。","priority":"must"},{"id":"F2","name":"开始与暂停按钮","description":"提供一个主要操作按钮，点击后在“开始”和“暂停”两种状态间切换，控制计时器的运行与停止。","priority":"must"},{"id":"F3","name":"重置功能","description":"提供重置按钮，点击后清除当前计时状态，将倒计时恢复至用户设定的初始时长。","priority":"must"},{"id":"F4","name":"时长自定义","description":"允许用户通过输入框或滑块自定义工作时长和休息时长，并实时应用到倒计时中。","priority":"nice"}],"interactions":["点击按钮切换计时器运行状态并更新按钮文本","修改时长参数后自动重置倒计时显示","重置操作将时间和状态恢复默认"],"assumptions":["默认工作时长为 25 分钟，休息时长为 5 分钟","页面加载时计时器处于停止状态","不支持跨页面刷新保持计时，但可使用本地存储保存设置"]}}
+

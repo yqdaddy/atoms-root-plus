@@ -21,11 +21,11 @@ export const llmRouter = new Hono();
  * Body: { prompt: string, options?: { currentHtml?: string } }
  *
  * SSE 事件流：
- * - stage: { stage: 'analysis' | 'generate' | 'review' }
- * - delta: { content: string, stage?: string }
+ * - stage: { phase: 'analysis' | 'generate' | 'review' }
+ * - delta: { text: string, phase?: string }
  * - approval_required: { sessionId: string, analysis: string, features: object }
- * - done: { fullHtml: string }
- * - error: { error: string }
+ * - done: { html: string }
+ * - error: { message: string }
  */
 llmRouter.post('/generate', async (c) => {
   // 解析请求体

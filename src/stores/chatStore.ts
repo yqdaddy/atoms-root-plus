@@ -20,6 +20,8 @@ export interface StreamBuffer {
   repairText: string;
   /** 当前阶段提示消息 */
   stageMessage: string;
+  /** 是否等待用户批准（approval_required 时设为 true，批准后继续生成时设为 false） */
+  awaitingApproval: boolean;
 }
 
 interface ChatState {
@@ -50,6 +52,8 @@ interface ChatActions {
   setInput: (input: string) => void;
   /** 重置流式缓冲 */
   resetStreamBuffer: () => void;
+  /** 设置等待批准状态 */
+  setAwaitingApproval: (awaiting: boolean) => void;
 }
 
 const initialStreamBuffer: StreamBuffer = {
@@ -60,6 +64,7 @@ const initialStreamBuffer: StreamBuffer = {
   generateText: '',
   repairText: '',
   stageMessage: '',
+  awaitingApproval: false,
 };
 
 export type ChatStore = ChatState & ChatActions;
@@ -142,6 +147,15 @@ export const useChatStore = create<ChatStore>()((set) => ({
 
   resetStreamBuffer: () => {
     set({ streamBuffer: initialStreamBuffer, error: null });
+  },
+
+  setAwaitingApproval: (awaiting) => {
+    set((state) => ({
+      streamBuffer: {
+        ...state.streamBuffer,
+        awaitingApproval: awaiting,
+      },
+    }));
   },
 }));
 

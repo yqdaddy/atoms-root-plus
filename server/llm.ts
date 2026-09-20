@@ -56,12 +56,12 @@ export type LLMEventType = 'stage' | 'delta' | 'approval_required' | 'done' | 'e
 export interface LLMEvent {
   type: LLMEventType;
   payload: {
-    stage?: 'analysis' | 'generate' | 'review';
-    content?: string;
+    phase?: 'analysis' | 'generate' | 'review';
+    text?: string;
     analysis?: string; // 分析结果 JSON 字符串
     features?: unknown; // 功能清单
-    fullHtml?: string;
-    error?: string;
+    html?: string;
+    message?: string;
     sessionId?: string; // 会话 ID，用于批准后继续
   };
 }
@@ -158,7 +158,10 @@ async function streamChatCompletion(
       model,
       messages,
       stream: true,
-      max_tokens: 4096,
+      // 完整单文件 HTML 应用实测 12KB+（约 4000-6000 token），4096 会把生成截断在
+      // 半途；8192 提供约 2 倍余量。该值在主流 flash 级模型（含默认的 agnes-3.0-flash）
+      // 输出上限之内；若供应商上限更低，API 会返回 4xx 走已有的 error 事件分支。
+      max_tokens: 8192,
     }),
     signal: abortSignal,
   });
@@ -214,6 +217,40 @@ async function streamChatCompletion(
 }
 
 /**
+ * 剥离 LLM 输出中误加的 markdown 代码围栏。
+ * 提示词（ENGINEER_SYSTEM_PROMPT）要求首行 <!DOCTYPE html>，但模型偶尔仍以 ```html
+ * 围栏包裹输出。采用"流式拼接完成后一次性剥离"而非逐 delta 处理：
+ * 围栏序列可能被拆分在相邻 delta 的边界上，逐 delta 剥离需要跨 delta 状态机，
+ * 而 delta 仅用于前端实时显示（围栏前缀只影响开头几个字符的显示），只有 done
+ * 载荷的 fullHtml 会被校验与落盘，在源头一次性处理即可。
+ * 仅剥离首行围栏与末行围栏，不触碰 HTML 内部内容。
+ */
+export function stripMarkdownFence(html: string): string {
+  let result = html.trim();
+  // 剥离开头围栏行（```html / ``` 等）
+  if (result.startsWith('```')) {
+    const firstNewline = result.indexOf('\n');
+    result = firstNewline === -1 ? '' : result.slice(firstNewline + 1);
+  }
+  // 剥离结尾的围栏行（模型补的闭合围栏，或截断时的残留围栏）
+  if (result.endsWith('```')) {
+    const lastNewline = result.lastIndexOf('\n');
+    result = lastNewline === -1 ? '' : result.slice(0, lastNewline);
+  }
+  return result.trim();
+}
+
+/**
+ * 完整 HTML 文档校验（截断检测兜底）：
+ * 以 <!DOCTYPE 开头且以 </html> 结尾才算完整。max_tokens 截断的产物不满足，
+ * 不应作为 done 载荷下发，由调用方改发 error 事件。
+ */
+export function isCompleteHtmlDocument(html: string): boolean {
+  const trimmed = html.trim();
+  return /^<!doctype/i.test(trimmed) && trimmed.endsWith('</html>');
+}
+
+/**
  * 三阶段生成（支持批准流程）
  * @param waitForApproval - 是否等待批准（默认 true）
  */
@@ -232,7 +269,7 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
 
   try {
     // 阶段 1：分析
-    onEvent({ type: 'stage', payload: { stage: 'analysis' } });
+    onEvent({ type: 'stage', payload: { phase: 'analysis' } });
 
     const analysisMessages: ChatMessage[] = [
       { role: 'system', content: ANALYST_SYSTEM_PROMPT },
@@ -241,7 +278,7 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
 
     const analysisResult = await streamChatCompletion(
       analysisMessages,
-      (text) => onEvent({ type: 'delta', payload: { content: text, stage: 'analysis' } }),
+      (text) => onEvent({ type: 'delta', payload: { text, phase: 'analysis' } }),
       combinedSignal
     );
 
@@ -284,10 +321,10 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
     // 批准后调用 continueGeneration
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      onEvent({ type: 'error', payload: { error: '请求已取消' } });
+      onEvent({ type: 'error', payload: { message: '请求已取消' } });
     } else {
       const message = error instanceof Error ? error.message : '未知错误';
-      onEvent({ type: 'error', payload: { error: message } });
+      onEvent({ type: 'error', payload: { message } });
     }
   } finally {
     activeControllers.delete(requestId);
@@ -304,7 +341,7 @@ export async function continueAfterApproval(
 ): Promise<void> {
   const session = pendingSessions.get(sessionId);
   if (!session) {
-    onEvent({ type: 'error', payload: { error: '会话已过期，请重新开始' } });
+    onEvent({ type: 'error', payload: { message: '会话已过期，请重新开始' } });
     return;
   }
 
@@ -317,7 +354,7 @@ export async function continueAfterApproval(
     const { prompt, currentHtml, features } = session;
 
     // 阶段 2：生成
-    onEvent({ type: 'stage', payload: { stage: 'generate' } });
+    onEvent({ type: 'stage', payload: { phase: 'generate' } });
 
     const featureListStr = typeof features === 'string'
       ? features
@@ -338,46 +375,57 @@ export async function continueAfterApproval(
       generateMessages,
       (text) => {
         accumulatedHtml += text;
-        onEvent({ type: 'delta', payload: { content: text, stage: 'generate' } });
+        onEvent({ type: 'delta', payload: { text, phase: 'generate' } });
       },
       combinedSignal
     );
 
     if (combinedSignal.aborted) return;
 
+    // 防御性剥离 LLM 误加的 markdown 围栏，得到干净的 HTML
+    const cleanHtml = stripMarkdownFence(generatedHtml);
+
+    // 截断检测兜底：不完整的 HTML（如被 max_tokens 截断）不发 done，
+    // 改发 error 事件让前端走已有错误分支给用户明确反馈
+    if (!isCompleteHtmlDocument(cleanHtml)) {
+      pendingSessions.delete(sessionId);
+      onEvent({ type: 'error', payload: { message: '生成内容不完整，请重试' } });
+      return;
+    }
+
     // 阶段 3：审查（可跳过以节省内存：SKIP_REVIEW=true）
     if (process.env.SKIP_REVIEW !== 'true') {
-      onEvent({ type: 'stage', payload: { stage: 'review' } });
+      onEvent({ type: 'stage', payload: { phase: 'review' } });
 
       const reviewMessages: ChatMessage[] = [
         { role: 'system', content: REVIEWER_SYSTEM_PROMPT },
-        { role: 'user', content: `请审查以下代码:\n${generatedHtml}` },
+        { role: 'user', content: `请审查以下代码:\n${cleanHtml}` },
       ];
 
       await streamChatCompletion(
         reviewMessages,
-        (text) => onEvent({ type: 'delta', payload: { content: text, stage: 'review' } }),
+        (text) => onEvent({ type: 'delta', payload: { text, phase: 'review' } }),
         combinedSignal
       );
     } else {
       // 轻量级审查：仅发送确认
-      onEvent({ type: 'stage', payload: { stage: 'review' } });
-      onEvent({ type: 'delta', payload: { content: '代码生成完成（审查已跳过）', stage: 'review' } });
+      onEvent({ type: 'stage', payload: { phase: 'review' } });
+      onEvent({ type: 'delta', payload: { text: '代码生成完成（审查已跳过）', phase: 'review' } });
     }
 
     if (combinedSignal.aborted) return;
 
     // 完成
-    onEvent({ type: 'done', payload: { fullHtml: generatedHtml } });
+    onEvent({ type: 'done', payload: { html: cleanHtml } });
 
     // 清理会话
     pendingSessions.delete(sessionId);
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      onEvent({ type: 'error', payload: { error: '请求已取消' } });
+      onEvent({ type: 'error', payload: { message: '请求已取消' } });
     } else {
       const message = error instanceof Error ? error.message : '未知错误';
-      onEvent({ type: 'error', payload: { error: message } });
+      onEvent({ type: 'error', payload: { message } });
     }
   }
 }

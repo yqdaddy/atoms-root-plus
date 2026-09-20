@@ -4,7 +4,7 @@
  * 支持批准流程：分析完成后显示计划，用户批准后继续生成。
  */
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { Icon } from '@iconify/react';
 import { useProjectStore } from '../stores/projectStore';
 import { useChatStore, getCurrentPhaseText } from '../stores/chatStore';
@@ -12,7 +12,8 @@ import { useSettingsStore } from '../stores/settingsStore';
 import { useAuthStore } from '../stores/authStore'; // F-001: 首页登录守卫
 import { getAIAPI, type StreamEvent, validateGeneratedHtml, type DemoTemplateId, type FeatureList } from '../services/ai';
 import { approveAndContinue } from '../services/ai/liveEngine';
-import { ENTRY_FILE_PATH } from '../types/project';
+import { cancelActiveRun } from '../services/ai/activeRun';
+import { ENTRY_FILE_PATH, type ChatMessage as ProjectChatMessage } from '../types/project';
 import { toast } from '../components/Toast';
 import { HomeAuthControls } from '../components/AuthControls';
 import SandboxFrame from '../components/SandboxFrame';
@@ -36,18 +37,33 @@ interface FileItem {
   lines: number;
 }
 
-/** 消息记录（带时间戳） */
-interface ChatMessage {
+/** 消息状态（用于 UI 展示，与持久化解耦） */
+type MessageStatus = 'processing' | 'done' | 'error' | 'waiting_approval';
+
+/** UI 消息（扩展自持久化的 ChatMessage，添加临时 UI 状态） */
+interface UIMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
   steps?: number;
-  status?: 'processing' | 'done' | 'error' | 'waiting_approval';
+  status?: MessageStatus;
   /** 分析结果（用于批准流程） */
-  features?: FeatureList | { raw: string };
+  features?: FeatureList | { raw: string } | undefined;
   /** 会话 ID（用于批准后继续） */
-  sessionId?: string;
+  sessionId?: string | undefined;
+}
+
+/** 将持久化消息转换为 UI 消息（过滤 system 消息） */
+function toUIMessage(msg: ProjectChatMessage): UIMessage | null {
+  // 过滤掉 system 消息，UI 不显示
+  if (msg.role === 'system') return null;
+  return {
+    id: msg.id,
+    role: msg.role as 'user' | 'assistant',
+    content: msg.content,
+    timestamp: new Date(msg.createdAt),
+  };
 }
 
 /** 格式化时间 */
@@ -124,7 +140,7 @@ function MessageBubble({
   message,
   onApprove,
 }: {
-  message: ChatMessage;
+  message: UIMessage;
   onApprove?: (sessionId: string) => void;
 }) {
   const isUser = message.role === 'user';
@@ -211,7 +227,10 @@ export default function HomePage() {
   const [viewTab, setViewTab] = useState<'preview' | 'code'>('preview');
   const [deviceMode, setDeviceMode] = useState<'desktop' | 'mobile'>('desktop');
   const [showConsole, setShowConsole] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // 当前正在生成的消息 ID（用于跟踪 UI 状态）
+  const [pendingMessageId, setPendingMessageId] = useState<string | null>(null);
+  // 当前消息的 UI 状态（步骤数、status 等）
+  const [messageUIState, setMessageUIState] = useState<{ steps: number; status: MessageStatus; features?: FeatureList | { raw: string }; sessionId?: string } | null>(null);
   const navigate = useNavigate();
 
   // F-001: 首页登录守卫
@@ -282,8 +301,37 @@ export default function HomePage() {
   }, [isGenerating, streamBuffer.stage, streamingText, generatedHtml]);
 
   const { createProject, updateEntryFile, updateProjectStatus, addMessage } = useProjectStore();
-  const { startGeneration, updateStage, appendDelta, finishGeneration, setError } = useChatStore();
+  const { startGeneration, updateStage, appendDelta, finishGeneration, setError, setAwaitingApproval } = useChatStore();
   const { apiKey, getEffectiveBaseURL } = useSettingsStore();
+
+  // 从持久化层读取消息，并合并当前生成中的 UI 状态
+  const messages = useMemo((): UIMessage[] => {
+    const persistedMessages = currentProject?.chat ?? [];
+    // 过滤掉 system 消息（toUIMessage 返回 null）
+    const uiMessages = persistedMessages.map(toUIMessage).filter((m): m is UIMessage => m !== null);
+
+    // 如果有正在生成的消息，添加 UI 状态
+    if (pendingMessageId && messageUIState) {
+      const idx = uiMessages.findIndex(m => m.id === pendingMessageId);
+      if (idx !== -1) {
+        const existing = uiMessages[idx];
+        if (existing) {
+          uiMessages[idx] = {
+            id: existing.id,
+            role: existing.role,
+            content: existing.content,
+            timestamp: existing.timestamp,
+            steps: messageUIState.steps,
+            status: messageUIState.status,
+            features: messageUIState.features,
+            sessionId: messageUIState.sessionId,
+          };
+        }
+      }
+    }
+
+    return uiMessages;
+  }, [currentProject?.chat, pendingMessageId, messageUIState]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
@@ -296,7 +344,7 @@ export default function HomePage() {
     if (isGenerating) return;
     // F-001: 未登录时点击模板按钮跳转到登录页
     if (!isLoggedIn) {
-      navigate('/login?redirect=%2F');
+      navigate('/login?redirect=%2Fworkspace');
       return;
     }
     setInputValue(prompt);
@@ -310,53 +358,55 @@ export default function HomePage() {
         case 'stage':
           updateStage(event.payload.stage, event.payload.attempt, event.payload.message);
           // 更新消息步骤计数
-          setMessages(prev => prev.map(msg => {
-            if (msg.role === 'assistant' && msg.status === 'processing') {
-              return { ...msg, steps: (msg.steps || 0) + 1 };
-            }
-            return msg;
-          }));
+          setMessageUIState(prev => prev ? { ...prev, steps: (prev.steps || 0) + 1 } : { steps: 1, status: 'processing' });
           break;
         case 'delta':
           appendDelta(event.payload.phase, event.payload.text);
-          // 更新 assistant 消息内容
-          setMessages(prev => prev.map(msg => {
-            if (msg.role === 'assistant' && msg.status === 'processing') {
-              return { ...msg, content: '正在生成代码...' };
-            }
-            return msg;
-          }));
+          // UI 状态保持 processing
+          setMessageUIState(prev => prev ? { ...prev, status: 'processing' } : { steps: 0, status: 'processing' });
           break;
         case 'done': {
+          console.log('[HomePage] done 事件:', {
+            htmlLength: event.payload.html?.length || 0,
+            htmlPreview: event.payload.html?.slice(0, 200) || '(empty)',
+          });
           const validation = validateGeneratedHtml(event.payload.html);
-          if (validation.ok) {
+          console.log('[HomePage] 验证结果:', validation);
+
+          // 即使验证失败，也保存 HTML（降级方案）
+          if (event.payload.html && event.payload.html.length > 0) {
+            console.log('[HomePage] 调用 updateEntryFile');
             updateEntryFile(event.payload.html);
-            updateProjectStatus('ready');
+            console.log('[HomePage] updateEntryFile 完成');
+            updateProjectStatus(validation.ok ? 'ready' : 'draft');
             finishGeneration();
             setIsGenerating(false);
-            addMessage({ role: 'assistant', content: '应用已生成完成！你可以继续描述需求来修改它。' });
-            toast.success('生成完成');
-            // 更新消息状态
-            setMessages(prev => prev.map(msg => {
-              if (msg.role === 'assistant' && msg.status === 'processing') {
-                return { ...msg, status: 'done' as const, content: '应用已生成完成！' };
-              }
-              return msg;
-            }));
+
+            if (validation.ok) {
+              addMessage({ role: 'assistant', content: '应用已生成完成！你可以继续描述需求来修改它。' });
+              toast.success('生成完成');
+            } else {
+              const warningMsg = `生成完成，但代码存在 ${validation.issues.length} 个问题，可能影响功能`;
+              addMessage({ role: 'assistant', content: warningMsg });
+              toast.info(warningMsg);
+              console.warn('[HomePage] 验证问题:', validation.issues);
+            }
+
+            // 清除 UI 状态
+            setPendingMessageId(null);
+            setMessageUIState(null);
           } else {
-            const errorMsg = `生成的代码存在 ${validation.issues.length} 个问题`;
+            // HTML 为空，这是真正的错误
+            const errorMsg = '生成的代码为空，请重试';
+            console.error('[HomePage] HTML 为空');
             setError(errorMsg);
             revertProjectStatusAfterFailure();
             finishGeneration();
             setIsGenerating(false);
             toast.error(errorMsg);
-            // 更新消息状态
-            setMessages(prev => prev.map(msg => {
-              if (msg.role === 'assistant' && msg.status === 'processing') {
-                return { ...msg, status: 'error' as const, content: errorMsg };
-              }
-              return msg;
-            }));
+            setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
+            addMessage({ role: 'assistant', content: errorMsg });
+            setPendingMessageId(null);
           }
           break;
         }
@@ -366,56 +416,46 @@ export default function HomePage() {
           finishGeneration();
           setIsGenerating(false);
           toast.error(event.payload.message, 6000);
-          // 更新消息状态
-          setMessages(prev => prev.map(msg => {
-            if (msg.role === 'assistant' && msg.status === 'processing') {
-              return { ...msg, status: 'error' as const, content: event.payload.message };
-            }
-            return msg;
-          }));
+          // 更新 UI 状态为错误
+          setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
+          // 添加错误消息到持久化
+          addMessage({ role: 'assistant', content: event.payload.message });
+          setPendingMessageId(null);
           break;
         case 'approval_required': {
-          // 分析完成，等待批准
-          finishGeneration();
+          // 分析完成，等待批准。不调用 finishGeneration，避免 stage 变成 done
+          setAwaitingApproval(true);
           setIsGenerating(false);
           // 更新消息状态，显示分析结果和批准按钮
-          setMessages(prev => prev.map(msg => {
-            if (msg.role === 'assistant' && msg.status === 'processing') {
-              const features = event.payload.features;
-              const content = isFeatureList(features)
-                ? `${features.appTitle}：${features.summary}`
-                : '分析完成，等待批准';
-              return {
-                ...msg,
-                status: 'waiting_approval' as const,
-                content,
-                features,
-                sessionId: event.payload.sessionId,
-                steps: (msg.steps || 0) + 1,
-              };
-            }
-            return msg;
-          }));
+          const features = event.payload.features;
+          setMessageUIState(prev => prev ? {
+            ...prev,
+            status: 'waiting_approval',
+            features,
+            sessionId: event.payload.sessionId,
+            steps: (prev.steps || 0) + 1,
+          } : {
+            steps: 1,
+            status: 'waiting_approval',
+            features,
+            sessionId: event.payload.sessionId,
+          });
           break;
         }
       }
     },
-    [updateStage, appendDelta, updateEntryFile, updateProjectStatus, finishGeneration, setError, addMessage]
+    [updateStage, appendDelta, updateEntryFile, updateProjectStatus, setError, addMessage, setAwaitingApproval]
   );
 
   // 批准后继续生成
   const handleApprove = useCallback(async (sessionId: string) => {
+    setAwaitingApproval(false); // 清除等待批准状态
     setIsGenerating(true);
     updateProjectStatus('generating');
     startGeneration(`approve-${Date.now()}`);
 
     // 更新消息状态为处理中
-    setMessages(prev => prev.map(msg => {
-      if (msg.sessionId === sessionId) {
-        return { ...msg, status: 'processing' as const, content: '正在生成代码...' };
-      }
-      return msg;
-    }));
+    setMessageUIState(prev => prev ? { ...prev, status: 'processing' } : { steps: 0, status: 'processing' });
 
     try {
       await approveAndContinue(sessionId, handleStreamEvent);
@@ -425,21 +465,18 @@ export default function HomePage() {
       revertProjectStatusAfterFailure();
       setIsGenerating(false);
       toast.error(errorMsg);
-      setMessages(prev => prev.map(msg => {
-        if (msg.sessionId === sessionId) {
-          return { ...msg, status: 'error' as const, content: errorMsg };
-        }
-        return msg;
-      }));
+      setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
+      addMessage({ role: 'assistant', content: errorMsg });
+      setPendingMessageId(null);
     }
-  }, [handleStreamEvent, updateProjectStatus, startGeneration, setError]);
+  }, [handleStreamEvent, updateProjectStatus, startGeneration, setError, addMessage, setAwaitingApproval]);
 
   const handleSubmit = useCallback(async () => {
     if (!inputValue.trim() || isGenerating) return;
 
     // F-001: 未登录时阻止创建，跳转到登录页
     if (!isLoggedIn) {
-      navigate('/login?redirect=%2F');
+      navigate('/login?redirect=%2Fworkspace');
       return;
     }
 
@@ -447,19 +484,12 @@ export default function HomePage() {
     setIsGenerating(true);
     setFiles([]); // 重置文件列表
 
-    // 添加用户消息
-    const userMessage: ChatMessage = {
-      id: `msg-${Date.now()}`,
-      role: 'user',
-      content: prompt,
-      timestamp: new Date(),
-    };
-    setMessages(prev => [...prev, userMessage]);
-
-    // 如果已有项目，是多轮修改；否则创建新项目
+    // 如果已有项目，是多轮修改；否则创建新项目（先建项目，首条用户消息才能入库）
     if (!currentProject) {
       createProject('未命名项目');
     }
+    // 添加用户消息到持久化层
+    addMessage({ role: 'user', content: prompt });
     updateProjectStatus('generating');
 
     // 重置输入
@@ -473,16 +503,10 @@ export default function HomePage() {
     const runId = `run-${Date.now()}`;
     startGeneration(runId);
 
-    // 添加 assistant 占位消息
-    const assistantMessage: ChatMessage = {
-      id: `msg-${Date.now() + 1}`,
-      role: 'assistant',
-      content: '',
-      timestamp: new Date(),
-      steps: 0,
-      status: 'processing',
-    };
-    setMessages(prev => [...prev, assistantMessage]);
+    // 设置当前正在生成的消息 UI 状态
+    const assistantId = `msg-${Date.now() + 1}`;
+    setPendingMessageId(assistantId);
+    setMessageUIState({ steps: 0, status: 'processing' });
 
     try {
       const opts = generatedHtml ? { currentHtml: generatedHtml } : {};
@@ -493,12 +517,10 @@ export default function HomePage() {
       revertProjectStatusAfterFailure();
       setIsGenerating(false);
       toast.error(errorMsg);
-      // 更新 assistant 消息状态
-      setMessages(prev => prev.map(msg =>
-        msg.id === assistantMessage.id
-          ? { ...msg, status: 'error' as const, content: errorMsg }
-          : msg
-      ));
+      // 更新 UI 状态为错误
+      setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
+      addMessage({ role: 'assistant', content: errorMsg });
+      setPendingMessageId(null);
     }
   }, [
     inputValue,
@@ -514,6 +536,7 @@ export default function HomePage() {
     setError,
     isLoggedIn,
     navigate,
+    addMessage,
   ]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -576,6 +599,15 @@ export default function HomePage() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          {/* 返回首页（落地页）入口 */}
+          <Link
+            to="/"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-elevated)] transition-all duration-[140ms]"
+            title="返回首页"
+          >
+            <Icon icon="lucide:home" width={14} height={14} />
+            <span>首页</span>
+          </Link>
           {/* 积分显示（模拟） */}
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--color-bg-base)] text-[12px] text-[var(--color-text-secondary)]">
             <Icon icon="lucide:coins" width={14} height={14} />
@@ -588,11 +620,11 @@ export default function HomePage() {
       {/* Main: Left chat + Right preview */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left: Chat Panel */}
-        <div className="w-full md:w-1/2 lg:w-[45%] flex flex-col border-r border-[var(--color-border-default)]">
+        <div className="w-full md:w-1/2 lg:w-[45%] min-w-[400px] flex flex-col border-r border-[var(--color-border-default)]">
           {/* Chat messages area */}
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
-            {/* Welcome message */}
-            {messages.length === 0 && !isGenerating && !generatedHtml && (
+            {/* Welcome message：只要当前是新会话就展示（与历史项目无关） */}
+            {messages.length === 0 && !isGenerating && (
               <div className="text-center py-8">
                 <div className="w-12 h-12 rounded-full bg-[var(--color-accent)]/10 flex items-center justify-center mx-auto mb-4">
                   <Icon icon="lucide:sparkles" width={24} height={24} className="text-[var(--color-accent)]" />
@@ -604,8 +636,8 @@ export default function HomePage() {
               </div>
             )}
 
-            {/* Template chips */}
-            {messages.length === 0 && !isGenerating && !generatedHtml && (
+            {/* Template chips：与欢迎语同条件，新会话始终展示模板入口 */}
+            {messages.length === 0 && !isGenerating && (
               <div className="flex flex-wrap justify-center gap-2 pb-4">
                 {TEMPLATE_CHIPS.map((chip) => (
                   <button
@@ -704,8 +736,8 @@ export default function HomePage() {
               </div>
             )}
 
-            {/* 生成完成 */}
-            {generatedHtml && !isGenerating && streamBuffer.stage === 'done' && messages.length === 0 && (
+            {/* 生成完成：仅在真正完成（非等待批准状态）且无消息时显示 */}
+            {generatedHtml && !isGenerating && streamBuffer.stage === 'done' && !streamBuffer.awaitingApproval && messages.length === 0 && (
               <div className="bg-green-500/5 border border-green-500/20 rounded-xl p-4">
                 <div className="flex items-center gap-2 text-green-500 mb-2">
                   <Icon icon="lucide:check-circle" width={16} height={16} />
@@ -720,6 +752,22 @@ export default function HomePage() {
 
           {/* Input area */}
           <div className="p-4 border-t border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+            {/* 停止按钮：生成中时显示 */}
+            {isGenerating && (
+              <button
+                onClick={() => {
+                  cancelActiveRun();
+                  finishGeneration();
+                  setIsGenerating(false);
+                  setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
+                  toast.info('已停止生成');
+                }}
+                className="w-full mb-3 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
+              >
+                <Icon icon="lucide:square" width={14} height={14} />
+                <span className="text-[13px] font-medium">停止生成</span>
+              </button>
+            )}
             <div className="relative">
               <textarea
                 value={inputValue}
@@ -730,7 +778,7 @@ export default function HomePage() {
                 onClick={() => {
                   // F-001: 未登录时点击输入框跳转到登录页
                   if (!isLoggedIn) {
-                    navigate('/login?redirect=%2F');
+                    navigate('/login?redirect=%2Fworkspace');
                   }
                 }}
                 className={`w-full bg-[var(--color-bg-base)] border border-[var(--color-border-default)] rounded-xl px-4 py-3 pr-12 text-[14px] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] resize-none outline-none focus:border-[var(--color-border-strong)] transition-colors disabled:opacity-50 disabled:cursor-pointer ${!isLoggedIn ? 'cursor-pointer' : ''}`}
@@ -770,7 +818,7 @@ export default function HomePage() {
         </div>
 
         {/* Right: Preview Panel */}
-        <div className="hidden md:flex flex-1 flex-col bg-[var(--color-bg-base)]">
+        <div className="hidden md:flex flex-1 min-w-[500px] flex-col bg-[var(--color-bg-base)]">
           {/* Preview header with full toolbar */}
           <div className="h-12 flex items-center justify-between px-4 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
             <div className="flex items-center gap-1">

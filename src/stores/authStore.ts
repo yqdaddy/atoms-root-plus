@@ -10,6 +10,7 @@ import {
   fetchCurrentUser,
 } from '../services/auth';
 import { storageKey } from '../types/storage'; // F-004: 登出清理本地缓存
+import { useProjectStore } from './projectStore'; // D-002: 登录后清理游客数据
 
 export interface AuthUser {
   id: string;
@@ -56,16 +57,31 @@ export const useAuthStore = create<AuthStore>()((set) => ({
   login: async (username, password) => {
     const user = await loginUser(username, password);
     set({ user });
+
+    // D-002: 登录成功后清理游客数据，避免游客池污染用户项目列表
+    useProjectStore.setState({ summaries: [], currentId: null, currentProject: null });
+    // 重新初始化，拉取登录用户的专属项目
+    useProjectStore.getState().initialize();
+
     return user;
   },
 
   register: async (username, password) => {
     const user = await registerUser(username, password);
     set({ user });
+
+    // D-002: 注册成功后清理游客数据，避免游客池污染用户项目列表
+    useProjectStore.setState({ summaries: [], currentId: null, currentProject: null });
+    // 重新初始化，拉取新用户的专属项目（通常为空）
+    useProjectStore.getState().initialize();
+
     return user;
   },
 
   logout: async () => {
+    // 先清理本地缓存，再清除用户状态
+    // 注意：如果调用方需要在登出后导航，应该在调用 logout 之前执行 navigate('/')
+    // 这样可以避免路由守卫在 user 变为 null 时拦截 /workspace 并重定向到 /login
     await logoutUser();
     set({ user: null });
 

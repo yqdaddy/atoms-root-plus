@@ -1,0 +1,2 @@
+{"schemaVersion":1,"savedAt":"2026-09-20T08:42:38.033Z","data":{"id":"eefb1893-dd3d-499b-92dd-9eeb9d3c27ea","name":"未命名项目","description":"","status":"draft","files":[{"path":"index.html","content":"<h1>smoke</h1>"}],"chat":[{"role":"user","content":"hi"}],"preview":{"extraSandboxFlags":[],"sizeMode":"autoHeight"},"createdAt":"2026-09-20T08:42:27.095Z","updatedAt":"2026-09-20T08:42:38.032Z"}}
+HTTP:200

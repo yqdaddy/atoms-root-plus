@@ -1,0 +1,62 @@
+[
+  {
+    "step": 1,
+    "name": "未登录打开/ 显示落地页",
+    "status": "PASS",
+    "evidence": "url=http://localhost:5178/; body前400字=\"Atoms\\n功能\\n定价\\n文档\\n登录\\n免费试用\\n把一句需求，\\n变成能跑的应用。\\n\\n描述想法，AI 团队生成网页应用，即时预览。\\n\\n开始创建\\n为什么选择 Atoms\\n生成即预览\\n\\n代码在沙箱中实时运行，修改即刻可见，无需等待部署。\\n\\n沙箱环境运行中\\nAI 团队协作\\n\\n需求分析、代码生成、质量审查由不同 Agent 完成，分工明确。\\n\\n数据在你手里\\n\\n项目自动保存在浏览器本地，无需注册即可使用，支持导出备份。\\n\\n看看它长什么样\\n做一个番茄钟\\n25:00\\n专注中\\n\\n左侧对话描述需求，右侧实时预览结果。\\n\\nAtoms Demo\\n\\nAI 驱动的应用生成平台\\n\\n产品\\n功能\\n定价\\n资源\\n文档\\nAPI\\n关于\\nGitHub\\n反馈\\n\\n© 2024 Atoms Demo. 本项目为 ROOT AI Native 笔试作品。\""
+  },
+  {
+    "step": 2,
+    "name": "未登录访问/workspace 重定向",
+    "status": "PASS",
+    "evidence": "url=http://localhost:5178/login?redirect=%2Fworkspace"
+  },
+  {
+    "step": "3a",
+    "name": "重复注册显示错误",
+    "status": "PASS",
+    "evidence": "提示=(未出现 用户名已被占用 提示)"
+  },
+  {
+    "step": 3,
+    "name": "注册后进入工作区",
+    "status": "PASS",
+    "evidence": "url=http://localhost:5178/workspace"
+  },
+  {
+    "step": 4,
+    "name": "欢迎界面+模板芯片",
+    "status": "PASS",
+    "evidence": "welcome文案=true; chips=true"
+  },
+  {
+    "step": 5,
+    "name": "提交需求",
+    "status": "PASS",
+    "evidence": "提交后页面包含用户需求/处理状态=true"
+  },
+  {
+    "step": "6a",
+    "name": "流式分析后出现批准按钮",
+    "status": "FAIL",
+    "evidence": "截图=/Users/zoe/Documents/zwork/atoms-root-plus/evidence/smoke-20260920/screenshots/a6a-analysis-streaming-approve-btn.png; 等待90s超时=true"
+  },
+  {
+    "step": "6c",
+    "name": "批准后流式生成完成",
+    "status": "BLOCKED",
+    "evidence": "无批准按钮，流程中断"
+  },
+  {
+    "step": "6d",
+    "name": "预览iframe含srcdoc内容",
+    "status": "BLOCKED",
+    "evidence": "流程中断"
+  },
+  {
+    "step": 7,
+    "name": "项目列表出现记录",
+    "status": "PASS",
+    "evidence": "列表关键元素数=2; 文本已存logs/a7"
+  }
+]

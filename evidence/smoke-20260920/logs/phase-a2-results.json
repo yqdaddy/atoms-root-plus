@@ -1,0 +1,38 @@
+[
+  {
+    "step": 8,
+    "name": "新建项目清理旧状态",
+    "status": "PASS",
+    "evidence": "欢迎=true; 残留对话=false; 截图=a8b"
+  },
+  {
+    "step": "8d",
+    "name": "第二需求创建新项目记录",
+    "status": "PASS",
+    "evidence": "before=2; after=3; 截图=a8c"
+  },
+  {
+    "step": 9,
+    "name": "刷新后数据恢复",
+    "status": "PASS",
+    "evidence": "localStorage={\"key\":\"atoms:v1:projects\",\"has\":true,\"summaries\":3}"
+  },
+  {
+    "step": 10,
+    "name": "登出回到落地页",
+    "status": "FAIL",
+    "evidence": "url=http://localhost:5178/workspace"
+  },
+  {
+    "step": "10b",
+    "name": "登出清理localStorage项目",
+    "status": "PASS",
+    "evidence": "残留键=[]"
+  },
+  {
+    "step": 11,
+    "name": "重新登录后项目列表恢复",
+    "status": "PASS",
+    "evidence": "列表含项目=true; 截图=a11"
+  }
+]

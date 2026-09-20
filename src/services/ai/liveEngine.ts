@@ -52,7 +52,7 @@ const STAGE_MESSAGES: Record<string, string> = {
  * 后端格式 → 前端格式转换：
  *   stage: { stage: 'analysis' } → { runId, stage: 'analyzing', attempt: 1, message }
  *   delta: { content, stage } → { runId, phase, text }
- *   done: { fullHtml } → { runId, html }
+ *   done: { html } → { runId, html }
  *   error: { error } → { runId, code, message, retryable, fallbackToDemo }
  */
 async function parseSSEStream(
@@ -142,7 +142,7 @@ function processSSEEvent(
     let event: StreamEvent;
     switch (eventType) {
       case 'stage': {
-        const backendStage = payload.stage as string;
+        const backendStage = payload.phase as string;
         const frontendStage = STAGE_MAP[backendStage] || 'analyzing';
         const message = STAGE_MESSAGES[backendStage] || `${backendStage} 阶段`;
         console.log('[liveEngine] stage 事件:', { backendStage, frontendStage, message });
@@ -158,23 +158,28 @@ function processSSEEvent(
         break;
       }
       case 'delta': {
-        const backendStage = payload.stage as string;
+        const backendStage = payload.phase as string;
         event = {
           type: 'delta',
           payload: {
             runId,
             phase: STAGE_TO_PHASE[backendStage] || 'generate',
-            text: payload.content || '',
+            text: payload.text || '',
           },
         };
         break;
       }
       case 'done': {
+        const html = payload.html || '';
+        console.log('[liveEngine] done 事件:', {
+          htmlLength: html.length,
+          htmlPreview: html.slice(0, 200),
+        });
         event = {
           type: 'done',
           payload: {
             runId,
-            html: payload.fullHtml || '',
+            html,
             warnings: [],
             stats: { mode: 'live', inputTokens: 0, outputTokens: 0, durationMs: 0, rounds: 1 },
           },
@@ -187,7 +192,7 @@ function processSSEEvent(
           payload: {
             runId,
             code: 'PARSE_FAILED' as const,
-            message: payload.error || '生成失败',
+            message: payload.message || '生成失败',
             retryable: true,
             fallbackToDemo: false,
           },

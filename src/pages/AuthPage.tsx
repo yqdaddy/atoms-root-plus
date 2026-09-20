@@ -100,12 +100,12 @@ export default function AuthPage({ mode }: AuthPageProps) {
         await login(username.trim(), password);
         toast.success('登录成功，欢迎回来。');
       }
-      // F-006: 登录后重定向到原访问页面
+      // F-006: 登录后重定向到原访问页面，无 redirect 时进入工作台
       const redirect = searchParams.get('redirect');
       if (redirect) {
         navigate(redirect, { replace: true });
       } else {
-        navigate('/', { replace: true });
+        navigate('/workspace', { replace: true });
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : '操作失败，请重试。';

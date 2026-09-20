@@ -19,6 +19,7 @@ import eyeOff from '../../assets/icons/lucide/eye-off.svg?raw';
 import folder from '../../assets/icons/lucide/folder.svg?raw';
 import hammer from '../../assets/icons/lucide/hammer.svg?raw';
 import history from '../../assets/icons/lucide/history.svg?raw';
+import home from '../../assets/icons/lucide/home.svg?raw';
 import layoutTemplate from '../../assets/icons/lucide/layout-template.svg?raw';
 import loaderCircle from '../../assets/icons/lucide/loader-circle.svg?raw';
 import logOut from '../../assets/icons/lucide/log-out.svg?raw';
@@ -67,6 +68,7 @@ const LOCAL_ICONS: Record<string, string> = {
   folder,
   hammer,
   history,
+  home,
   'layout-template': layoutTemplate,
   'loader-circle': loaderCircle,
   'log-out': logOut,

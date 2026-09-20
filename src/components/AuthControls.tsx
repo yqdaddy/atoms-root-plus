@@ -1,6 +1,7 @@
 /**
- * 认证相关 UI 控件。
- * 供 HomePage（右上角）与 ProjectSidebar（底部）复用。
+ * 首页右上角认证控件。
+ * 未登录：登录 / 注册按钮组。
+ * 已登录：用户胶囊 + 下拉菜单（退出登录）。
  */
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -8,11 +9,6 @@ import { Icon } from '@iconify/react';
 import { useAuthStore } from '../stores/authStore';
 import { toast } from './Toast';
 
-/**
- * 首页右上角认证控件。
- * 未登录：登录 / 注册按钮组。
- * 已登录：用户胶囊 + 下拉菜单（退出登录）。
- */
 export function HomeAuthControls() {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
@@ -40,9 +36,11 @@ export function HomeAuthControls() {
 
   const handleLogout = useCallback(async () => {
     setMenuOpen(false);
+    // 先导航到落地页，再执行登出清理
+    // 这样可以避免路由守卫在 user 变为 null 时拦截 /workspace 并重定向到 /login
+    navigate('/');
     await logout();
     toast.info('已退出登录。');
-    navigate('/'); // 登出后跳转到落地页
   }, [logout, navigate]);
 
   if (!user) {
@@ -89,49 +87,5 @@ export function HomeAuthControls() {
         </div>
       )}
     </div>
-  );
-}
-
-/**
- * 侧栏底部认证控件。
- * 未登录：登录按钮。
- * 已登录：用户名行 + 退出登录按钮。
- */
-export function SidebarAuthControls() {
-  const { user, logout } = useAuthStore();
-  const navigate = useNavigate();
-
-  const handleLogout = useCallback(async () => {
-    await logout();
-    toast.info('已退出登录。');
-    navigate('/'); // 登出后跳转到落地页
-  }, [logout, navigate]);
-
-  if (!user) {
-    return (
-      <button
-        onClick={() => navigate('/login')}
-        className="flex items-center gap-2 w-full px-3 py-2 rounded-[10px] text-[13px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-elevated)] transition-all duration-[140ms]"
-      >
-        <Icon icon="lucide:user" width={15} height={15} />
-        <span>登录 / 注册</span>
-      </button>
-    );
-  }
-
-  return (
-    <>
-      <div className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--color-text-secondary)]">
-        <Icon icon="lucide:user" width={15} height={15} />
-        <span className="truncate">{user.username}</span>
-      </div>
-      <button
-        onClick={handleLogout}
-        className="flex items-center gap-2 w-full px-3 py-2 rounded-[10px] text-[13px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-elevated)] transition-all duration-[140ms]"
-      >
-        <Icon icon="lucide:log-out" width={15} height={15} />
-        <span>退出登录</span>
-      </button>
-    </>
   );
 }

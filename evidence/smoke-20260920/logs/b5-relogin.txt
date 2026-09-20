@@ -1,0 +1,2 @@
+{"user":{"id":"250cd2b3-19e3-4914-b209-d7ea5a4d01cf","username":"smoke_1789893670","createdAt":"2026-09-20T08:42:00.905Z"}}
+HTTP:200

@@ -1,10 +1,13 @@
 /**
  * 落地页 Hero 区组件
  * 设计规范: docs/design/landing-page-spec.md 4.2
+ * 登录态适配: 未登录 CTA 为「开始创建」（去注册），已登录为「进入工作台」
  */
 import { Link } from 'react-router-dom';
+import { useAuthStore } from '../../stores/authStore';
 
 export default function Hero() {
+  const user = useAuthStore((state) => state.user);
   return (
     <section className="bg-[var(--color-bg-base)] py-16 lg:py-24">
       <div className="mx-auto max-w-7xl px-6 lg:px-6">
@@ -23,10 +26,10 @@ export default function Hero() {
 
             <div className="mt-8">
               <Link
-                to="/register"
+                to={user ? '/workspace' : '/register'}
                 className="inline-flex items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-accent)] px-8 py-3 text-sm font-semibold text-[var(--color-text-on-accent)] hover:bg-[var(--color-accent-hover)] active:scale-[0.98] transition-all duration-140 min-w-[140px]"
               >
-                开始创建
+                {user ? '进入工作台' : '开始创建'}
               </Link>
             </div>
           </div>

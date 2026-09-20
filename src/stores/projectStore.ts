@@ -5,6 +5,8 @@
  */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { useChatStore } from './chatStore';
+import { cancelActiveRun } from '../services/ai/activeRun';
 import type { Project, ProjectSummary, FileNode, ChatMessage, IsoDateTime } from '../types/project';
 import { ENTRY_FILE_PATH, DEFAULT_PREVIEW_CONFIG } from '../types/project';
 import { storageKey } from '../types/storage';
@@ -77,6 +79,8 @@ interface ProjectState {
 interface ProjectActions {
   /** 创建新项目并设为当前 */
   createProject: (name?: string) => Project;
+  /** 清空工作台状态，进入"未开始新项目"状态（提交首个需求时才真正 createProject） */
+  newProject: () => void;
   /** 切换当前项目 */
   switchProject: (id: string) => void;
   /** 更新当前项目名称 */
@@ -140,6 +144,14 @@ export const useProjectStore = create<ProjectStore>()(
         return project;
       },
 
+      newProject: () => {
+        // 中断残留的生成任务与界面状态：旧项目即使生成中，也立即回到干净欢迎界面
+        cancelActiveRun();
+        useChatStore.setState({ isGenerating: false, error: null, currentInput: '' });
+        useChatStore.getState().resetStreamBuffer();
+        set({ currentId: null, currentProject: null });
+      },
+
       switchProject: (id) => {
         const { currentProject, loadProject, deleteProject } = get();
         if (currentProject?.id === id) return;
@@ -190,7 +202,10 @@ export const useProjectStore = create<ProjectStore>()(
 
       updateEntryFile: (html) => {
         set((state) => {
-          if (!state.currentProject) return state;
+          if (!state.currentProject) {
+            console.warn('[projectStore] updateEntryFile: currentProject 为 null');
+            return state;
+          }
           const timestamp = now();
           const updatedFile: FileNode = {
             path: ENTRY_FILE_PATH,

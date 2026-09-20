@@ -139,6 +139,43 @@ function isObject(v: unknown): v is Record<string, unknown> {
 }
 
 /**
+ * 校验 files 字段格式。
+ * files 必须是 Record<string, FileNode>，每个 FileNode 必须包含必需字段。
+ */
+function isValidFiles(v: unknown): v is Record<string, { path: string; content: string; language: string; updatedAt: string }> {
+  if (!isObject(v)) {
+    return false;
+  }
+
+  for (const [key, file] of Object.entries(v)) {
+    if (!isObject(file)) {
+      return false;
+    }
+
+    // 检查必需字段
+    if (typeof file.path !== 'string') {
+      return false;
+    }
+    if (typeof file.content !== 'string') {
+      return false;
+    }
+    if (typeof file.language !== 'string') {
+      return false;
+    }
+    if (typeof file.updatedAt !== 'string') {
+      return false;
+    }
+
+    // key 应该与 file.path 一致
+    if (key !== file.path) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
  * PUT /api/projects/:id
  * 更新项目（部分更新）。
  * 按 userId 隔离：只能更新自己的项目。
@@ -157,6 +194,11 @@ projectsRouter.put('/:id', async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as UpdateProjectBody;
   const current = existing.data;
 
+  // files 字段格式校验
+  if (body.files !== undefined && !isValidFiles(body.files)) {
+    return c.json({ error: 'files 字段格式错误：必须是 Record<string, FileNode>，每个 FileNode 包含 path、content、language、updatedAt 字段，且 key 与 path 一致' }, 400);
+  }
+
   const updated: Project = {
     ...current,
     name:
@@ -170,8 +212,8 @@ projectsRouter.put('/:id', async (c) => {
       (STATUS_VALUES as readonly string[]).includes(body.status)
         ? (body.status as ProjectStatus)
         : current.status,
-    files: isObject(body.files)
-      ? (body.files as unknown as Project['files'])
+    files: body.files !== undefined
+      ? (body.files as Project['files'])
       : current.files,
     chat: Array.isArray(body.chat) ? body.chat : current.chat,
     preview: isObject(body.preview)

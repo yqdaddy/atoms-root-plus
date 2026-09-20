@@ -1,5 +1,4 @@
 import HomePage from './pages/HomePage';
-import WorkspacePage from './pages/WorkspacePage';
 import AuthPage from './pages/AuthPage';
 import ProjectsPage from './pages/ProjectsPage';
 import LandingPage from './components/landing/LandingPage';
@@ -33,16 +32,13 @@ function App() {
   if (path === '/login' || path === '/register') {
     page = <AuthPage mode={path === '/register' ? 'register' : 'login'} />;
   } else if (path === '/workspace') {
-    page = <WorkspacePage />;
+    // 工作台独立路由（HomePage），需登录
+    page = <HomePage />;
   } else if (path === '/projects') {
     page = <ProjectsPage />;
   } else {
-    // 首页路由守卫：未登录显示落地页，已登录显示工作台
-    if (user) {
-      page = <HomePage />;
-    } else {
-      page = <LandingPage />;
-    }
+    // 首页（落地页）任何时候都可直接访问，不区分登录态
+    page = <LandingPage />;
   }
 
   return (

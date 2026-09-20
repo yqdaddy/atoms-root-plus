@@ -131,6 +131,7 @@ export default function ProjectsPage() {
   const summaries = useProjectStore((state) => state.summaries);
   const switchProject = useProjectStore((state) => state.switchProject);
   const deleteProject = useProjectStore((state) => state.deleteProject);
+  const newProject = useProjectStore((state) => state.newProject);
   const initialize = useProjectStore((state) => state.initialize);
 
   const [isLoading, setIsLoading] = useState(true);
@@ -167,7 +168,9 @@ export default function ProjectsPage() {
   };
 
   const handleNewProject = () => {
-    navigate('/');
+    // 清空工作台状态：工作台回到干净欢迎界面，提交首个需求时才创建新项目记录
+    newProject();
+    navigate('/workspace');
   };
 
   return (
@@ -176,7 +179,7 @@ export default function ProjectsPage() {
       <header className="sticky top-0 z-10 h-14 flex items-center justify-between px-6 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
         <div className="flex items-center gap-4">
           <button
-            onClick={() => navigate('/')}
+            onClick={() => navigate('/workspace')}
             className="flex items-center gap-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
           >
             <Icon icon="lucide:arrow-left" width={18} height={18} />
