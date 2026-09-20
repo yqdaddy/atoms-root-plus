@@ -2,6 +2,8 @@
 
 > AI Agent 驱动的代码生成平台，对标 atoms.dev
 
+**在线体验**：<https://atoms.litpp.com>
+
 ## 项目介绍
 
 Atoms Demo 是一个 AI App Builder：用户用一段自然语言描述需求，由角色化 Agent 流水线（需求分析、用户批准、代码生成、代码审查）生成自包含的单文件 HTML 应用，在 iframe 沙箱中实时预览，并通过多轮对话持续迭代。前后端分离：React SPA 负责界面与本地持久化，Hono 后端负责会话认证、项目存储与 LLM 流式代理，LLM 密钥由服务端持有，前端零密钥。
