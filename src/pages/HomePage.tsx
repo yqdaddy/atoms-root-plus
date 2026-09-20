@@ -658,6 +658,69 @@ export default function HomePage() {
               <MessageBubble key={msg.id} message={msg} onApprove={handleApprove} />
             ))}
 
+            {/* 独立的批准面板：不依赖 chat 数组中的消息 */}
+            {streamBuffer.awaitingApproval && messageUIState?.status === 'waiting_approval' && messageUIState?.features && (
+              <div className="bg-[var(--color-bg-base)] border border-[var(--color-border-default)] rounded-xl p-4">
+                {/* 标题栏 */}
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center">
+                    <Icon icon="lucide:clipboard-check" width={20} height={20} className="text-amber-500" />
+                  </div>
+                  <div>
+                    <h3 className="text-[14px] font-medium text-[var(--color-text-primary)]">分析完成</h3>
+                    <p className="text-[12px] text-[var(--color-text-tertiary)]">请确认功能清单后批准生成</p>
+                  </div>
+                </div>
+
+                {/* 功能清单 */}
+                {isFeatureList(messageUIState.features) && (
+                  <div className="mb-4">
+                    <h4 className="text-[12px] font-medium text-[var(--color-text-secondary)] mb-2">
+                      {messageUIState.features.appTitle}
+                    </h4>
+                    <div className="space-y-1.5">
+                      {messageUIState.features.features.map((f) => (
+                        <div key={f.id} className="flex items-start gap-2">
+                          <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${
+                            f.priority === 'must'
+                              ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
+                              : 'bg-[var(--color-text-tertiary)]/10 text-[var(--color-text-secondary)]'
+                          }`}>
+                            {f.priority === 'must' ? '必须' : '可选'}
+                          </span>
+                          <span className="text-[13px] text-[var(--color-text-primary)]">{f.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 操作按钮 */}
+                <div className="flex items-center gap-3 pt-3 border-t border-[var(--color-border-default)]">
+                  <button
+                    onClick={() => {
+                      // 取消批准，重置状态
+                      setAwaitingApproval(false);
+                      setMessageUIState(null);
+                      finishGeneration();
+                      toast.info('已取消生成');
+                    }}
+                    className="px-4 py-2 rounded-lg text-[13px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-base)] transition-colors"
+                  >
+                    取消
+                  </button>
+                  {messageUIState.sessionId && (
+                    <button
+                      onClick={() => handleApprove(messageUIState.sessionId!)}
+                      className="flex-1 px-4 py-2 rounded-lg bg-[var(--color-accent)] text-white text-[13px] font-medium hover:bg-[var(--color-accent-hover)] transition-colors"
+                    >
+                      批准并生成
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* 生成状态面板 */}
             {isGenerating && (
               <div className="space-y-3">
