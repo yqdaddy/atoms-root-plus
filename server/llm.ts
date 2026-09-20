@@ -3,6 +3,7 @@
  * 调用 Agnes AI API，支持流式输出与取消。
  * 支持批准流程：分析完成后暂停等待用户批准。
  * 支持多文件项目生成：工程师阶段输出 JSON 格式的多文件结构。
+ * 支持多轮对话上下文：迭代请求携带最近 N 条对话历史。
  */
 
 import {
@@ -15,6 +16,124 @@ import {
   type GeneratedFile,
   type FileLanguage,
 } from './multiFileParser.js';
+
+/**
+ * 对话轮次输入（从前端传入，用于构建多轮上下文）。
+ */
+export interface ChatTurnInput {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/** 多轮上下文构建配置 */
+const CHAT_CONTEXT_CONFIG = {
+  /** 最多保留的用户指令条数（4.2 设计：最近 5 条修改指令） */
+  MAX_USER_TURNS: 5,
+  /** 单条用户消息字符上限 */
+  USER_MSG_CAP: 200,
+  /** 单条助手消息字符上限（摘要用途） */
+  ASSISTANT_MSG_CAP: 120,
+  /** 整个上下文块字符上限（约 1000 tokens） */
+  TOTAL_BLOCK_CAP: 1600,
+  /** 用户消息超出时的截断标记 */
+  TRUNCATE_MARKER: '…',
+} as const;
+
+/**
+ * 构建多轮对话上下文块（纯函数，可离线测试）。
+ *
+ * 策略：
+ * 1. 从末尾向前扫描，保留最近 N=5 条用户指令
+ * 2. 每条用户指令后若紧跟助手消息，一并纳入
+ * 3. 对每条消息应用字符上限截断
+ * 4. 总字符数超限时，从最早的轮次开始丢弃
+ *
+ * @param turns 原始对话轮次数组（已按时间升序）
+ * @param originalRequest 可选的最初需求（当历史窗口不含首条时单独标注）
+ * @returns 格式化的上下文块字符串，无有效内容时返回空字符串
+ */
+export function buildChatContextBlock(
+  turns: ChatTurnInput[],
+  originalRequest?: string
+): string {
+  if (!turns || turns.length === 0) return '';
+
+  // 过滤无效条目
+  const validTurns = turns.filter(
+    (t) => t && (t.role === 'user' || t.role === 'assistant') && typeof t.content === 'string' && t.content.trim().length > 0
+  );
+  if (validTurns.length === 0) return '';
+
+  // 从后向前收集最近 N 条用户指令及其助手回复
+  const selectedTurns: ChatTurnInput[] = [];
+  let userCount = 0;
+  for (let i = validTurns.length - 1; i >= 0 && userCount < CHAT_CONTEXT_CONFIG.MAX_USER_TURNS; i--) {
+    const turn = validTurns[i];
+    if (!turn) continue;
+    if (turn.role === 'user') {
+      userCount++;
+      // 助手回复在时间上位于用户之后，即数组中 index i+1
+      const next = validTurns[i + 1];
+      if (next && next.role === 'assistant') {
+        selectedTurns.unshift(next); // 先加助手（保持时间顺序）
+      }
+      selectedTurns.unshift(turn); // 再加用户
+    }
+    // 助手消息单独出现时会在上述逻辑中被跳过（由用户触发纳入）
+  }
+
+  if (selectedTurns.length === 0) return '';
+
+  // 对每条消息应用截断
+  const truncatedTurns = selectedTurns.map((t) => {
+    const cap = t.role === 'user' ? CHAT_CONTEXT_CONFIG.USER_MSG_CAP : CHAT_CONTEXT_CONFIG.ASSISTANT_MSG_CAP;
+    const trimmed = t.content.trim();
+    const truncated = trimmed.length > cap ? trimmed.slice(0, cap) + CHAT_CONTEXT_CONFIG.TRUNCATE_MARKER : trimmed;
+    return { role: t.role, content: truncated };
+  });
+
+  // 构建原始需求行（如果提供且不在窗口中）
+  const firstUserInWindow = truncatedTurns.find((t) => t.role === 'user');
+  const originalLine =
+    originalRequest && firstUserInWindow && firstUserInWindow.content !== originalRequest.trim().slice(0, CHAT_CONTEXT_CONFIG.USER_MSG_CAP)
+      ? [`用户最初需求：${originalRequest.trim().slice(0, CHAT_CONTEXT_CONFIG.USER_MSG_CAP)}${originalRequest.trim().length > CHAT_CONTEXT_CONFIG.USER_MSG_CAP ? CHAT_CONTEXT_CONFIG.TRUNCATE_MARKER : ''}`]
+      : [];
+
+  // 构建对话行
+  const turnLines = truncatedTurns.map((t) => {
+    const prefix = t.role === 'user' ? '用户：' : '助手：';
+    return `${prefix}${t.content}`;
+  });
+
+  // 合并并检查总长度
+  let allLines = [...originalLine, ...turnLines];
+  let block = allLines.join('\n');
+
+  // 总长度超限时，从最早的用户轮次开始丢弃（保留原始需求行）
+  while (block.length > CHAT_CONTEXT_CONFIG.TOTAL_BLOCK_CAP && turnLines.length > 1) {
+    // 找到第一个用户行索引（跳过原始需求行）
+    const firstUserIdx = originalLine.length > 0 ? allLines.findIndex((l, i) => i >= originalLine.length && l.startsWith('用户：')) : allLines.findIndex((l) => l.startsWith('用户：'));
+    if (firstUserIdx === -1) break;
+    // 移除该用户行及其前面的助手行（如果有）
+    const removeIdx = firstUserIdx > 0 && allLines[firstUserIdx - 1]?.startsWith('助手：') ? firstUserIdx - 1 : firstUserIdx;
+    allLines = allLines.filter((_, i) => i !== removeIdx);
+    // 如果移除的是助手行，还需移除对应的用户行
+    if (allLines[removeIdx]?.startsWith('用户：')) {
+      // 已移除助手，继续
+    } else if (removeIdx < allLines.length && allLines[removeIdx]?.startsWith('用户：')) {
+      // 正常
+    }
+    // 重建 turnLines 和 allLines
+    const newTurnLines: string[] = [];
+    for (let i = originalLine.length; i < allLines.length; i++) {
+      newTurnLines.push(allLines[i]!);
+    }
+    allLines = [...originalLine, ...newTurnLines];
+    block = allLines.join('\n');
+  }
+
+  return block.trim();
+}
 
 /** 分析师系统提示词（生成功能清单） */
 const ANALYST_SYSTEM_PROMPT = `你是 Atoms 平台的需求分析师。分析用户需求，输出可在浏览器内实现的功能清单。
@@ -145,6 +264,8 @@ interface PendingSession {
   currentFiles?: Record<string, { path: string; content: string; language: FileLanguage }>; // 多文件模式
   analysisResult: string;
   features: unknown;
+  /** 预构建的对话上下文块，用于工程师阶段注入 */
+  chatContextBlock?: string;
   createdAt: Date;
 }
 
@@ -172,6 +293,10 @@ export interface GenerateOptions {
   prompt: string;
   currentHtml?: string; // 向后兼容：单文件模式
   currentFiles?: Record<string, { path: string; content: string; language: FileLanguage }>; // 多文件模式
+  /** 多轮对话上下文：最近的对话轮次（用户+助手交替） */
+  chatTurns?: ChatTurnInput[];
+  /** 原始需求（首次用户输入），用于标注"用户最初需求" */
+  originalRequest?: string;
   abortSignal?: AbortSignal;
   onEvent: (event: LLMEvent) => void;
 }
@@ -348,7 +473,7 @@ export function isCompleteHtmlDocument(html: string): boolean {
  * @param waitForApproval - 是否等待批准（默认 true）
  */
 export async function generateWithStages(options: GenerateOptions): Promise<void> {
-  const { prompt, currentHtml, currentFiles, abortSignal, onEvent } = options;
+  const { prompt, currentHtml, currentFiles, chatTurns, originalRequest, abortSignal, onEvent } = options;
   const requestId = crypto.randomUUID();
   const controller = new AbortController();
 
@@ -377,7 +502,12 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
       analysisMessages[0] = { role: 'system', content: ANALYST_SYSTEM_PROMPT + '\n\n' + iterationPrompt };
     }
 
-    analysisMessages.push({ role: 'user', content: prompt });
+    // 构建对话上下文块（多轮修改时注入）
+    const chatContextBlock = buildChatContextBlock(chatTurns ?? [], originalRequest);
+    const userContent = chatContextBlock
+      ? `${prompt}\n\n## 此前的对话上下文\n${chatContextBlock}`
+      : prompt;
+    analysisMessages.push({ role: 'user', content: userContent });
 
     const analysisResult = await streamChatCompletion(
       analysisMessages,
@@ -409,6 +539,7 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
       currentFiles,
       analysisResult,
       features,
+      chatContextBlock,
       createdAt: new Date(),
     });
 
@@ -455,7 +586,7 @@ export async function continueAfterApproval(
     : controller.signal;
 
   try {
-    const { prompt, currentHtml, currentFiles, features } = session;
+    const { prompt, currentHtml, currentFiles, features, chatContextBlock } = session;
 
     // 阶段 2：生成
     onEvent({ type: 'stage', payload: { phase: 'generate' } });
@@ -472,6 +603,11 @@ export async function continueAfterApproval(
     // 判断是否为迭代模式
     const isIteration = currentFiles && Object.keys(currentFiles).length > 0;
 
+    // 构建对话上下文附加块
+    const chatContextSection = chatContextBlock
+      ? `\n\n## 此前的对话上下文\n${chatContextBlock}`
+      : '';
+
     if (isIteration && currentFiles) {
       // 迭代模式：传递受影响文件的完整内容
       // 从 features 中提取可能受影响的文件路径（简化：传递所有文件）
@@ -480,7 +616,7 @@ export async function continueAfterApproval(
 
       generateMessages.push({
         role: 'user',
-        content: `## 功能清单\n${featureListStr}\n\n## 当前项目文件\n${affectedFilesContent}\n\n## 用户修改需求\n${prompt}\n\n请根据修改需求更新需要变更的文件（只输出变更的文件，未变更的文件不需要输出）。`,
+        content: `## 功能清单\n${featureListStr}\n\n## 当前项目文件\n${affectedFilesContent}\n\n## 用户修改需求\n${prompt}${chatContextSection}\n\n请根据修改需求更新需要变更的文件（只输出变更的文件，未变更的文件不需要输出）。`,
       });
     } else {
       // 首次生成模式

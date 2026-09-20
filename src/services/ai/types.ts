@@ -196,15 +196,34 @@ export function canTransition(from: GenerationStatus, to: GenerationStatus): boo
 
 /* ---------------- 迭代选项与引擎接口 ---------------- */
 
+/** 对话轮次（用于多轮上下文传递） */
+export interface ChatTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 /** 迭代生成的可选上下文，由调用方从当前项目状态提取后传入 */
 export interface GenerateOptions {
-  /** 此前应用的一句话摘要，填入分析师模板的 {{RECENT_CONTEXT}} */
+  /** 此前应用的一句话摘要（遗留字段，后端未使用） */
   recentContext?: string;
   /**
    * 当前最新完整 HTML。提供时工程师阶段改用修复模板（{{CURRENT_HTML}} 全量重生成，
    * 抑制无谓改动），对应 docs/tech-ai-pipeline.md 4.2 的迭代策略。
    */
   currentHtml?: string;
+  /**
+   * 当前项目文件（多文件模式）。提供时服务端按迭代模式处理，保留未变更文件。
+   */
+  currentFiles?: Record<string, { path: string; content: string; language: string }>;
+  /**
+   * 多轮对话上下文：最近的对话轮次（用户 + 助手交替）。
+   * 服务端从中选取最近 N 条用户指令构建上下文块。
+   */
+  chatTurns?: readonly ChatTurn[];
+  /**
+   * 原始需求（首次用户输入），用于在上下文中标注"用户最初需求"。
+   */
+  originalRequest?: string;
 }
 
 /** 双引擎共同接口：同一事件协议，前端不感知引擎差异 */

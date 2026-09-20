@@ -246,7 +246,8 @@ async function runPipeline(
   try {
     console.log('[liveEngine] 发起请求到后端代理', {
       prompt: prompt.slice(0, 50),
-      hasRecentContext: Boolean(options.recentContext),
+      hasCurrentFiles: Boolean(options.currentFiles),
+      hasChatTurns: Boolean(options.chatTurns),
       hasCurrentHtml: Boolean(options.currentHtml),
     });
 
@@ -260,8 +261,10 @@ async function runPipeline(
       body: JSON.stringify({
         prompt,
         options: {
-          recentContext: options.recentContext,
           currentHtml: options.currentHtml,
+          currentFiles: options.currentFiles,
+          chatTurns: options.chatTurns,
+          originalRequest: options.originalRequest,
         },
       }),
       signal: controller.signal,

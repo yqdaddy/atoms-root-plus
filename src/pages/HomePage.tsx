@@ -10,7 +10,8 @@ import { useProjectStore } from '../stores/projectStore';
 import { useChatStore, getCurrentPhaseText } from '../stores/chatStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useAuthStore } from '../stores/authStore'; // F-001: 首页登录守卫
-import { getAIAPI, type StreamEvent, validateGeneratedHtml, type DemoTemplateId, type FeatureList } from '../services/ai';
+import { saveShare, getShareUrl } from '../utils/share';
+import { getAIAPI, type StreamEvent, type GenerateOptions, validateGeneratedHtml, type DemoTemplateId, type FeatureList } from '../services/ai';
 import { approveAndContinue } from '../services/ai/liveEngine';
 import { cancelActiveRun } from '../services/ai/activeRun';
 import { ENTRY_FILE_PATH, type ChatMessage as ProjectChatMessage, type FileNode as ProjectFileNode } from '../types/project';
@@ -586,10 +587,14 @@ export default function HomePage() {
     setIsGenerating(true);
     setFiles([]); // 重置文件列表
 
-    // 如果已有项目，是多轮修改；否则创建新项目（先建项目，首条用户消息才能入库）
-    if (!currentProject) {
-      createProject('未命名项目');
-    }
+    // 确保项目存在（首条用户消息才能入库）
+    const project = currentProject ?? createProject('未命名项目');
+
+    // 判断是否为迭代：存在历史对话 或 已有生成内容（页面刷新后 currentProject 可能未恢复）
+    const priorChat = project.chat ?? [];
+    const hasExistingFiles = Object.keys(project.files).some(p => p !== ENTRY_FILE_PATH || project.files[p]?.content?.includes('</html>'));
+    const isIteration = priorChat.length > 0 || (generatedHtml && generatedHtml.length > 100) || hasExistingFiles;
+
     // 添加用户消息到持久化层
     addMessage({ role: 'user', content: userMessage });
     updateProjectStatus('generating');
@@ -608,7 +613,35 @@ export default function HomePage() {
     setMessageUIState({ steps: 0, status: 'processing' });
 
     try {
-      const opts = generatedHtml ? { currentHtml: generatedHtml } : {};
+      // 构建 currentFiles：优先使用 project.files，fallback 到 generatedHtml
+      const filesFromProject = Object.entries(project.files)
+        .filter(([path, node]) => path !== ENTRY_FILE_PATH || (node.content && node.content.includes('</html>')))
+        .map(([path, node]) => [path, { path: node.path, content: node.content, language: node.language }]);
+
+      // 如果 project.files 为空但有 generatedHtml，用 generatedHtml 作为 fallback
+      const filesToSend = filesFromProject.length > 0
+        ? Object.fromEntries(filesFromProject)
+        : generatedHtml
+          ? { [ENTRY_FILE_PATH]: { path: ENTRY_FILE_PATH, content: generatedHtml, language: 'html' as const } }
+          : {};
+
+      // 构建生成选项
+      const baseOpts: GenerateOptions = isIteration ? {
+        currentHtml: generatedHtml,
+        currentFiles: filesToSend,
+        // 最近 12 条对话（用户+助手交替），前端预裁剪每条上限 2000 字符
+        chatTurns: priorChat.slice(-12)
+          .filter(m => m.role === 'user' || m.role === 'assistant')
+          .map(m => ({
+            role: m.role as 'user' | 'assistant',
+            content: m.content.slice(0, 2000)
+          })),
+      } : {};
+
+      // 原始需求：首条用户消息（仅在迭代时添加）
+      const firstUserContent = priorChat.find(m => m.role === 'user')?.content?.slice(0, 300);
+      const opts = firstUserContent ? { ...baseOpts, originalRequest: firstUserContent } : baseOpts;
+
       await api.generateStream(llmPrompt, handleStreamEvent, opts);
     } catch (error) {
       const errorMsg = '生成过程发生异常，请重试';
@@ -1065,18 +1098,15 @@ export default function HomePage() {
                 {generatedHtml && (
                   <button
                     onClick={() => {
-                      const blob = new Blob([generatedHtml], { type: 'text/html' });
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = 'app.html';
-                      a.click();
-                      URL.revokeObjectURL(url);
+                      const shareId = saveShare(generatedHtml, currentProject?.name);
+                      const shareUrl = getShareUrl(shareId);
+                      navigator.clipboard.writeText(shareUrl);
+                      toast.success('分享链接已复制到剪贴板');
                     }}
                     className="flex items-center gap-1 text-[11px] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]"
                   >
                     <Icon icon="lucide:share" width={12} height={12} />
-                    分享
+                    复制分享链接
                   </button>
                 )}
               </div>

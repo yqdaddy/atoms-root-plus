@@ -2,6 +2,7 @@ import HomePage from './pages/HomePage';
 import AuthPage from './pages/AuthPage';
 import ProjectsPage from './pages/ProjectsPage';
 import LandingPage from './components/landing/LandingPage';
+import SharePage from './pages/SharePage';
 import { ToastProvider } from './components/Toast';
 import { useLocation, Navigate } from 'react-router-dom';
 import { useAuthStore } from './stores/authStore';
@@ -29,7 +30,10 @@ function App() {
     return <Navigate to={`/login?redirect=${encodeURIComponent(path)}`} replace />;
   }
 
-  if (path === '/login' || path === '/register') {
+  // 分享预览路由（无需登录）
+  if (path.startsWith('/share/')) {
+    page = <SharePage />;
+  } else if (path === '/login' || path === '/register') {
     page = <AuthPage mode={path === '/register' ? 'register' : 'login'} />;
   } else if (path === '/workspace') {
     // 工作台独立路由（HomePage），需登录

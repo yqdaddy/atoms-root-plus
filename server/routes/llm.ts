@@ -51,6 +51,8 @@ llmRouter.post('/generate', async (c) => {
   const prompt = body.prompt.trim();
   const currentHtml = body.options?.currentHtml;
   const currentFiles = body.options?.currentFiles;
+  const chatTurns = parseChatTurns(body.options?.chatTurns);
+  const originalRequest = typeof body.options?.originalRequest === 'string' ? body.options.originalRequest : undefined;
   const requestId = body.requestId;
 
   // 如果有 requestId，检查是否有进行中的请求并取消
@@ -74,6 +76,8 @@ llmRouter.post('/generate', async (c) => {
       prompt,
       currentHtml: typeof currentHtml === 'string' ? currentHtml : undefined,
       currentFiles: typeof currentFiles === 'object' && currentFiles !== null ? currentFiles : undefined,
+      chatTurns,
+      originalRequest,
       onEvent,
     });
 
@@ -219,6 +223,30 @@ const OPTIMIZER_LOCALES: readonly string[] = ['zh-CN', 'en'];
 function clampNumber(value: unknown, min: number, max: number): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
   return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * 解析对话轮次输入：校验数组结构与每个条目的 role/content 类型。
+ * 不合规格式整体丢弃，返回 undefined。
+ * @param value 前端传入的 chatTurns 字段
+ * @param maxItems 最大条目数（防止过大载荷），默认 20
+ */
+function parseChatTurns(value: unknown, maxItems = 20): Array<{ role: 'user' | 'assistant'; content: string }> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  if (value.length === 0) return undefined;
+  if (value.length > maxItems) return undefined;
+
+  const result: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null) return undefined;
+    const obj = item as Record<string, unknown>;
+    if (obj.role !== 'user' && obj.role !== 'assistant') return undefined;
+    if (typeof obj.content !== 'string') return undefined;
+    // 单条消息长度上限（防止极端 payload）
+    if (obj.content.length > 5000) return undefined;
+    result.push({ role: obj.role, content: obj.content });
+  }
+  return result;
 }
 
 /**
