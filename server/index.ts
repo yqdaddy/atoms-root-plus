@@ -77,3 +77,8 @@ serve({
 });
 
 console.log(`Server running on http://localhost:${port}`);
+
+// 通知 pm2 服务已就绪（配合 ecosystem.config.js 的 wait_ready）
+if (process.send) {
+  setTimeout(() => process.send!('ready'), 100);
+}

@@ -345,19 +345,25 @@ export async function continueAfterApproval(
 
     if (combinedSignal.aborted) return;
 
-    // 阶段 3：审查
-    onEvent({ type: 'stage', payload: { stage: 'review' } });
+    // 阶段 3：审查（可跳过以节省内存：SKIP_REVIEW=true）
+    if (process.env.SKIP_REVIEW !== 'true') {
+      onEvent({ type: 'stage', payload: { stage: 'review' } });
 
-    const reviewMessages: ChatMessage[] = [
-      { role: 'system', content: REVIEWER_SYSTEM_PROMPT },
-      { role: 'user', content: `请审查以下代码:\n${generatedHtml}` },
-    ];
+      const reviewMessages: ChatMessage[] = [
+        { role: 'system', content: REVIEWER_SYSTEM_PROMPT },
+        { role: 'user', content: `请审查以下代码:\n${generatedHtml}` },
+      ];
 
-    await streamChatCompletion(
-      reviewMessages,
-      (text) => onEvent({ type: 'delta', payload: { content: text, stage: 'review' } }),
-      combinedSignal
-    );
+      await streamChatCompletion(
+        reviewMessages,
+        (text) => onEvent({ type: 'delta', payload: { content: text, stage: 'review' } }),
+        combinedSignal
+      );
+    } else {
+      // 轻量级审查：仅发送确认
+      onEvent({ type: 'stage', payload: { stage: 'review' } });
+      onEvent({ type: 'delta', payload: { content: '代码生成完成（审查已跳过）', stage: 'review' } });
+    }
 
     if (combinedSignal.aborted) return;
 
