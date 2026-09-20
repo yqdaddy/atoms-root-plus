@@ -65,9 +65,12 @@ jobs:
             cd ${{ secrets.BACKEND_PATH }}
             npm install --production --no-optional
 
-            # 使用 ecosystem.config.js 启动（限制内存 128MB 堆）
+            # 重新编译原生模块（better-sqlite3 需要服务器端编译）
+            npm rebuild better-sqlite3 2>/dev/null || true
+
+            # 使用 ecosystem.config.cjs 启动（限制内存 128MB 堆）
             pm2 delete atoms-backend 2>/dev/null || true
-            pm2 start ecosystem.config.js
+            pm2 start ecosystem.config.cjs
             pm2 save
           "
 
