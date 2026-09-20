@@ -13,10 +13,14 @@ import { useAuthStore } from '../stores/authStore'; // F-001: 首页登录守卫
 import { getAIAPI, type StreamEvent, validateGeneratedHtml, type DemoTemplateId, type FeatureList } from '../services/ai';
 import { approveAndContinue } from '../services/ai/liveEngine';
 import { cancelActiveRun } from '../services/ai/activeRun';
-import { ENTRY_FILE_PATH, type ChatMessage as ProjectChatMessage } from '../types/project';
+import { ENTRY_FILE_PATH, type ChatMessage as ProjectChatMessage, type FileNode as ProjectFileNode } from '../types/project';
 import { toast } from '../components/Toast';
 import { HomeAuthControls } from '../components/AuthControls';
 import SandboxFrame from '../components/SandboxFrame';
+import { FileTreePanel, type TreeNode, type FileNode, buildTree } from '../components/FileTree';
+import { RequirementPanel } from '../components/RequirementPanel';
+import { useOptimizerStore } from '../stores/optimizerStore';
+import type { ConfirmedRequirement, OptimizedRequirement } from '../services/ai/optimizer';
 
 const TEMPLATE_CHIPS: { id: DemoTemplateId; label: string; prompt: string; icon: string }[] = [
   { id: 'todo', label: '待办清单', prompt: '做一个待办清单，可以添加、完成和删除任务', icon: 'lucide:check-square' },
@@ -87,6 +91,24 @@ function revertProjectStatusAfterFailure(): void {
   const { currentProject, updateProjectStatus } = useProjectStore.getState();
   const entryHtml = currentProject?.files[ENTRY_FILE_PATH]?.content ?? '';
   updateProjectStatus(validateGeneratedHtml(entryHtml).ok ? 'ready' : 'draft');
+}
+
+/**
+ * 将确认后的结构化需求组合为流水线提示词。
+ * 三阶段流水线入口只接受纯文本 prompt（AIEngine 契约），
+ * 因此以「原始描述 + 结构化文档 + 修改说明」的富文本形式传递给分析师阶段。
+ */
+function composePipelinePrompt(confirmed: ConfirmedRequirement): string {
+  const parts = [
+    confirmed.originalPrompt,
+    '## 已确认的结构化需求文档',
+    JSON.stringify(confirmed.optimized, null, 2),
+  ];
+  if (confirmed.userEdited && confirmed.editNotes) {
+    parts.push(`## 用户修改说明：${confirmed.editNotes}`);
+  }
+  parts.push('请严格按照以上结构化需求文档生成应用；原始描述与文档冲突时，以文档为准。');
+  return parts.join('\n');
 }
 
 /**
@@ -249,6 +271,44 @@ export default function HomePage() {
 
   // 文件列表（目前只有 index.html，后续可扩展）
   const [files, setFiles] = useState<FileItem[]>([]);
+  // 当前选中的文件路径（用于文件树高亮和代码查看）
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(ENTRY_FILE_PATH);
+
+  // 转换文件列表为文件树结构（使用项目 files）
+  const fileTree: TreeNode[] = useMemo(() => {
+    if (currentProject?.files) {
+      return buildTree(currentProject.files);
+    }
+    // 兼容本地状态（生成中的临时展示）
+    return files.map((file): FileNode => ({
+      id: file.path,
+      name: file.name,
+      path: file.path,
+      type: 'file',
+      fileType: 'html', // 目前只有 HTML
+      status: file.status,
+      size: file.size,
+      lines: file.lines,
+    }));
+  }, [currentProject?.files, files]);
+
+  // 当前选中文件内容
+  const activeFileContent = useMemo(() => {
+    if (!activeFilePath) return generatedHtml;
+    return currentProject?.files[activeFilePath]?.content ?? generatedHtml;
+  }, [activeFilePath, currentProject?.files, generatedHtml]);
+
+  // 处理文件选择
+  const handleFileSelect = useCallback((path: string) => {
+    setActiveFilePath(path);
+    // 可选：更新 URL hash 支持书签
+    window.location.hash = `file=${encodeURIComponent(path)}`;
+  }, []);
+
+  // 处理目录展开/收起（目前没有目录，预留扩展）
+  const handleFolderToggle = useCallback((_path: string) => {
+    // 预留：多文件项目时实现目录展开/收起
+  }, []);
 
   // 自动滚动到底部
   useEffect(() => {
@@ -300,9 +360,17 @@ export default function HomePage() {
     }
   }, [isGenerating, streamBuffer.stage, streamingText, generatedHtml]);
 
-  const { createProject, updateEntryFile, updateProjectStatus, addMessage } = useProjectStore();
+  const { createProject, updateEntryFile, updateFiles, updateProjectStatus, addMessage } = useProjectStore();
   const { startGeneration, updateStage, appendDelta, finishGeneration, setError, setAwaitingApproval } = useChatStore();
   const { apiKey, getEffectiveBaseURL } = useSettingsStore();
+
+  // 提示词优化器（需求确认前置流程）
+  const optimizerEnabled = useOptimizerStore((state) => state.enabled);
+  const optimizerResult = useOptimizerStore((state) => state.result);
+  const isOptimizing = useOptimizerStore((state) => state.isOptimizing);
+  const optimizerError = useOptimizerStore((state) => state.error);
+  const optimizerStreamText = useOptimizerStore((state) => state.streamText);
+  const optimizerOriginalPrompt = useOptimizerStore((state) => state.originalPrompt);
 
   // 从持久化层读取消息，并合并当前生成中的 UI 状态
   const messages = useMemo((): UIMessage[] => {
@@ -369,12 +437,48 @@ export default function HomePage() {
           console.log('[HomePage] done 事件:', {
             htmlLength: event.payload.html?.length || 0,
             htmlPreview: event.payload.html?.slice(0, 200) || '(empty)',
+            hasFiles: !!(event.payload as { files?: Record<string, ProjectFileNode> }).files,
           });
-          const validation = validateGeneratedHtml(event.payload.html);
-          console.log('[HomePage] 验证结果:', validation);
 
-          // 即使验证失败，也保存 HTML（降级方案）
-          if (event.payload.html && event.payload.html.length > 0) {
+          // 兼容多文件格式：检查 payload.files 是否存在
+          const payload = event.payload as { html?: string; files?: Record<string, ProjectFileNode>; warnings?: string[] };
+          const hasFiles = payload.files && Object.keys(payload.files).length > 0;
+
+          if (hasFiles) {
+            // 多文件模式
+            const files = payload.files!;
+            console.log('[HomePage] 多文件模式，文件数:', Object.keys(files).length);
+
+            // 获取入口文件内容用于验证
+            const entryPath = (event.payload as { entryFile?: string }).entryFile ?? ENTRY_FILE_PATH;
+            const entryContent = files[entryPath]?.content ?? files[ENTRY_FILE_PATH]?.content ?? '';
+            const validation = validateGeneratedHtml(entryContent);
+
+            // 保存多文件
+            updateFiles(files, entryPath);
+            updateProjectStatus(validation.ok ? 'ready' : 'draft');
+            finishGeneration();
+            setIsGenerating(false);
+
+            if (validation.ok) {
+              addMessage({ role: 'assistant', content: `应用已生成完成！共 ${Object.keys(files).length} 个文件。你可以继续描述需求来修改它。` });
+              toast.success('生成完成');
+            } else {
+              const warningMsg = `生成完成，但代码存在 ${validation.issues.length} 个问题，可能影响功能`;
+              addMessage({ role: 'assistant', content: warningMsg });
+              toast.info(warningMsg);
+              console.warn('[HomePage] 验证问题:', validation.issues);
+            }
+
+            // 清除 UI 状态
+            setPendingMessageId(null);
+            setMessageUIState(null);
+          } else if (event.payload.html && event.payload.html.length > 0) {
+            // 单文件模式（向后兼容）
+            console.log('[HomePage] 单文件模式');
+            const validation = validateGeneratedHtml(event.payload.html);
+            console.log('[HomePage] 验证结果:', validation);
+
             console.log('[HomePage] 调用 updateEntryFile');
             updateEntryFile(event.payload.html);
             console.log('[HomePage] updateEntryFile 完成');
@@ -444,7 +548,7 @@ export default function HomePage() {
         }
       }
     },
-    [updateStage, appendDelta, updateEntryFile, updateProjectStatus, setError, addMessage, setAwaitingApproval]
+    [updateStage, appendDelta, updateEntryFile, updateFiles, updateProjectStatus, setError, addMessage, setAwaitingApproval]
   );
 
   // 批准后继续生成
@@ -471,16 +575,14 @@ export default function HomePage() {
     }
   }, [handleStreamEvent, updateProjectStatus, startGeneration, setError, addMessage, setAwaitingApproval]);
 
-  const handleSubmit = useCallback(async () => {
-    if (!inputValue.trim() || isGenerating) return;
+  /**
+   * 执行一次三阶段流水线生成。
+   * @param userMessage 展示在对话区的用户消息（原始需求）
+   * @param llmPrompt 实际发给模型的内容（原始需求或附带结构化文档的富输入）
+   */
+  const runGeneration = useCallback(async (userMessage: string, llmPrompt: string) => {
+    if (!userMessage.trim() || isGenerating) return;
 
-    // F-001: 未登录时阻止创建，跳转到登录页
-    if (!isLoggedIn) {
-      navigate('/login?redirect=%2Fworkspace');
-      return;
-    }
-
-    const prompt = inputValue.trim();
     setIsGenerating(true);
     setFiles([]); // 重置文件列表
 
@@ -489,11 +591,8 @@ export default function HomePage() {
       createProject('未命名项目');
     }
     // 添加用户消息到持久化层
-    addMessage({ role: 'user', content: prompt });
+    addMessage({ role: 'user', content: userMessage });
     updateProjectStatus('generating');
-
-    // 重置输入
-    setInputValue('');
 
     // 获取 AI API
     const baseURL = getEffectiveBaseURL();
@@ -510,7 +609,7 @@ export default function HomePage() {
 
     try {
       const opts = generatedHtml ? { currentHtml: generatedHtml } : {};
-      await api.generateStream(prompt, handleStreamEvent, opts);
+      await api.generateStream(llmPrompt, handleStreamEvent, opts);
     } catch (error) {
       const errorMsg = '生成过程发生异常，请重试';
       setError(errorMsg);
@@ -523,7 +622,6 @@ export default function HomePage() {
       setPendingMessageId(null);
     }
   }, [
-    inputValue,
     isGenerating,
     currentProject,
     createProject,
@@ -534,10 +632,75 @@ export default function HomePage() {
     handleStreamEvent,
     generatedHtml,
     setError,
-    isLoggedIn,
-    navigate,
     addMessage,
   ]);
+
+  // 直接生成：跳过优化器，以原始输入进入流水线
+  const handleSubmit = useCallback(() => {
+    if (!inputValue.trim() || isGenerating || isOptimizing) return;
+
+    // F-001: 未登录时阻止创建，跳转到登录页
+    if (!isLoggedIn) {
+      navigate('/login?redirect=%2Fworkspace');
+      return;
+    }
+
+    const prompt = inputValue.trim();
+    setInputValue('');
+    void runGeneration(prompt, prompt);
+  }, [inputValue, isGenerating, isOptimizing, isLoggedIn, navigate, runGeneration]);
+
+  // 帮我完善需求：触发提示词优化器（需求确认前置流程）
+  const handleStartOptimize = useCallback(() => {
+    if (!inputValue.trim() || isGenerating || isOptimizing) return;
+
+    if (!isLoggedIn) {
+      navigate('/login?redirect=%2Fworkspace');
+      return;
+    }
+
+    void useOptimizerStore.getState().startOptimize(inputValue.trim());
+  }, [inputValue, isGenerating, isOptimizing, isLoggedIn, navigate]);
+
+  // 取消：优化中取消请求；确认阶段放弃本次需求（回到输入状态，不产生文件变更）
+  const handleOptimizerCancel = useCallback(() => {
+    if (useOptimizerStore.getState().isOptimizing) {
+      useOptimizerStore.getState().cancelOptimize();
+      toast.info('已取消需求分析');
+      return;
+    }
+    useOptimizerStore.getState().skip();
+    toast.info('已取消本次需求，可继续修改描述');
+  }, []);
+
+  // 优化失败后重试
+  const handleOptimizerRetry = useCallback(() => {
+    const prompt = useOptimizerStore.getState().originalPrompt;
+    if (!prompt) return;
+    void useOptimizerStore.getState().startOptimize(prompt);
+  }, []);
+
+  // 一键接受：按当前结构化需求进入流水线
+  const handleOptimizerAccept = useCallback(() => {
+    const store = useOptimizerStore.getState();
+    store.accept();
+    const confirmed = useOptimizerStore.getState().buildConfirmedRequirement();
+    if (!confirmed) return;
+    useOptimizerStore.getState().reset();
+    setInputValue('');
+    void runGeneration(confirmed.originalPrompt, composePipelinePrompt(confirmed));
+  }, [runGeneration]);
+
+  // 编辑后接受：携带修改后的需求进入流水线
+  const handleOptimizerAcceptWithEdits = useCallback((edited: OptimizedRequirement, notes: string) => {
+    const store = useOptimizerStore.getState();
+    store.acceptWithEdits(edited, notes);
+    const confirmed = useOptimizerStore.getState().buildConfirmedRequirement();
+    if (!confirmed) return;
+    useOptimizerStore.getState().reset();
+    setInputValue('');
+    void runGeneration(confirmed.originalPrompt, composePipelinePrompt(confirmed));
+  }, [runGeneration]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -624,7 +787,7 @@ export default function HomePage() {
           {/* Chat messages area */}
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
             {/* Welcome message：只要当前是新会话就展示（与历史项目无关） */}
-            {messages.length === 0 && !isGenerating && (
+            {messages.length === 0 && !isGenerating && !isOptimizing && (
               <div className="text-center py-8">
                 <div className="w-12 h-12 rounded-full bg-[var(--color-accent)]/10 flex items-center justify-center mx-auto mb-4">
                   <Icon icon="lucide:sparkles" width={24} height={24} className="text-[var(--color-accent)]" />
@@ -637,7 +800,7 @@ export default function HomePage() {
             )}
 
             {/* Template chips：与欢迎语同条件，新会话始终展示模板入口 */}
-            {messages.length === 0 && !isGenerating && (
+            {messages.length === 0 && !isGenerating && !isOptimizing && (
               <div className="flex flex-wrap justify-center gap-2 pb-4">
                 {TEMPLATE_CHIPS.map((chip) => (
                   <button
@@ -719,6 +882,21 @@ export default function HomePage() {
                   )}
                 </div>
               </div>
+            )}
+
+            {/* 需求确认面板：优化器流式分析中 / 待确认 / 优化失败 */}
+            {(isOptimizing || optimizerResult || optimizerError) && (
+              <RequirementPanel
+                requirement={optimizerResult}
+                isOptimizing={isOptimizing}
+                streamText={optimizerStreamText}
+                error={optimizerError}
+                originalPrompt={optimizerOriginalPrompt}
+                onAccept={handleOptimizerAccept}
+                onAcceptWithEdits={handleOptimizerAcceptWithEdits}
+                onCancel={handleOptimizerCancel}
+                onRetry={handleOptimizerRetry}
+              />
             )}
 
             {/* 生成状态面板 */}
@@ -836,8 +1014,12 @@ export default function HomePage() {
                 value={inputValue}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
-                placeholder={isGenerating ? '正在生成中...' : isLoggedIn ? '让智能体团队实现你的想法' : '登录后开始创建应用'}
-                disabled={isGenerating || !isLoggedIn}
+                placeholder={
+                  isGenerating ? '正在生成中...' :
+                  isOptimizing ? '正在分析需求...' :
+                  isLoggedIn ? '让智能体团队实现你的想法' : '登录后开始创建应用'
+                }
+                disabled={isGenerating || isOptimizing || !isLoggedIn}
                 onClick={() => {
                   // F-001: 未登录时点击输入框跳转到登录页
                   if (!isLoggedIn) {
@@ -849,33 +1031,55 @@ export default function HomePage() {
               />
               <button
                 onClick={handleSubmit}
-                disabled={!inputValue.trim() || isGenerating}
+                disabled={!inputValue.trim() || isGenerating || isOptimizing}
                 className="absolute right-3 bottom-3 flex items-center justify-center w-8 h-8 rounded-lg bg-[var(--color-accent)] text-white disabled:bg-transparent disabled:text-[var(--color-text-tertiary)] disabled:border disabled:border-[var(--color-border-default)] transition-all hover:bg-[var(--color-accent-hover)] active:scale-95"
               >
                 <Icon icon={isGenerating ? 'lucide:loader-2' : 'lucide:send'} width={16} height={16} className={isGenerating ? 'animate-spin' : ''} />
               </button>
             </div>
-            <div className="flex items-center justify-between mt-2">
-              <p className="text-[11px] text-[var(--color-text-tertiary)]">
+            <div className="flex items-center justify-between mt-2 gap-2">
+              <p className="text-[11px] text-[var(--color-text-tertiary)] shrink-0">
                 按 Enter 发送 · Shift+Enter 换行
               </p>
-              {generatedHtml && (
+              <div className="flex items-center gap-2">
+                {optimizerEnabled && (
+                  <button
+                    onClick={handleStartOptimize}
+                    disabled={!inputValue.trim() || isGenerating || isOptimizing}
+                    title="AI 先梳理需求并生成结构化文档，确认后再开始生成"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] text-[var(--color-accent)] border border-[var(--color-accent)]/40 hover:bg-[var(--color-accent)]/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Icon icon="lucide:sparkles" width={13} height={13} />
+                    帮我完善需求
+                  </button>
+                )}
                 <button
-                  onClick={() => {
-                    const blob = new Blob([generatedHtml], { type: 'text/html' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = 'app.html';
-                    a.click();
-                    URL.revokeObjectURL(url);
-                  }}
-                  className="flex items-center gap-1 text-[11px] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]"
+                  onClick={handleSubmit}
+                  disabled={!inputValue.trim() || isGenerating || isOptimizing}
+                  title="跳过需求分析，直接开始生成"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[12px] text-[var(--color-text-secondary)] border border-[var(--color-border-default)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  <Icon icon="lucide:share" width={12} height={12} />
-                  分享
+                  <Icon icon="lucide:play" width={13} height={13} />
+                  直接生成
                 </button>
-              )}
+                {generatedHtml && (
+                  <button
+                    onClick={() => {
+                      const blob = new Blob([generatedHtml], { type: 'text/html' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = 'app.html';
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    className="flex items-center gap-1 text-[11px] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]"
+                  >
+                    <Icon icon="lucide:share" width={12} height={12} />
+                    分享
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -994,11 +1198,11 @@ export default function HomePage() {
                   {generatedHtml ? (
                     deviceMode === 'mobile' ? (
                       <div className="w-[375px] h-[667px] rounded-[2rem] border-8 border-[var(--color-border-strong)] overflow-hidden shadow-2xl bg-white">
-                        <SandboxFrame html={generatedHtml} />
+                        <SandboxFrame html={generatedHtml} files={currentProject?.files} />
                       </div>
                     ) : (
                       <div className="w-full h-full">
-                        <SandboxFrame html={generatedHtml} />
+                        <SandboxFrame html={generatedHtml} files={currentProject?.files} />
                       </div>
                     )
                   ) : (
@@ -1024,32 +1228,47 @@ export default function HomePage() {
                 )}
               </>
             ) : (
-              <div className="flex-1 flex flex-col">
-                {generatedHtml ? (
-                  <>
-                    <div className="px-4 py-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
-                      <span className="text-[12px] text-[var(--color-text-tertiary)]">index.html</span>
-                      <span className="text-[12px] text-[var(--color-text-tertiary)] ml-4">
-                        {(generatedHtml.length / 1024).toFixed(1)} KB
-                      </span>
+              <div className="flex-1 flex overflow-hidden">
+                {/* 文件树 */}
+                <div className="w-48 shrink-0 border-r border-[var(--color-border-default)]">
+                  <FileTreePanel
+                    tree={fileTree}
+                    activeFilePath={activeFilePath}
+                    onFileSelect={handleFileSelect}
+                    onFolderToggle={handleFolderToggle}
+                  />
+                </div>
+
+                {/* 代码区 */}
+                <div className="flex-1 flex flex-col overflow-hidden">
+                  {activeFileContent ? (
+                    <>
+                      <div className="px-4 py-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+                        <span className="text-[12px] text-[var(--color-text-tertiary)]">
+                          {activeFilePath?.split('/').pop() ?? 'index.html'}
+                        </span>
+                        <span className="text-[12px] text-[var(--color-text-tertiary)] ml-4">
+                          {(activeFileContent.length / 1024).toFixed(1)} KB
+                        </span>
+                      </div>
+                      <div
+                        ref={codeRef}
+                        className="flex-1 overflow-auto p-4 font-mono text-[13px] leading-[1.6] bg-[var(--color-bg-surface)]"
+                      >
+                        <pre className="text-[var(--color-text-primary)]">
+                          {highlightHtml(activeFileContent)}
+                        </pre>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="h-full flex items-center justify-center">
+                      <div className="text-center text-[var(--color-text-tertiary)]">
+                        <Icon icon="lucide:file-code" width={48} height={48} className="mx-auto mb-4 opacity-50" />
+                        <p className="text-[14px]">生成的代码将在这里显示</p>
+                      </div>
                     </div>
-                    <div
-                      ref={codeRef}
-                      className="flex-1 overflow-auto p-4 font-mono text-[13px] leading-[1.6] bg-[var(--color-bg-surface)]"
-                    >
-                      <pre className="text-[var(--color-text-primary)]">
-                        {highlightHtml(generatedHtml)}
-                      </pre>
-                    </div>
-                  </>
-                ) : (
-                  <div className="h-full flex items-center justify-center">
-                    <div className="text-center text-[var(--color-text-tertiary)]">
-                      <Icon icon="lucide:file-code" width={48} height={48} className="mx-auto mb-4 opacity-50" />
-                      <p className="text-[14px]">生成的代码将在这里显示</p>
-                    </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             )}
           </div>

@@ -2,7 +2,18 @@
  * LLM 调用核心逻辑。
  * 调用 Agnes AI API，支持流式输出与取消。
  * 支持批准流程：分析完成后暂停等待用户批准。
+ * 支持多文件项目生成：工程师阶段输出 JSON 格式的多文件结构。
  */
+
+import {
+  parseMultiFileOutput,
+  toFileNodeRecord,
+  generateFileTreeSummary,
+  formatAffectedFiles,
+  type MultiFileOutput,
+  type GeneratedFile,
+  type FileLanguage,
+} from './multiFileParser.js';
 
 /** 分析师系统提示词（生成功能清单） */
 const ANALYST_SYSTEM_PROMPT = `你是 Atoms 平台的需求分析师。分析用户需求，输出可在浏览器内实现的功能清单。
@@ -25,28 +36,81 @@ const ANALYST_SYSTEM_PROMPT = `你是 Atoms 平台的需求分析师。分析用
 - 每条功能必须是浏览器内可演示的真实交互
 - 不允许假设后端服务、数据库或第三方接口`;
 
-/** 工程师系统提示词 */
-const ENGINEER_SYSTEM_PROMPT = `你是 Atoms 平台的前端工程师。根据功能清单生成单文件 HTML 应用。
+/** 迭代模式的分析师追加指令 */
+const ANALYST_ITERATION_PROMPT = `## 本次为迭代修改任务
+
+用户会对现有应用提出修改要求。你的 features 列表描述的是"本次需要落地的变更项"而非全新功能；must 条目即本次必须完成的修改。请在 assumptions 中列出你无法从描述中确定的点。
+
+## 现有项目文件结构
+{{FILE_TREE_SUMMARY}}
+
+请基于现有项目理解当前功能，仅针对用户的新需求或修改要求输出变更项。`;
+
+/** 工程师系统提示词（多文件项目生成） */
+const ENGINEER_SYSTEM_PROMPT = `你是 Atoms 平台的前端工程师。你根据功能清单生成一个多文件结构的前端项目。你输出 JSON 格式的文件列表。
+
+## 输出格式
+只输出一个 JSON 对象，禁止输出任何解释文字。结构如下：
+{
+  "files": [
+    { "path": "/index.html", "content": "文件内容", "language": "html" },
+    { "path": "/styles/main.css", "content": "文件内容", "language": "css" },
+    { "path": "/src/main.js", "content": "文件内容", "language": "javascript" }
+  ]
+}
+
+## 文件组织规范
+1. 入口文件必须是 /index.html
+2. CSS 文件放在 /styles/ 目录
+3. JavaScript 文件放在 /src/ 目录，可进一步分 /src/components/, /src/utils/
+4. 每个文件内容独立完整，不引用其他本地文件（引用通过路径声明，由组装器处理）
 
 ## 产物铁律
-1. 单文件自包含：全部 HTML/CSS/JS 在一个文件内
-2. 输出第一行是 <!DOCTYPE html>，最后一行是 </html>
-3. 禁止任何后端网络请求，数据持久化只用 localStorage
-4. 外部资源只允许 https://cdn.jsdelivr.net
-5. 禁止手写 SVG 图标，使用 CSS 形状或 Unicode 符号
+1. 所有文件自包含，组装后可在浏览器直接运行
+2. 外部资源只允许 https://cdn.jsdelivr.net
+3. 禁止手写 SVG 图标，使用 CSS 形状或 Unicode 符号
+4. 数据持久化只用 localStorage
 
 ## 设计规范
 - 字体使用系统字体栈：system-ui, "PingFang SC", "Microsoft YaHei", sans-serif
 - 禁用紫色渐变，使用明确主题色加中性灰阶
 - 布局响应式，移动端不塌陷
-- CSS 集中在 <style>，JS 集中在 </body> 前的 <script>`;
+- 中文文案使用中文标点
+
+## 引用规范
+在 index.html 中引用其他文件：
+- CSS: <link rel="stylesheet" href="./styles/main.css">
+- JS: <script src="./src/main.js"></script>
+这些引用会在预览时由组装器内联替换。
+
+## 输出前自检
+输出结束前逐条确认：所有标签闭合；<script> 内无语法错误；功能清单中 priority 为 must 的功能全部有对应实现；无白名单外资源。`;
 
 /** 审查者系统提示词 */
-const REVIEWER_SYSTEM_PROMPT = `你是代码审查员。检查生成的代码质量。
+const REVIEWER_SYSTEM_PROMPT = `你是 Atoms 平台的质量审查者。你审查多文件项目是否合格交付。你不重写代码，只输出审查结论。
 
-检查要点：结构完整、脚本可执行、功能覆盖、交互真实、资源合规、体验底线
+## 审查维度（按顺序逐条检查）
+1. 结构完整：有 /index.html 入口文件，且 HTML 有 <!DOCTYPE html>、<html>、<head>、<body> 且标签全部闭合
+2. 脚本可执行：每个 .js 文件内无明显语法错误；HTML 中引用的 JS 文件路径在 files 中存在
+3. 样式合规：HTML 中引用的 CSS 文件路径在 files 中存在
+4. 功能覆盖：功能清单中 priority 为 must 的每条功能在代码中有对应实现
+5. 交互真实：按钮与表单有事件绑定和对应处理逻辑，不是纯静态
+6. 资源合规：外部资源只允许来自 cdn.jsdelivr.net
+7. 体验底线：首屏有可见内容；无紫色渐变；未使用 Inter 字体
 
-输出格式：直接列出发现的问题（如有）或确认"代码质量良好"。`;
+## 输出格式
+只输出一个 JSON 对象，禁止输出其他任何文字：
+{
+  "pass": true 或 false,
+  "checks": [
+    { "item": "结构完整", "pass": true, "note": "一句话说明，20 字以内" }
+  ],
+  "repairInstructions": [],
+  "missingFiles": ["不存在的文件路径列表"]
+}
+约束：checks 必须覆盖上述 7 个维度。
+pass 为 false 时 repairInstructions 必填：最多 3 条，每条是一个具体、可独立执行的修复指令。
+pass 为 true 时 repairInstructions 必须是空数组，missingFiles 必须是空数组。`;
 
 /**
  * SSE 事件类型
@@ -60,7 +124,8 @@ export interface LLMEvent {
     text?: string;
     analysis?: string; // 分析结果 JSON 字符串
     features?: unknown; // 功能清单
-    html?: string;
+    html?: string; // 单文件 HTML（向后兼容）
+    files?: Record<string, { path: string; content: string; language: FileLanguage; updatedAt: string }>; // 多文件结构
     message?: string;
     sessionId?: string; // 会话 ID，用于批准后继续
   };
@@ -71,7 +136,8 @@ export interface LLMEvent {
  */
 interface PendingSession {
   prompt: string;
-  currentHtml?: string;
+  currentHtml?: string; // 向后兼容：单文件模式
+  currentFiles?: Record<string, { path: string; content: string; language: FileLanguage }>; // 多文件模式
   analysisResult: string;
   features: unknown;
   createdAt: Date;
@@ -99,7 +165,8 @@ export function deletePendingSession(sessionId: string): boolean {
  */
 export interface GenerateOptions {
   prompt: string;
-  currentHtml?: string;
+  currentHtml?: string; // 向后兼容：单文件模式
+  currentFiles?: Record<string, { path: string; content: string; language: FileLanguage }>; // 多文件模式
   abortSignal?: AbortSignal;
   onEvent: (event: LLMEvent) => void;
 }
@@ -107,9 +174,23 @@ export interface GenerateOptions {
 /**
  * 对话消息
  */
-interface ChatMessage {
+export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+}
+
+/**
+ * 单次调用的可覆盖参数（可选，缺省走环境变量与既有默认值）。
+ * model 默认不开放给客户端覆盖：服务端以 LLM_MODEL 为准，避免前端传入
+ * 上游不认识的模型名导致 4xx。
+ */
+export interface StreamChatCallOptions {
+  /** 覆盖模型名（默认取 LLM_MODEL 环境变量） */
+  model?: string;
+  /** 覆盖 max_tokens 上限（默认 8192） */
+  maxTokens?: number;
+  /** 采样温度；不传则不下发该字段，由上游默认值决定 */
+  temperature?: number;
 }
 
 /**
@@ -134,10 +215,11 @@ export function cancelGeneration(requestId: string): boolean {
 /**
  * 调用 OpenAI 兼容 API 流式生成
  */
-async function streamChatCompletion(
+export async function streamChatCompletion(
   messages: ChatMessage[],
   onDelta: (text: string) => void,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  callOptions?: StreamChatCallOptions
 ): Promise<string> {
   const apiKey = process.env.LLM_API_KEY;
 
@@ -148,21 +230,27 @@ async function streamChatCompletion(
   const baseUrl = (process.env.LLM_BASE_URL || 'https://api.agnes-ai.cn/v1').replace(/\/+$/, '');
   const model = process.env.LLM_MODEL || 'agnes-3.0-flash';
 
+  const requestBody: Record<string, unknown> = {
+    model: callOptions?.model || model,
+    messages,
+    stream: true,
+    // 完整单文件 HTML 应用实测 12KB+（约 4000-6000 token），4096 会把生成截断在
+    // 半途；8192 提供约 2 倍余量。该值在主流 flash 级模型（含默认的 agnes-3.0-flash）
+    // 输出上限之内；若供应商上限更低，API 会返回 4xx 走已有的 error 事件分支。
+    // 输出较短的调用方（如需求优化器）可通过 callOptions.maxTokens 收紧上限。
+    max_tokens: callOptions?.maxTokens ?? 8192,
+  };
+  if (typeof callOptions?.temperature === 'number') {
+    requestBody.temperature = callOptions.temperature;
+  }
+
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({
-      model,
-      messages,
-      stream: true,
-      // 完整单文件 HTML 应用实测 12KB+（约 4000-6000 token），4096 会把生成截断在
-      // 半途；8192 提供约 2 倍余量。该值在主流 flash 级模型（含默认的 agnes-3.0-flash）
-      // 输出上限之内；若供应商上限更低，API 会返回 4xx 走已有的 error 事件分支。
-      max_tokens: 8192,
-    }),
+    body: JSON.stringify(requestBody),
     signal: abortSignal,
   });
 
@@ -255,7 +343,7 @@ export function isCompleteHtmlDocument(html: string): boolean {
  * @param waitForApproval - 是否等待批准（默认 true）
  */
 export async function generateWithStages(options: GenerateOptions): Promise<void> {
-  const { prompt, currentHtml, abortSignal, onEvent } = options;
+  const { prompt, currentHtml, currentFiles, abortSignal, onEvent } = options;
   const requestId = crypto.randomUUID();
   const controller = new AbortController();
 
@@ -271,10 +359,20 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
     // 阶段 1：分析
     onEvent({ type: 'stage', payload: { phase: 'analysis' } });
 
+    // 构建分析师消息
     const analysisMessages: ChatMessage[] = [
       { role: 'system', content: ANALYST_SYSTEM_PROMPT },
-      { role: 'user', content: prompt },
     ];
+
+    // 迭代模式：添加文件树摘要
+    const isIteration = currentFiles && Object.keys(currentFiles).length > 0;
+    if (isIteration && currentFiles) {
+      const fileTreeSummary = generateFileTreeSummary(currentFiles);
+      const iterationPrompt = ANALYST_ITERATION_PROMPT.replace('{{FILE_TREE_SUMMARY}}', fileTreeSummary);
+      analysisMessages[0] = { role: 'system', content: ANALYST_SYSTEM_PROMPT + '\n\n' + iterationPrompt };
+    }
+
+    analysisMessages.push({ role: 'user', content: prompt });
 
     const analysisResult = await streamChatCompletion(
       analysisMessages,
@@ -303,6 +401,7 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
     pendingSessions.set(sessionId, {
       prompt,
       currentHtml,
+      currentFiles,
       analysisResult,
       features,
       createdAt: new Date(),
@@ -332,7 +431,7 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
 }
 
 /**
- * 批准后继续生成
+ * 批准后继续生成（多文件模式）
  */
 export async function continueAfterApproval(
   sessionId: string,
@@ -351,7 +450,7 @@ export async function continueAfterApproval(
     : controller.signal;
 
   try {
-    const { prompt, currentHtml, features } = session;
+    const { prompt, currentHtml, currentFiles, features } = session;
 
     // 阶段 2：生成
     onEvent({ type: 'stage', payload: { phase: 'generate' } });
@@ -360,21 +459,37 @@ export async function continueAfterApproval(
       ? features
       : JSON.stringify(features, null, 2);
 
+    // 构建工程师消息
     const generateMessages: ChatMessage[] = [
       { role: 'system', content: ENGINEER_SYSTEM_PROMPT },
-      {
-        role: 'user',
-        content: currentHtml
-          ? `## 功能清单\n${featureListStr}\n\n## 当前代码\n${currentHtml}\n\n## 用户修改需求\n${prompt}\n\n请根据修改需求更新代码。`
-          : `## 功能清单\n${featureListStr}\n\n## 用户需求\n${prompt}\n\n请生成完整的单页应用。`,
-      },
     ];
 
-    let accumulatedHtml = '';
-    const generatedHtml = await streamChatCompletion(
+    // 判断是否为迭代模式
+    const isIteration = currentFiles && Object.keys(currentFiles).length > 0;
+
+    if (isIteration && currentFiles) {
+      // 迭代模式：传递受影响文件的完整内容
+      // 从 features 中提取可能受影响的文件路径（简化：传递所有文件）
+      const affectedPaths = Object.keys(currentFiles);
+      const affectedFilesContent = formatAffectedFiles(currentFiles, affectedPaths);
+
+      generateMessages.push({
+        role: 'user',
+        content: `## 功能清单\n${featureListStr}\n\n## 当前项目文件\n${affectedFilesContent}\n\n## 用户修改需求\n${prompt}\n\n请根据修改需求更新需要变更的文件（只输出变更的文件，未变更的文件不需要输出）。`,
+      });
+    } else {
+      // 首次生成模式
+      generateMessages.push({
+        role: 'user',
+        content: `## 功能清单\n${featureListStr}\n\n## 用户需求\n${prompt}\n\n请生成完整的多文件项目。`,
+      });
+    }
+
+    let accumulatedOutput = '';
+    const generatedOutput = await streamChatCompletion(
       generateMessages,
       (text) => {
-        accumulatedHtml += text;
+        accumulatedOutput += text;
         onEvent({ type: 'delta', payload: { text, phase: 'generate' } });
       },
       combinedSignal
@@ -382,24 +497,31 @@ export async function continueAfterApproval(
 
     if (combinedSignal.aborted) return;
 
-    // 防御性剥离 LLM 误加的 markdown 围栏，得到干净的 HTML
-    const cleanHtml = stripMarkdownFence(generatedHtml);
-
-    // 截断检测兜底：不完整的 HTML（如被 max_tokens 截断）不发 done，
-    // 改发 error 事件让前端走已有错误分支给用户明确反馈
-    if (!isCompleteHtmlDocument(cleanHtml)) {
+    // 解析多文件输出
+    let multiFileOutput: MultiFileOutput;
+    try {
+      multiFileOutput = parseMultiFileOutput(generatedOutput);
+    } catch (parseError) {
+      const errorMsg = parseError instanceof Error ? parseError.message : '输出解析失败';
+      console.error('[continueAfterApproval] 多文件解析失败:', errorMsg);
       pendingSessions.delete(sessionId);
-      onEvent({ type: 'error', payload: { message: '生成内容不完整，请重试' } });
+      onEvent({ type: 'error', payload: { message: `生成输出格式错误: ${errorMsg}` } });
       return;
     }
+
+    // 合并文件：迭代模式下保留未变更文件
+    const finalFiles = isIteration && currentFiles
+      ? toFileNodeRecord(multiFileOutput, currentFiles)
+      : toFileNodeRecord(multiFileOutput);
 
     // 阶段 3：审查（可跳过以节省内存：SKIP_REVIEW=true）
     if (process.env.SKIP_REVIEW !== 'true') {
       onEvent({ type: 'stage', payload: { phase: 'review' } });
 
+      const filesJson = JSON.stringify(multiFileOutput, null, 2);
       const reviewMessages: ChatMessage[] = [
         { role: 'system', content: REVIEWER_SYSTEM_PROMPT },
-        { role: 'user', content: `请审查以下代码:\n${cleanHtml}` },
+        { role: 'user', content: `## 功能清单\n${featureListStr}\n\n## 待审查的项目文件\n${filesJson}\n\n请审查这个多文件项目。` },
       ];
 
       await streamChatCompletion(
@@ -415,8 +537,36 @@ export async function continueAfterApproval(
 
     if (combinedSignal.aborted) return;
 
-    // 完成
-    onEvent({ type: 'done', payload: { html: cleanHtml } });
+    // 组装单文件 HTML（用于向后兼容和预览）
+    // 从入口文件开始，内联所有引用
+    const indexFile = multiFileOutput.files.find(f => f.path === '/index.html');
+    let assembledHtml = indexFile?.content || '';
+
+    // 简单内联 CSS 和 JS 引用
+    if (indexFile) {
+      // 内联 CSS
+      for (const file of multiFileOutput.files.filter(f => f.language === 'css')) {
+        const relativePath = '.' + file.path;
+        const linkPattern = new RegExp(`<link[^>]*href=["']${escapeRegExp(relativePath)}["'][^>]*>`, 'gi');
+        assembledHtml = assembledHtml.replace(linkPattern, `<style>\n${file.content}\n</style>`);
+      }
+
+      // 内联 JS
+      for (const file of multiFileOutput.files.filter(f => f.language === 'javascript')) {
+        const relativePath = '.' + file.path;
+        const scriptPattern = new RegExp(`<script[^>]*src=["']${escapeRegExp(relativePath)}["'][^>]*>\\s*<\\/script>`, 'gi');
+        assembledHtml = assembledHtml.replace(scriptPattern, `<script>\n${file.content}\n</script>`);
+      }
+    }
+
+    // 完成：同时返回 html（向后兼容）和 files（多文件结构）
+    onEvent({
+      type: 'done',
+      payload: {
+        html: assembledHtml,
+        files: finalFiles,
+      },
+    });
 
     // 清理会话
     pendingSessions.delete(sessionId);
@@ -428,4 +578,11 @@ export async function continueAfterApproval(
       onEvent({ type: 'error', payload: { message } });
     }
   }
+}
+
+/**
+ * 转义正则表达式特殊字符
+ */
+function escapeRegExp(string: string): string {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

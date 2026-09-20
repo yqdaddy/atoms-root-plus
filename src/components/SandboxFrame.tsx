@@ -1,6 +1,7 @@
 /**
  * SandboxFrame 组件：iframe 沙箱预览。
  * 使用 srcdoc + sandbox 属性隔离执行生成的应用代码。
+ * 支持单文件和多文件项目：多文件项目通过 assembler 组装为单文件后预览。
  */
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Icon } from '@iconify/react';
@@ -10,13 +11,18 @@ import {
   parseSandboxMessage,
   DEFAULT_CDN_HOSTS,
 } from '../types/sandbox';
-import type { SandboxAllowFlag } from '../types/project';
+import type { SandboxAllowFlag, FileNode } from '../types/project';
 import { useSettingsStore, type DeviceMode, DEVICE_VIEWPORTS } from '../stores/settingsStore';
+import { assembleFiles } from '../services/sandbox/assembler';
 import CodeViewer from './CodeViewer';
 
 interface SandboxFrameProps {
-  /** 生成的 HTML 代码 */
-  html: string;
+  /** 生成的 HTML 代码（单文件模式，向后兼容） */
+  html?: string;
+  /** 多文件项目（多文件模式） */
+  files?: Record<string, FileNode> | undefined;
+  /** 入口文件路径（多文件模式），默认 /index.html */
+  entryFile?: string;
   /** 额外的 sandbox 标志 */
   extraSandboxFlags?: readonly SandboxAllowFlag[];
   /** 自定义 CDN 主机白名单 */
@@ -106,8 +112,50 @@ function assemblePreviewHtml(
   }
 }
 
+/** 判断是否为多文件项目 */
+function isMultiFile(files: Record<string, FileNode> | undefined): boolean {
+  if (!files) return false;
+  const paths = Object.keys(files);
+  if (paths.length > 1) return true;
+  if (paths.length === 1 && paths[0] !== '/index.html') return true;
+  return false;
+}
+
+/** 获取最终的预览 HTML */
+function getPreviewHtml(
+  html: string | undefined,
+  files: Record<string, FileNode> | undefined,
+  entryFile: string
+): string {
+  // 多文件模式：调用 assembler 组装
+  if (files && isMultiFile(files)) {
+    const result = assembleFiles(files, entryFile);
+
+    // 记录组装警告
+    if (result.warnings.length > 0) {
+      console.warn('[SandboxFrame] 组装警告:', result.warnings);
+    }
+
+    return result.html;
+  }
+
+  // 单文件模式：直接使用 html 或 files 中的入口文件
+  if (html) {
+    return html;
+  }
+
+  if (files) {
+    const entry = files[entryFile] ?? files['/index.html'];
+    return entry?.content ?? '';
+  }
+
+  return '';
+}
+
 export default function SandboxFrame({
   html,
+  files,
+  entryFile = '/index.html',
   extraSandboxFlags = [],
   cdnHosts = DEFAULT_CDN_HOSTS,
   onReady,
@@ -123,10 +171,16 @@ export default function SandboxFrame({
   // 组装沙箱属性
   const sandboxAttr = useMemo(() => buildSandboxAttribute(extraSandboxFlags), [extraSandboxFlags]);
 
-  // 组装预览 HTML
+  // 获取最终预览 HTML（支持多文件）
+  const previewSourceHtml = useMemo(
+    () => getPreviewHtml(html, files, entryFile),
+    [html, files, entryFile]
+  );
+
+  // 组装预览 HTML（注入 CSP 和桥接脚本）
   const previewHtml = useMemo(
-    () => assemblePreviewHtml(html, sessionId, cdnHosts),
-    [html, sessionId, cdnHosts]
+    () => assemblePreviewHtml(previewSourceHtml, sessionId, cdnHosts),
+    [previewSourceHtml, sessionId, cdnHosts]
   );
 
   // 监听来自沙箱的消息
@@ -265,7 +319,9 @@ export default function SandboxFrame({
       <CodeViewer
         isOpen={isCodeViewerOpen}
         onClose={() => setIsCodeViewerOpen(false)}
-        code={html}
+        html={previewSourceHtml}
+        files={files}
+        entryFile={entryFile}
         fileName="index.html"
       />
     </div>

@@ -42,10 +42,10 @@ export const ANALYST_ITERATION_BLOCK = `## 本次为迭代修改任务
 must 条目即本次必须完成的修改。请在 assumptions 中列出你无法从描述中确定的点。`;
 
 /** 迭代轮次追加到分析师 User Prompt 的当前代码块 */
-export const ANALYST_ITERATION_CONTEXT_BLOCK = `## 现有应用完整代码
-{{CURRENT_HTML}}
+export const ANALYST_ITERATION_CONTEXT_BLOCK = `## 现有项目文件结构
+{{FILE_TREE_SUMMARY}}
 
-请基于现有代码理解当前功能，仅针对用户的新需求或修改要求输出变更项。`;
+请基于现有项目理解当前功能，仅针对用户的新需求或修改要求输出变更项。`;
 
 export const ANALYST_USER_PROMPT_TEMPLATE = `用户需求：{{USER_PROMPT}}
 
@@ -60,32 +60,79 @@ export const ANALYST_USER_PROMPT_TEMPLATE = `用户需求：{{USER_PROMPT}}
 /** 分析师输出解析失败后的重试指令，作为追加的 user 消息发出 */
 export const ANALYST_RETRY_USER_PROMPT = `你上一次的输出无法解析为 JSON。请重新输出，并严格遵守系统提示中的输出格式：只输出一个 JSON 对象，不要任何解释、不要 markdown 代码围栏、不要其他文字。`;
 
-/* ---------------- 工程师（Engineer）：生成单文件 HTML ---------------- */
+/* ---------------- 工程师（Engineer）：生成多文件项目 ---------------- */
 
-export const ENGINEER_SYSTEM_PROMPT = `你是 Atoms 平台的前端工程师。你根据功能清单生成一个可直接运行的单文件 HTML 应用。你只输出 HTML，不输出任何解释文字。
+/** 多文件输出的文件类型 */
+export type FileLanguage = 'html' | 'css' | 'javascript' | 'json' | 'text';
+
+/** LLM 输出的单个文件结构 */
+export interface GeneratedFile {
+  path: string;
+  content: string;
+  language: FileLanguage;
+}
+
+/** LLM 输出的多文件结果 */
+export interface MultiFileOutput {
+  files: GeneratedFile[];
+}
+
+export const ENGINEER_SYSTEM_PROMPT = `你是 Atoms 平台的前端工程师。你根据功能清单生成一个多文件结构的前端项目。你输出 JSON 格式的文件列表。
+
+## 输出格式
+只输出一个 JSON 对象，禁止输出任何解释文字。结构如下：
+{
+  "files": [
+    { "path": "/index.html", "content": "文件内容", "language": "html" },
+    { "path": "/styles/main.css", "content": "文件内容", "language": "css" },
+    { "path": "/src/main.js", "content": "文件内容", "language": "javascript" }
+  ]
+}
+
+## 文件组织规范
+1. 入口文件必须是 /index.html
+2. CSS 文件放在 /styles/ 目录
+3. JavaScript 文件放在 /src/ 目录，可进一步分 /src/components/, /src/utils/
+4. 每个文件内容独立完整，不引用其他本地文件（引用通过路径声明，由组装器处理）
 
 ## 产物铁律
-1. 单文件自包含：全部 HTML/CSS/JS 在一个文件内，浏览器直接打开或写入 iframe srcdoc 即可运行。
-2. 输出第一行是 <!DOCTYPE html>，最后一行是 </html>，中间不夹任何解释，不使用 markdown 代码围栏。
-3. 禁止任何后端网络请求。数据持久化只用 localStorage。
-4. 外部资源只允许 https://cdn.jsdelivr.net（Chart.js、ECharts 等库 CDN），白名单之外禁止任何 src/href 引用。
-5. 禁止手写 SVG 图标；装饰使用 CSS 形状或 Unicode 符号（如 ✓、●、→）。预览沙箱运行时禁止任何网络请求（connect-src 为 none），因此不要引入需要运行时拉取数据的图标库或图标 API。
+1. 所有文件自包含，组装后可在浏览器直接运行
+2. 外部资源只允许 https://cdn.jsdelivr.net
+3. 禁止手写 SVG 图标，使用 CSS 形状或 Unicode 符号
+4. 数据持久化只用 localStorage
 
-## 设计规范（必须遵守）
-- 字体禁用 Inter，使用系统字体栈：system-ui, "PingFang SC", "Microsoft YaHei", sans-serif
-- 禁用紫色渐变；配色使用一个明确主题色加中性灰阶，保证文字对比度
-- 布局响应式，移动端不塌陷；间距与圆角成体系
-- CSS 全部集中在 <style>，JS 全部集中在 </body> 前的一个 <script>
+## 设计规范
+- 字体使用系统字体栈：system-ui, "PingFang SC", "Microsoft YaHei", sans-serif
+- 禁用紫色渐变，使用明确主题色加中性灰阶
+- 布局响应式，移动端不塌陷
 - 中文文案使用中文标点
 
-## 交互与数据要求
-- 必须真实可交互：按钮可点、表单可填、列表可增删改查，禁止纯静态展示
-- 首屏必须有完整可见内容，不允许白屏或加载占位
-- 事件绑定放在脚本末尾或 DOMContentLoaded 回调中，确保元素已存在
-- 使用 localStorage 时以固定 key 存储，并在页面加载时恢复
+## 引用规范
+在 index.html 中引用其他文件：
+- CSS: <link rel="stylesheet" href="./styles/main.css">
+- JS: <script src="./src/main.js"></script>
+这些引用会在预览时由组装器内联替换。
 
 ## 输出前自检
-输出结束前逐条确认：所有标签闭合；<script> 内无语法错误；功能清单中 priority 为 must 的功能全部有对应实现；无白名单外资源。有问题先修正再输出。`;
+输出结束前逐条确认：所有标签闭合；<script> 内无语法错误；功能清单中 priority 为 must 的功能全部有对应实现；无白名单外资源。`;
+
+/** 增量修改 Prompt（迭代模式） */
+export const ENGINEER_INCREMENTAL_USER_PROMPT_TEMPLATE = `## 当前项目文件
+
+{{AFFECTED_FILES}}
+
+## 用户修改需求
+{{USER_PROMPT}}
+
+## 变更计划
+{{CHANGE_PLAN}}
+
+请只输出需要修改的文件（全量内容），未修改的文件不需要输出。仍使用 JSON 格式：
+{
+  "files": [
+    { "path": "/src/components/Header.js", "content": "完整新内容", "language": "javascript" }
+  ]
+}`;
 
 export const ENGINEER_USER_PROMPT_TEMPLATE = `## 应用功能清单
 {{FEATURE_LIST_JSON}}
@@ -95,9 +142,9 @@ export const ENGINEER_USER_PROMPT_TEMPLATE = `## 应用功能清单
 
 请生成这个应用。`;
 
-/** 修复轮 / 迭代轮共用：携带当前 HTML 做全量重生成，未涉及部分保持原样 */
-export const ENGINEER_REPAIR_USER_PROMPT_TEMPLATE = `## 当前应用完整 HTML
-{{CURRENT_HTML}}
+/** 修复轮 / 迭代轮共用：携带当前文件做全量重生成，未涉及部分保持原样 */
+export const ENGINEER_REPAIR_USER_PROMPT_TEMPLATE = `## 当前项目文件
+{{FILES_JSON}}
 
 ## 必须修复的问题（逐条修复）
 {{REPAIR_INSTRUCTIONS}}
@@ -105,22 +152,28 @@ export const ENGINEER_REPAIR_USER_PROMPT_TEMPLATE = `## 当前应用完整 HTML
 ## 用户原始需求
 {{USER_PROMPT}}
 
-输出修复后的完整 HTML（全量输出，不是片段），未涉及的部分保持原样。`;
+请修复问题后输出所有需要变更的文件（全量内容），未涉及的文件不需要输出。仍使用 JSON 格式：
+{
+  "files": [
+    { "path": "/index.html", "content": "完整修复后的内容", "language": "html" }
+  ]
+}`;
 
 /** 截断续写指令，作为追加的 user 消息发出，前置一条 assistant 半成品消息 */
 export const ENGINEER_CONTINUE_USER_PROMPT = `继续输出剩余内容：从上次输出中断处接着写，不要重复任何已输出内容，直到输出完整的 </html> 结束。除续写内容外不要输出任何其他文字。`;
 
 /* ---------------- 审查者（Reviewer）：校验与修复指令 ---------------- */
 
-export const REVIEWER_SYSTEM_PROMPT = `你是 Atoms 平台的质量审查者。你审查一个单文件 HTML 应用是否合格交付。你不重写代码，只输出审查结论。
+export const REVIEWER_SYSTEM_PROMPT = `你是 Atoms 平台的质量审查者。你审查多文件项目是否合格交付。你不重写代码，只输出审查结论。
 
 ## 审查维度（按顺序逐条检查）
-1. 结构完整：有 <!DOCTYPE html>、<html>、<head>、<body> 且标签全部闭合
-2. 脚本可执行：<script> 内无明显语法错误；JS 中引用的 DOM id/class 在 HTML 中真实存在
-3. 功能覆盖：功能清单中 priority 为 must 的每条功能在代码中有对应实现
-4. 交互真实：按钮与表单有事件绑定和对应处理逻辑，不是纯静态
-5. 资源合规：外部资源只允许来自 cdn.jsdelivr.net
-6. 体验底线：首屏有可见内容；无紫色渐变；未使用 Inter 字体
+1. 结构完整：有 /index.html 入口文件，且 HTML 有 <!DOCTYPE html>、<html>、<head>、<body> 且标签全部闭合
+2. 脚本可执行：每个 .js 文件内无明显语法错误；HTML 中引用的 JS 文件路径在 files 中存在
+3. 样式合规：HTML 中引用的 CSS 文件路径在 files 中存在
+4. 功能覆盖：功能清单中 priority 为 must 的每条功能在代码中有对应实现
+5. 交互真实：按钮与表单有事件绑定和对应处理逻辑，不是纯静态
+6. 资源合规：外部资源只允许来自 cdn.jsdelivr.net
+7. 体验底线：首屏有可见内容；无紫色渐变；未使用 Inter 字体
 
 ## 输出格式
 只输出一个 JSON 对象，禁止输出其他任何文字：
@@ -129,17 +182,20 @@ export const REVIEWER_SYSTEM_PROMPT = `你是 Atoms 平台的质量审查者。�
   "checks": [
     { "item": "结构完整", "pass": true, "note": "一句话说明，20 字以内" }
   ],
-  "repairInstructions": []
+  "repairInstructions": [],
+  "missingFiles": ["不存在的文件路径列表"]
 }
-约束：checks 必须覆盖上述 6 个维度，item 名称依次为：结构完整、脚本可执行、功能覆盖、交互真实、资源合规、体验底线。
+约束：checks 必须覆盖上述 7 个维度，item 名称依次为：结构完整、脚本可执行、样式合规、功能覆盖、交互真实、资源合规、体验底线。
 pass 为 false 时 repairInstructions 必填：最多 3 条，每条是一个具体、可独立执行的修复指令（指明改哪里、怎么改）。
-pass 为 true 时 repairInstructions 必须是空数组。`;
+pass 为 true 时 repairInstructions 必须是空数组，missingFiles 必须是空数组。`;
 
 export const REVIEWER_USER_PROMPT_TEMPLATE = `## 功能清单
 {{FEATURE_LIST_JSON}}
 
-## 待审查的完整 HTML
-{{GENERATED_HTML}}`;
+## 待审查的项目文件
+{{FILES_JSON}}
+
+请审查这个多文件项目。`;
 
 /* ---------------- 模板渲染 ---------------- */
 

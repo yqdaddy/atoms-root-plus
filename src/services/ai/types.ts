@@ -92,8 +92,10 @@ export interface GenerateStats {
 /** done 事件负载：最终交付结果 */
 export interface GenerateResult {
   runId: string;
-  /** 最终完整单文件 HTML */
+  /** 最终完整单文件 HTML（向后兼容） */
   html: string;
+  /** 多文件结构（可选，多文件模式时存在） */
+  files?: Record<string, { path: string; content: string; language: string; updatedAt: string }>;
   /** 软性问题警告，如「内容被截断，已按可用部分交付」 */
   warnings: string[];
   stats: GenerateStats;

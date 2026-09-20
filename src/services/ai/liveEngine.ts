@@ -171,15 +171,19 @@ function processSSEEvent(
       }
       case 'done': {
         const html = payload.html || '';
+        const files = payload.files;
         console.log('[liveEngine] done 事件:', {
           htmlLength: html.length,
           htmlPreview: html.slice(0, 200),
+          hasFiles: !!files,
+          fileCount: files ? Object.keys(files).length : 0,
         });
         event = {
           type: 'done',
           payload: {
             runId,
             html,
+            files: files,
             warnings: [],
             stats: { mode: 'live', inputTokens: 0, outputTokens: 0, durationMs: 0, rounds: 1 },
           },

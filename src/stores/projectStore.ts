@@ -87,8 +87,10 @@ interface ProjectActions {
   updateProjectName: (name: string) => void;
   /** 更新当前项目状态 */
   updateProjectStatus: (status: Project['status']) => void;
-  /** 更新当前项目入口文件内容 */
+  /** 更新当前项目入口文件内容（单文件模式，向后兼容） */
   updateEntryFile: (html: string) => void;
+  /** 更新当前项目的多文件（多文件模式） */
+  updateFiles: (files: Record<string, FileNode>, entryFile?: string) => void;
   /** 添加消息到当前项目 */
   addMessage: (message: Omit<ChatMessage, 'id' | 'createdAt'>) => void;
   /** 删除项目 */
@@ -229,6 +231,50 @@ export const useProjectStore = create<ProjectStore>()(
             summaries: state.summaries.map((s) =>
               s.id === updated.id
                 ? { ...s, status: 'ready', updatedAt: timestamp, entryBytes: new Blob([html]).size }
+                : s
+            ),
+          };
+        });
+      },
+
+      updateFiles: (files, entryFile) => {
+        set((state) => {
+          if (!state.currentProject) {
+            console.warn('[projectStore] updateFiles: currentProject 为 null');
+            return state;
+          }
+          const timestamp = now();
+
+          // 确定入口文件路径
+          const entryPath = entryFile ?? ENTRY_FILE_PATH;
+          const entryContent = files[entryPath]?.content ?? files[ENTRY_FILE_PATH]?.content ?? '';
+
+          // 构建新的文件映射
+          const updatedFiles: Record<string, FileNode> = {};
+
+          for (const [path, file] of Object.entries(files)) {
+            updatedFiles[path] = {
+              ...file,
+              updatedAt: timestamp,
+            };
+          }
+
+          const updated: Project = {
+            ...state.currentProject,
+            files: updatedFiles,
+            status: 'ready',
+            updatedAt: timestamp,
+          };
+          persistProjectDetail(updated);
+
+          // 异步同步到 API
+          updateProjectApi(updated).catch(() => {});
+
+          return {
+            currentProject: updated,
+            summaries: state.summaries.map((s) =>
+              s.id === updated.id
+                ? { ...s, status: 'ready', updatedAt: timestamp, entryBytes: new Blob([entryContent]).size }
                 : s
             ),
           };
