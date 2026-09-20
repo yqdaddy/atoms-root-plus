@@ -29,13 +29,10 @@ jobs:
         run: npm run build:server
 
       - name: Setup SSH
-        uses: webfactory/ssh-agent-action@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-
-      - name: Add server to known hosts
         run: |
           mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
 
       - name: Create deployment package
@@ -51,48 +48,30 @@ jobs:
 
       - name: Deploy backend
         run: |
-          # 同步后端代码（保留 .env 和 data 目录）
           rsync -avz --delete --exclude='.env' --exclude='data' deploy/backend/ ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ secrets.BACKEND_PATH }}/
 
-          # 确保数据目录存在
           ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
             mkdir -p ${{ secrets.BACKEND_PATH }}/data
             chmod 700 ${{ secrets.BACKEND_PATH }}/data
-          "
 
-          # 如果 .env 不存在，从示例创建
-          ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
             if [ ! -f ${{ secrets.BACKEND_PATH }}/.env ]; then
               cp ${{ secrets.BACKEND_PATH }}/.env.example ${{ secrets.BACKEND_PATH }}/.env
-              echo '⚠️ 请手动编辑 ${{ secrets.BACKEND_PATH }}/.env 填入真实配置'
+              echo '⚠️ 请手动编辑 .env 填入 LLM_API_KEY'
             fi
           "
 
-      - name: Install backend dependencies
+      - name: Install dependencies and restart
         run: |
           ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
             cd ${{ secrets.BACKEND_PATH }}
             npm install --production
-          "
 
-      - name: Restart backend service
-        run: |
-          ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
-            # 检查 pm2 是否安装
-            if ! command -v pm2 &> /dev/null; then
-              npm install -g pm2
-            fi
-
-            # 重启或启动服务
-            cd ${{ secrets.BACKEND_PATH }}
             pm2 delete atoms-backend 2>/dev/null || true
             pm2 start dist-server/index.js --name atoms-backend
             pm2 save
           "
 
-      - name: Verify deployment
+      - name: Verify
         run: |
-          echo "✅ 部署完成！"
-          echo "前端: http://${{ secrets.SERVER_HOST }}/"
-          echo "后端: http://${{ secrets.SERVER_HOST }}/api/health"
-          ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "curl -s http://localhost:3000/api/health || echo '后端启动中...'"
+          echo "✅ 部署完成 → https://atoms.litpp.com"
+          ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "curl -s http://localhost:3000/api/health"
