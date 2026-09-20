@@ -19,9 +19,9 @@ GitHub Actions
     │
     └── SSH + rsync
             │
-            ├── 前端 → /var/www/atoms/ (nginx 托管)
+            ├── 前端 → /mnt/atoms/ (nginx 托管)
             │
-            └── 后端 → /opt/atoms-backend/ (pm2 守护)
+            └── 后端 → /mnt/atoms-backend/ (pm2 守护)
 ```
 
 ## 需要的 GitHub Secrets
@@ -31,8 +31,8 @@ GitHub Actions
 | `SERVER_HOST` | 服务器 IP 或域名 | `1.2.3.4` |
 | `SERVER_USER` | SSH 用户名 | `root` |
 | `SSH_PRIVATE_KEY` | 部署专用私钥 | `-----BEGIN...` |
-| `FRONTEND_PATH` | 前端路径 | `/var/www/atoms` |
-| `BACKEND_PATH` | 后端路径 | `/opt/atoms-backend` |
+| `FRONTEND_PATH` | 前端路径 | `/mnt/atoms` |
+| `BACKEND_PATH` | 后端路径 | `/mnt/atoms-backend` |
 
 ## 本地测试部署（可选）
 

@@ -14,14 +14,13 @@
 ssh root@你的服务器IP
 
 # 创建前端部署目录（nginx root）
-mkdir -p /var/www/atoms
+mkdir -p /mnt/atoms
 
 # 创建后端部署目录
-mkdir -p /opt/atoms-backend
+mkdir -p /mnt/atoms-backend/data
 
-# 创建数据目录（数据库、日志）
-mkdir -p /opt/atoms-backend/data
-chmod 700 /opt/atoms-backend/data
+# 设置数据目录权限
+chmod 700 /mnt/atoms-backend/data
 ```
 
 ## 3. 配置 nginx
@@ -33,7 +32,7 @@ server {
     listen 80;
     server_name 你的域名或IP;
 
-    root /var/www/atoms;
+    root /mnt/atoms;
     index index.html;
 
     # API 反向代理
@@ -108,8 +107,8 @@ echo "你的公钥内容" >> ~/.ssh/authorized_keys
 | `SERVER_HOST` | 服务器 IP 或域名 | `192.168.1.100` 或 `your-domain.com` |
 | `SERVER_USER` | SSH 用户名 | `root` 或 `ubuntu` |
 | `SSH_PRIVATE_KEY` | 私钥内容（完整） | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
-| `FRONTEND_PATH` | 前端部署路径 | `/var/www/atoms` |
-| `BACKEND_PATH` | 后端部署路径 | `/opt/atoms-backend` |
+| `FRONTEND_PATH` | 前端部署路径 | `/mnt/atoms` |
+| `BACKEND_PATH` | 后端部署路径 | `/mnt/atoms-backend` |
 
 ## 7. 首次部署后配置后端环境变量
 
@@ -117,7 +116,7 @@ echo "你的公钥内容" >> ~/.ssh/authorized_keys
 
 ```bash
 ssh root@你的服务器IP
-nano /opt/atoms-backend/.env
+nano /mnt/atoms-backend/.env
 
 # 填入真实配置：
 # LLM_API_KEY=你的真实API密钥

@@ -54,6 +54,12 @@ jobs:
           # 同步后端代码（保留 .env 和 data 目录）
           rsync -avz --delete --exclude='.env' --exclude='data' deploy/backend/ ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ secrets.BACKEND_PATH }}/
 
+          # 确保数据目录存在
+          ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
+            mkdir -p ${{ secrets.BACKEND_PATH }}/data
+            chmod 700 ${{ secrets.BACKEND_PATH }}/data
+          "
+
           # 如果 .env 不存在，从示例创建
           ssh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
             if [ ! -f ${{ secrets.BACKEND_PATH }}/.env ]; then
