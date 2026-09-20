@@ -42,7 +42,8 @@ export function HomeAuthControls() {
     setMenuOpen(false);
     await logout();
     toast.info('已退出登录。');
-  }, [logout]);
+    navigate('/'); // 登出后跳转到落地页
+  }, [logout, navigate]);
 
   if (!user) {
     return (
@@ -103,7 +104,8 @@ export function SidebarAuthControls() {
   const handleLogout = useCallback(async () => {
     await logout();
     toast.info('已退出登录。');
-  }, [logout]);
+    navigate('/'); // 登出后跳转到落地页
+  }, [logout, navigate]);
 
   if (!user) {
     return (

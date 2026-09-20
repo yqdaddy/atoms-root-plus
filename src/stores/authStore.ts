@@ -9,6 +9,7 @@ import {
   logoutUser,
   fetchCurrentUser,
 } from '../services/auth';
+import { storageKey } from '../types/storage'; // F-004: 登出清理本地缓存
 
 export interface AuthUser {
   id: string;
@@ -67,6 +68,26 @@ export const useAuthStore = create<AuthStore>()((set) => ({
   logout: async () => {
     await logoutUser();
     set({ user: null });
+
+    // F-004: 登出清理本地缓存
+    // 清除项目相关 localStorage 数据
+    try {
+      // 清除项目摘要和当前项目 ID
+      const projectsKey = storageKey('projects');
+      localStorage.removeItem(projectsKey);
+
+      // 清除所有项目详情（atoms:v1:projects:{id}）
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('atoms:v1:projects:')) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach((key) => localStorage.removeItem(key));
+    } catch {
+      // 忽略清理错误
+    }
   },
 
   setUser: (user) => {

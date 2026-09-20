@@ -9,6 +9,7 @@ import { Icon } from '@iconify/react';
 import { useProjectStore } from '../stores/projectStore';
 import { useChatStore, getCurrentPhaseText } from '../stores/chatStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import { useAuthStore } from '../stores/authStore'; // F-001: 首页登录守卫
 import { getAIAPI, type StreamEvent, validateGeneratedHtml, type DemoTemplateId, type FeatureList } from '../services/ai';
 import { approveAndContinue } from '../services/ai/liveEngine';
 import { ENTRY_FILE_PATH } from '../types/project';
@@ -213,6 +214,10 @@ export default function HomePage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const navigate = useNavigate();
 
+  // F-001: 首页登录守卫
+  const { user } = useAuthStore();
+  const isLoggedIn = !!user;
+
   // 流式输出状态
   const streamBuffer = useChatStore((state) => state.streamBuffer);
   const streamingText = getCurrentPhaseText(streamBuffer);
@@ -289,6 +294,11 @@ export default function HomePage() {
 
   const handleChipClick = (prompt: string) => {
     if (isGenerating) return;
+    // F-001: 未登录时点击模板按钮跳转到登录页
+    if (!isLoggedIn) {
+      navigate('/login?redirect=%2F');
+      return;
+    }
     setInputValue(prompt);
   };
 
@@ -427,6 +437,12 @@ export default function HomePage() {
   const handleSubmit = useCallback(async () => {
     if (!inputValue.trim() || isGenerating) return;
 
+    // F-001: 未登录时阻止创建，跳转到登录页
+    if (!isLoggedIn) {
+      navigate('/login?redirect=%2F');
+      return;
+    }
+
     const prompt = inputValue.trim();
     setIsGenerating(true);
     setFiles([]); // 重置文件列表
@@ -496,6 +512,8 @@ export default function HomePage() {
     handleStreamEvent,
     generatedHtml,
     setError,
+    isLoggedIn,
+    navigate,
   ]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -707,9 +725,15 @@ export default function HomePage() {
                 value={inputValue}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
-                placeholder={isGenerating ? '正在生成中...' : '让智能体团队实现你的想法'}
-                disabled={isGenerating}
-                className="w-full bg-[var(--color-bg-base)] border border-[var(--color-border-default)] rounded-xl px-4 py-3 pr-12 text-[14px] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] resize-none outline-none focus:border-[var(--color-border-strong)] transition-colors disabled:opacity-50"
+                placeholder={isGenerating ? '正在生成中...' : isLoggedIn ? '让智能体团队实现你的想法' : '登录后开始创建应用'}
+                disabled={isGenerating || !isLoggedIn}
+                onClick={() => {
+                  // F-001: 未登录时点击输入框跳转到登录页
+                  if (!isLoggedIn) {
+                    navigate('/login?redirect=%2F');
+                  }
+                }}
+                className={`w-full bg-[var(--color-bg-base)] border border-[var(--color-border-default)] rounded-xl px-4 py-3 pr-12 text-[14px] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] resize-none outline-none focus:border-[var(--color-border-strong)] transition-colors disabled:opacity-50 disabled:cursor-pointer ${!isLoggedIn ? 'cursor-pointer' : ''}`}
                 rows={2}
               />
               <button

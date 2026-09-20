@@ -5,6 +5,7 @@
 
 import type { Project, ProjectSummary } from '../../types/project';
 import type { StorageEnvelope } from '../../types/storage';
+import { apiFetch } from '../apiClient';
 
 /** API 基础 URL（开发环境使用相对路径，走 Vite 代理） */
 const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -29,9 +30,8 @@ export async function checkApiHealth(): Promise<boolean> {
   lastHealthCheck = now;
 
   try {
-    const response = await fetch(`${API_BASE}/api/health`, {
+    const response = await apiFetch(`${API_BASE}/api/health`, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
     });
 
     apiAvailable = response.ok;
@@ -56,9 +56,8 @@ export async function fetchProjectSummaries(): Promise<ProjectSummary[]> {
   if (!apiAvailable) return [];
 
   try {
-    const response = await fetch(`${API_BASE}/api/projects`, {
+    const response = await apiFetch(`${API_BASE}/api/projects`, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
     });
 
     if (!response.ok) return [];
@@ -76,9 +75,8 @@ export async function fetchProject(id: string): Promise<Project | null> {
   if (!apiAvailable) return null;
 
   try {
-    const response = await fetch(`${API_BASE}/api/projects/${id}`, {
+    const response = await apiFetch(`${API_BASE}/api/projects/${id}`, {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
     });
 
     if (!response.ok) return null;
@@ -99,9 +97,8 @@ export async function createProjectApi(project: Project): Promise<string | null>
   if (!apiAvailable) return null;
 
   try {
-    const response = await fetch(`${API_BASE}/api/projects`, {
+    const response = await apiFetch(`${API_BASE}/api/projects`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         id: project.id,
         name: project.name,
@@ -125,9 +122,8 @@ export async function updateProjectApi(project: Project): Promise<boolean> {
   if (!apiAvailable) return false;
 
   try {
-    const response = await fetch(`${API_BASE}/api/projects/${project.id}`, {
+    const response = await apiFetch(`${API_BASE}/api/projects/${project.id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(project),
     });
 
@@ -144,9 +140,8 @@ export async function deleteProjectApi(id: string): Promise<boolean> {
   if (!apiAvailable) return false;
 
   try {
-    const response = await fetch(`${API_BASE}/api/projects/${id}`, {
+    const response = await apiFetch(`${API_BASE}/api/projects/${id}`, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
     });
 
     return response.ok;

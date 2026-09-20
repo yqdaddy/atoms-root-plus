@@ -5,6 +5,7 @@
  * 降级策略：后端不可用（网络错误、5xx）时由 index.ts 回退 demoEngine。
  */
 import { cancelActiveRun, registerActiveRun } from './activeRun';
+import { apiFetch } from '../apiClient';
 import {
   type AIEngine,
   type GenerateOptions,
@@ -241,7 +242,8 @@ async function runPipeline(
     });
 
     // 统一走反向代理：开发环境由 Vite 代理转发，生产环境同源直出
-    const response = await fetch('/api/llm/generate', {
+    // 使用 apiFetch 统一拦截 401
+    const response = await apiFetch('/api/llm/generate', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -379,7 +381,8 @@ export async function approveAndContinue(
   try {
     console.log('[liveEngine] 批准后继续生成', { sessionId });
 
-    const response = await fetch('/api/llm/approve', {
+    // 使用 apiFetch 统一拦截 401
+    const response = await apiFetch('/api/llm/approve', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

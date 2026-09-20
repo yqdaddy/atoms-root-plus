@@ -3,7 +3,7 @@
  * 支持 Tabs 切换，前端校验，四态完备。
  */
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom'; // F-006: 支持 redirect 参数
 import { Icon } from '@iconify/react';
 import { useAuthStore } from '../stores/authStore';
 import { toast } from '../components/Toast';
@@ -51,6 +51,7 @@ export default function AuthPage({ mode }: AuthPageProps) {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams(); // F-006: 获取 redirect 参数
   const { login, register, isLoading } = useAuthStore();
 
   // 模式切换时清空密码与错误
@@ -64,11 +65,6 @@ export default function AuthPage({ mode }: AuthPageProps) {
   // 切换 Tab
   const switchMode = useCallback((newMode: 'login' | 'register') => {
     navigate(newMode === 'register' ? '/register' : '/login', { replace: true });
-  }, [navigate]);
-
-  // 游客模式
-  const enterAsGuest = useCallback(() => {
-    navigate('/', { replace: true });
   }, [navigate]);
 
   // 提交
@@ -104,15 +100,20 @@ export default function AuthPage({ mode }: AuthPageProps) {
         await login(username.trim(), password);
         toast.success('登录成功，欢迎回来。');
       }
-      // 成功后跳转首页
-      navigate('/', { replace: true });
+      // F-006: 登录后重定向到原访问页面
+      const redirect = searchParams.get('redirect');
+      if (redirect) {
+        navigate(redirect, { replace: true });
+      } else {
+        navigate('/', { replace: true });
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : '操作失败，请重试。';
       setSubmitError(message);
     } finally {
       setIsSubmitting(false);
     }
-  }, [username, password, confirmPassword, mode, register, login, navigate]);
+  }, [username, password, confirmPassword, mode, register, login, navigate, searchParams]);
 
   // tabButtons 必须在条件渲染之前，否则 hooks 数量不一致导致 React 崩溃
   const tabButtons = useMemo(() => [
@@ -288,16 +289,7 @@ export default function AuthPage({ mode }: AuthPageProps) {
           </button>
         </form>
 
-        {/* 游客模式 */}
-        <p className="mt-6 text-center text-[13px] text-[var(--color-text-secondary)]">
-          不想注册？{' '}
-          <button
-            onClick={enterAsGuest}
-            className="text-[var(--color-accent)] hover:underline"
-          >
-            游客模式进入
-          </button>
-        </p>
+        {/* F-003: 移除游客模式入口 - 已删除 */}
       </div>
     </div>
   );

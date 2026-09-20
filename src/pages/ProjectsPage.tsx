@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '@iconify/react';
 import { useProjectStore } from '../stores/projectStore';
+import { useAuthStore } from '../stores/authStore'; // F-002: 项目列表页守卫
 import type { ProjectSummary } from '../types/project';
 
 /** 格式化时间 */
@@ -126,6 +127,7 @@ function ProjectCard({
 
 export default function ProjectsPage() {
   const navigate = useNavigate();
+  const { user, isLoading: authLoading } = useAuthStore(); // F-002: 获取登录状态
   const summaries = useProjectStore((state) => state.summaries);
   const switchProject = useProjectStore((state) => state.switchProject);
   const deleteProject = useProjectStore((state) => state.deleteProject);
@@ -133,9 +135,25 @@ export default function ProjectsPage() {
 
   const [isLoading, setIsLoading] = useState(true);
 
+  // F-002: 项目列表页守卫 - 未登录时跳转到登录页
+  useEffect(() => {
+    if (!authLoading && !user) {
+      navigate('/login?redirect=%2Fprojects', { replace: true });
+    }
+  }, [authLoading, user, navigate]);
+
   useEffect(() => {
     initialize().finally(() => setIsLoading(false));
   }, [initialize]);
+
+  // F-002: 认证加载中或未登录时显示加载状态
+  if (authLoading || !user) {
+    return (
+      <div className="min-h-screen bg-[var(--color-bg-base)] flex items-center justify-center">
+        <Icon icon="lucide:loader-2" width={24} height={24} className="animate-spin text-[var(--color-text-tertiary)]" />
+      </div>
+    );
+  }
 
   const handleOpenProject = (id: string) => {
     switchProject(id);
