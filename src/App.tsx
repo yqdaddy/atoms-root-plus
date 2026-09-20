@@ -1,6 +1,7 @@
 import HomePage from './pages/HomePage';
 import WorkspacePage from './pages/WorkspacePage';
 import AuthPage from './pages/AuthPage';
+import ProjectsPage from './pages/ProjectsPage';
 import { ToastProvider } from './components/Toast';
 import { useLocation } from 'react-router-dom';
 
@@ -13,6 +14,8 @@ function App() {
     page = <AuthPage mode={path === '/register' ? 'register' : 'login'} />;
   } else if (path === '/workspace') {
     page = <WorkspacePage />;
+  } else if (path === '/projects') {
+    page = <ProjectsPage />;
   } else {
     page = <HomePage />;
   }

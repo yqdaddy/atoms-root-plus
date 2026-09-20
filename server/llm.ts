@@ -1,55 +1,97 @@
 /**
  * LLM 调用核心逻辑。
  * 调用 Agnes AI API，支持流式输出与取消。
+ * 支持批准流程：分析完成后暂停等待用户批准。
  */
 
-/**
- * 三阶段生成 prompt 配置
- */
-const STAGE_PROMPTS = {
-  analysis: `你是产品分析师。分析用户需求，输出简洁的技术方案要点。
+/** 分析师系统提示词（生成功能清单） */
+const ANALYST_SYSTEM_PROMPT = `你是 Atoms 平台的需求分析师。分析用户需求，输出可在浏览器内实现的功能清单。
 
-要求：
-- 识别核心功能点
-- 确定技术实现方案
-- 列出关键组件
+## 输出格式
+只输出一个 JSON 对象，不要任何解释文字：
+{
+  "appTitle": "应用标题",
+  "appType": "dashboard | landing | todo | chart | tool | other",
+  "summary": "一句话概述",
+  "features": [
+    { "id": "F1", "name": "功能名", "description": "功能描述", "priority": "must 或 nice" }
+  ],
+  "interactions": ["关键交互列表"],
+  "assumptions": ["假设列表"]
+}
 
-输出格式：直接输出分析要点，每点一行。`,
+## 约束
+- 功能最多 6 条，priority 为 must 的最多 4 条
+- 每条功能必须是浏览器内可演示的真实交互
+- 不允许假设后端服务、数据库或第三方接口`;
 
-  generate: `你是前端工程师。根据分析结果生成完整的单页应用代码。
+/** 工程师系统提示词 */
+const ENGINEER_SYSTEM_PROMPT = `你是 Atoms 平台的前端工程师。根据功能清单生成单文件 HTML 应用。
 
-要求：
-- 使用现代 HTML/CSS/JavaScript
-- 代码可直接运行
-- 包含完整结构和样式
-- 使用 Tailwind CSS CDN
+## 产物铁律
+1. 单文件自包含：全部 HTML/CSS/JS 在一个文件内
+2. 输出第一行是 <!DOCTYPE html>，最后一行是 </html>
+3. 禁止任何后端网络请求，数据持久化只用 localStorage
+4. 外部资源只允许 https://cdn.jsdelivr.net
+5. 禁止手写 SVG 图标，使用 CSS 形状或 Unicode 符号
 
-输出格式：直接输出完整 HTML 代码，从 <!DOCTYPE html> 开始。`,
+## 设计规范
+- 字体使用系统字体栈：system-ui, "PingFang SC", "Microsoft YaHei", sans-serif
+- 禁用紫色渐变，使用明确主题色加中性灰阶
+- 布局响应式，移动端不塌陷
+- CSS 集中在 <style>，JS 集中在 </body> 前的 <script>`;
 
-  review: `你是代码审查员。检查生成的代码质量。
+/** 审查者系统提示词 */
+const REVIEWER_SYSTEM_PROMPT = `你是代码审查员。检查生成的代码质量。
 
-检查要点：
-- 代码完整性
-- 潜在 bug
-- 性能问题
-- 可访问性
+检查要点：结构完整、脚本可执行、功能覆盖、交互真实、资源合规、体验底线
 
-输出格式：列出发现的问题（如有）或确认"代码质量良好"。`,
-};
+输出格式：直接列出发现的问题（如有）或确认"代码质量良好"。`;
 
 /**
  * SSE 事件类型
  */
-export type LLMEventType = 'stage' | 'delta' | 'done' | 'error';
+export type LLMEventType = 'stage' | 'delta' | 'approval_required' | 'done' | 'error';
 
 export interface LLMEvent {
   type: LLMEventType;
   payload: {
     stage?: 'analysis' | 'generate' | 'review';
     content?: string;
+    analysis?: string; // 分析结果 JSON 字符串
+    features?: unknown; // 功能清单
     fullHtml?: string;
     error?: string;
+    sessionId?: string; // 会话 ID，用于批准后继续
   };
+}
+
+/**
+ * 待批准的会话
+ */
+interface PendingSession {
+  prompt: string;
+  currentHtml?: string;
+  analysisResult: string;
+  features: unknown;
+  createdAt: Date;
+}
+
+/** 待批准会话存储（内存，生产环境应使用 Redis） */
+const pendingSessions = new Map<string, PendingSession>();
+
+/**
+ * 获取待批准会话
+ */
+export function getPendingSession(sessionId: string): PendingSession | undefined {
+  return pendingSessions.get(sessionId);
+}
+
+/**
+ * 删除待批准会话
+ */
+export function deletePendingSession(sessionId: string): boolean {
+  return pendingSessions.delete(sessionId);
 }
 
 /**
@@ -172,7 +214,8 @@ async function streamChatCompletion(
 }
 
 /**
- * 三阶段生成
+ * 三阶段生成（支持批准流程）
+ * @param waitForApproval - 是否等待批准（默认 true）
  */
 export async function generateWithStages(options: GenerateOptions): Promise<void> {
   const { prompt, currentHtml, abortSignal, onEvent } = options;
@@ -188,17 +231,15 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
     : controller.signal;
 
   try {
-    let accumulatedHtml = currentHtml || '';
-
     // 阶段 1：分析
     onEvent({ type: 'stage', payload: { stage: 'analysis' } });
 
     const analysisMessages: ChatMessage[] = [
-      { role: 'system', content: STAGE_PROMPTS.analysis },
+      { role: 'system', content: ANALYST_SYSTEM_PROMPT },
       { role: 'user', content: prompt },
     ];
 
-    await streamChatCompletion(
+    const analysisResult = await streamChatCompletion(
       analysisMessages,
       (text) => onEvent({ type: 'delta', payload: { content: text, stage: 'analysis' } }),
       combinedSignal
@@ -206,19 +247,93 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
 
     if (combinedSignal.aborted) return;
 
+    // 解析分析结果
+    let features: unknown;
+    try {
+      // 尝试提取 JSON
+      const jsonMatch = analysisResult.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        features = JSON.parse(jsonMatch[0]);
+      } else {
+        features = { raw: analysisResult };
+      }
+    } catch {
+      features = { raw: analysisResult };
+    }
+
+    // 发送批准请求事件
+    const sessionId = crypto.randomUUID();
+    pendingSessions.set(sessionId, {
+      prompt,
+      currentHtml,
+      analysisResult,
+      features,
+      createdAt: new Date(),
+    });
+
+    onEvent({
+      type: 'approval_required',
+      payload: {
+        sessionId,
+        analysis: analysisResult,
+        features,
+      },
+    });
+
+    // 注意：这里不继续执行，等待用户批准
+    // 批准后调用 continueGeneration
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      onEvent({ type: 'error', payload: { error: '请求已取消' } });
+    } else {
+      const message = error instanceof Error ? error.message : '未知错误';
+      onEvent({ type: 'error', payload: { error: message } });
+    }
+  } finally {
+    activeControllers.delete(requestId);
+  }
+}
+
+/**
+ * 批准后继续生成
+ */
+export async function continueAfterApproval(
+  sessionId: string,
+  onEvent: (event: LLMEvent) => void,
+  abortSignal?: AbortSignal
+): Promise<void> {
+  const session = pendingSessions.get(sessionId);
+  if (!session) {
+    onEvent({ type: 'error', payload: { error: '会话已过期，请重新开始' } });
+    return;
+  }
+
+  const controller = new AbortController();
+  const combinedSignal = abortSignal
+    ? AbortSignal.any([abortSignal, controller.signal])
+    : controller.signal;
+
+  try {
+    const { prompt, currentHtml, features } = session;
+
     // 阶段 2：生成
     onEvent({ type: 'stage', payload: { stage: 'generate' } });
 
+    const featureListStr = typeof features === 'string'
+      ? features
+      : JSON.stringify(features, null, 2);
+
     const generateMessages: ChatMessage[] = [
-      { role: 'system', content: STAGE_PROMPTS.generate },
+      { role: 'system', content: ENGINEER_SYSTEM_PROMPT },
       {
         role: 'user',
         content: currentHtml
-          ? `用户需求: ${prompt}\n\n当前代码:\n${currentHtml}\n\n请根据需求修改代码。`
-          : `用户需求: ${prompt}\n\n请生成完整的单页应用。`,
+          ? `## 功能清单\n${featureListStr}\n\n## 当前代码\n${currentHtml}\n\n## 用户修改需求\n${prompt}\n\n请根据修改需求更新代码。`
+          : `## 功能清单\n${featureListStr}\n\n## 用户需求\n${prompt}\n\n请生成完整的单页应用。`,
       },
     ];
 
+    let accumulatedHtml = '';
     const generatedHtml = await streamChatCompletion(
       generateMessages,
       (text) => {
@@ -234,7 +349,7 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
     onEvent({ type: 'stage', payload: { stage: 'review' } });
 
     const reviewMessages: ChatMessage[] = [
-      { role: 'system', content: STAGE_PROMPTS.review },
+      { role: 'system', content: REVIEWER_SYSTEM_PROMPT },
       { role: 'user', content: `请审查以下代码:\n${generatedHtml}` },
     ];
 
@@ -248,6 +363,9 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
 
     // 完成
     onEvent({ type: 'done', payload: { fullHtml: generatedHtml } });
+
+    // 清理会话
+    pendingSessions.delete(sessionId);
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       onEvent({ type: 'error', payload: { error: '请求已取消' } });
@@ -255,7 +373,5 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
       const message = error instanceof Error ? error.message : '未知错误';
       onEvent({ type: 'error', payload: { error: message } });
     }
-  } finally {
-    activeControllers.delete(requestId);
   }
 }

@@ -111,14 +111,26 @@ export interface ErrorEventPayload {
   detail?: string;
 }
 
+/** approval_required 事件负载：分析完成，等待用户批准 */
+export interface ApprovalRequiredPayload {
+  runId: string;
+  sessionId: string;
+  /** 分析结果原始 JSON 字符串 */
+  analysis: string;
+  /** 解析后的功能清单 */
+  features: FeatureList | { raw: string };
+}
+
 /**
  * 统一流式事件信封。
  * 时序约定：一个 run 内事件严格有序；done 与 error 互斥且必为末事件；
  * delta.phase 与当前 stage 对应（repair 阶段的 delta 属于 generating 态的 attempt=2）。
+ * approval_required 表示分析完成，等待用户批准后继续。
  */
 export type StreamEvent =
   | { type: 'stage'; payload: StageEventPayload }
   | { type: 'delta'; payload: DeltaEventPayload }
+  | { type: 'approval_required'; payload: ApprovalRequiredPayload }
   | { type: 'done'; payload: GenerateResult }
   | { type: 'error'; payload: ErrorEventPayload };
 

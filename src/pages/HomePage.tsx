@@ -1,6 +1,7 @@
 /**
  * 首页：全屏智能体界面（类 atoms.dev 风格）。
  * 左侧 AI 对话 + 文件生成面板，右侧实时预览 + 代码查看。
+ * 支持批准流程：分析完成后显示计划，用户批准后继续生成。
  */
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -8,7 +9,8 @@ import { Icon } from '@iconify/react';
 import { useProjectStore } from '../stores/projectStore';
 import { useChatStore, getCurrentPhaseText } from '../stores/chatStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { getAIAPI, type StreamEvent, validateGeneratedHtml, type DemoTemplateId } from '../services/ai';
+import { getAIAPI, type StreamEvent, validateGeneratedHtml, type DemoTemplateId, type FeatureList } from '../services/ai';
+import { approveAndContinue } from '../services/ai/liveEngine';
 import { ENTRY_FILE_PATH } from '../types/project';
 import { toast } from '../components/Toast';
 import { HomeAuthControls } from '../components/AuthControls';
@@ -40,7 +42,11 @@ interface ChatMessage {
   content: string;
   timestamp: Date;
   steps?: number;
-  status?: 'processing' | 'done' | 'error';
+  status?: 'processing' | 'done' | 'error' | 'waiting_approval';
+  /** 分析结果（用于批准流程） */
+  features?: FeatureList | { raw: string };
+  /** 会话 ID（用于批准后继续） */
+  sessionId?: string;
 }
 
 /** 格式化时间 */
@@ -50,6 +56,11 @@ function formatTime(date: Date): string {
   const hours = String(date.getHours()).padStart(2, '0');
   const minutes = String(date.getMinutes()).padStart(2, '0');
   return `${month}/${day} ${hours}:${minutes}`;
+}
+
+/** 判断是否为 FeatureList 类型 */
+function isFeatureList(features: unknown): features is FeatureList {
+  return typeof features === 'object' && features !== null && 'appTitle' in features && 'features' in features;
 }
 
 /**
@@ -108,8 +119,16 @@ function FileTreeItem({ file, isActive }: { file: FileItem; isActive: boolean })
 }
 
 /** 消息气泡组件（类 atoms.dev 风格） */
-function MessageBubble({ message }: { message: ChatMessage }) {
+function MessageBubble({
+  message,
+  onApprove,
+}: {
+  message: ChatMessage;
+  onApprove?: (sessionId: string) => void;
+}) {
   const isUser = message.role === 'user';
+  const isWaitingApproval = message.status === 'waiting_approval';
+  const features = message.features;
 
   return (
     <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
@@ -131,18 +150,53 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       }`}>
         <p className="text-[13px] leading-[1.6] whitespace-pre-wrap">{message.content}</p>
 
-        {/* 状态标签（assistant 消息） */}
+        {/* 功能清单展示 */}
+        {!isUser && isWaitingApproval && features && isFeatureList(features) && (
+          <div className="mt-3 pt-3 border-t border-[var(--color-border-default)]">
+            <h4 className="text-[12px] font-medium text-[var(--color-text-primary)] mb-2">功能清单</h4>
+            <div className="space-y-1.5">
+              {features.features.map((f) => (
+                <div key={f.id} className="flex items-start gap-2">
+                  <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${
+                    f.priority === 'must'
+                      ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
+                      : 'bg-[var(--color-text-tertiary)]/10 text-[var(--color-text-secondary)]'
+                  }`}>
+                    {f.priority === 'must' ? '必须' : '可选'}
+                  </span>
+                  <span className="text-[12px] text-[var(--color-text-secondary)]">{f.name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 状态标签或批准按钮 */}
         {!isUser && message.status && (
           <div className="flex items-center gap-2 mt-2 pt-2 border-t border-[var(--color-border-default)]">
-            <span className={`text-[11px] ${
-              message.status === 'done' ? 'text-green-500' :
-              message.status === 'error' ? 'text-red-500' :
-              'text-[var(--color-accent)]'
-            }`}>
-              {message.status === 'done' ? '已处理' :
-               message.status === 'error' ? '处理失败' :
-               '处理中...'}
-            </span>
+            {isWaitingApproval ? (
+              <>
+                <span className="text-[11px] text-amber-500">等待批准</span>
+                {message.sessionId && onApprove && (
+                  <button
+                    onClick={() => onApprove(message.sessionId!)}
+                    className="ml-auto px-3 py-1 rounded-lg bg-[var(--color-accent)] text-white text-[12px] font-medium hover:bg-[var(--color-accent-hover)] transition-colors"
+                  >
+                    批准
+                  </button>
+                )}
+              </>
+            ) : (
+              <span className={`text-[11px] ${
+                message.status === 'done' ? 'text-green-500' :
+                message.status === 'error' ? 'text-red-500' :
+                'text-[var(--color-accent)]'
+              }`}>
+                {message.status === 'done' ? '已处理' :
+                 message.status === 'error' ? '处理失败' :
+                 '处理中...'}
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -310,10 +364,65 @@ export default function HomePage() {
             return msg;
           }));
           break;
+        case 'approval_required': {
+          // 分析完成，等待批准
+          finishGeneration();
+          setIsGenerating(false);
+          // 更新消息状态，显示分析结果和批准按钮
+          setMessages(prev => prev.map(msg => {
+            if (msg.role === 'assistant' && msg.status === 'processing') {
+              const features = event.payload.features;
+              const content = isFeatureList(features)
+                ? `${features.appTitle}：${features.summary}`
+                : '分析完成，等待批准';
+              return {
+                ...msg,
+                status: 'waiting_approval' as const,
+                content,
+                features,
+                sessionId: event.payload.sessionId,
+                steps: (msg.steps || 0) + 1,
+              };
+            }
+            return msg;
+          }));
+          break;
+        }
       }
     },
     [updateStage, appendDelta, updateEntryFile, updateProjectStatus, finishGeneration, setError, addMessage]
   );
+
+  // 批准后继续生成
+  const handleApprove = useCallback(async (sessionId: string) => {
+    setIsGenerating(true);
+    updateProjectStatus('generating');
+    startGeneration(`approve-${Date.now()}`);
+
+    // 更新消息状态为处理中
+    setMessages(prev => prev.map(msg => {
+      if (msg.sessionId === sessionId) {
+        return { ...msg, status: 'processing' as const, content: '正在生成代码...' };
+      }
+      return msg;
+    }));
+
+    try {
+      await approveAndContinue(sessionId, handleStreamEvent);
+    } catch (error) {
+      const errorMsg = '生成过程发生异常，请重试';
+      setError(errorMsg);
+      revertProjectStatusAfterFailure();
+      setIsGenerating(false);
+      toast.error(errorMsg);
+      setMessages(prev => prev.map(msg => {
+        if (msg.sessionId === sessionId) {
+          return { ...msg, status: 'error' as const, content: errorMsg };
+        }
+        return msg;
+      }));
+    }
+  }, [handleStreamEvent, updateProjectStatus, startGeneration, setError]);
 
   const handleSubmit = useCallback(async () => {
     if (!inputValue.trim() || isGenerating) return;
@@ -496,7 +605,7 @@ export default function HomePage() {
 
             {/* 消息列表 */}
             {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
+              <MessageBubble key={msg.id} message={msg} onApprove={handleApprove} />
             ))}
 
             {/* 生成状态面板 */}

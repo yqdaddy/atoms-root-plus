@@ -65,6 +65,10 @@ async function parseSSEStream(
   let chunkCount = 0;
   const runId = `run-${Date.now()}`;
 
+  // 当前事件的类型和数据
+  let currentEventType = '';
+  let currentData = '';
+
   try {
     for (;;) {
       if (signal.aborted) {
@@ -84,106 +88,130 @@ async function parseSSEStream(
 
       if (chunk.done) {
         console.log('[liveEngine] 流结束，共接收', chunkCount, '个数据块');
+        // 处理最后一个事件（如果有）
+        if (currentEventType && currentData) {
+          processSSEEvent(currentEventType, currentData, runId, onEvent);
+        }
         break;
       }
 
       chunkCount += 1;
       buffer += decoder.decode(chunk.value, { stream: true });
+      console.log('[liveEngine] 收到 chunk', chunkCount, '长度:', buffer.length);
 
-      // 解析 SSE 行：每行格式为 "event: xxx\ndata: {...}\n\n"
-      let eventEndIndex = buffer.indexOf('\n\n');
-      while (eventEndIndex >= 0) {
-        const eventBlock = buffer.slice(0, eventEndIndex);
-        buffer = buffer.slice(eventEndIndex + 2);
-        eventEndIndex = buffer.indexOf('\n\n');
+      // 逐行解析 SSE
+      const lines = buffer.split('\n');
+      // 保留最后一个不完整的行
+      buffer = lines.pop() || '';
 
-        const lines = eventBlock.split('\n');
-        let eventType = '';
-        let eventData = '';
-
-        for (const line of lines) {
-          if (line.startsWith('event:')) {
-            eventType = line.slice(6).trim();
-          } else if (line.startsWith('data:')) {
-            eventData = line.slice(5).trim();
+      for (const line of lines) {
+        if (line.startsWith('event:')) {
+          currentEventType = line.slice(6).trim();
+        } else if (line.startsWith('data:')) {
+          currentData = line.slice(5).trim();
+        } else if (line === '') {
+          // 空行表示事件结束
+          if (currentEventType && currentData) {
+            processSSEEvent(currentEventType, currentData, runId, onEvent);
           }
-        }
-
-        if (eventType && eventData) {
-          try {
-            const payload = JSON.parse(eventData);
-            // 转换后端格式到前端格式
-            let event: StreamEvent;
-            switch (eventType) {
-              case 'stage': {
-                // 后端: { stage: 'analysis' } → 前端: { runId, stage: 'analyzing', attempt, message }
-                const backendStage = payload.stage as string;
-                const frontendStage = STAGE_MAP[backendStage] || 'analyzing';
-                event = {
-                  type: 'stage',
-                  payload: {
-                    runId,
-                    stage: frontendStage,
-                    attempt: 1,
-                    message: STAGE_MESSAGES[backendStage] || `${backendStage} 阶段`,
-                  },
-                };
-                break;
-              }
-              case 'delta': {
-                // 后端: { content, stage } → 前端: { runId, phase, text }
-                const backendStage = payload.stage as string;
-                event = {
-                  type: 'delta',
-                  payload: {
-                    runId,
-                    phase: STAGE_TO_PHASE[backendStage] || 'generate',
-                    text: payload.content || '',
-                  },
-                };
-                break;
-              }
-              case 'done': {
-                // 后端: { fullHtml } → 前端: { runId, html, warnings, stats }
-                event = {
-                  type: 'done',
-                  payload: {
-                    runId,
-                    html: payload.fullHtml || '',
-                    warnings: [],
-                    stats: { mode: 'live', inputTokens: 0, outputTokens: 0, durationMs: 0, rounds: 1 },
-                  },
-                };
-                break;
-              }
-              case 'error': {
-                // 后端: { error } → 前端: { runId, code, message, retryable, fallbackToDemo }
-                event = {
-                  type: 'error',
-                  payload: {
-                    runId,
-                    code: 'PARSE_FAILED' as const,
-                    message: payload.error || '生成失败',
-                    retryable: true,
-                    fallbackToDemo: false,
-                  },
-                };
-                break;
-              }
-              default:
-                console.warn('[liveEngine] 未知事件类型', eventType);
-                continue;
-            }
-            console.log('[liveEngine] 收到事件', event.type, eventBlock.length, '字节');
-            onEvent(event);
-          } catch (parseError) {
-            console.warn('[liveEngine] 无法解析事件数据', eventData.slice(0, 200));
-          }
+          currentEventType = '';
+          currentData = '';
         }
       }
     }
   } finally {
     reader.releaseLock();
+  }
+}
+
+/**
+ * 处理单个 SSE 事件
+ */
+function processSSEEvent(
+  eventType: string,
+  eventData: string,
+  runId: string,
+  onEvent: StreamEventHandler,
+): void {
+  try {
+    const payload = JSON.parse(eventData);
+    console.log('[liveEngine] 解析事件:', eventType, eventData.slice(0, 100));
+
+    // 转换后端格式到前端格式
+    let event: StreamEvent;
+    switch (eventType) {
+      case 'stage': {
+        const backendStage = payload.stage as string;
+        const frontendStage = STAGE_MAP[backendStage] || 'analyzing';
+        const message = STAGE_MESSAGES[backendStage] || `${backendStage} 阶段`;
+        console.log('[liveEngine] stage 事件:', { backendStage, frontendStage, message });
+        event = {
+          type: 'stage',
+          payload: {
+            runId,
+            stage: frontendStage,
+            attempt: 1,
+            message,
+          },
+        };
+        break;
+      }
+      case 'delta': {
+        const backendStage = payload.stage as string;
+        event = {
+          type: 'delta',
+          payload: {
+            runId,
+            phase: STAGE_TO_PHASE[backendStage] || 'generate',
+            text: payload.content || '',
+          },
+        };
+        break;
+      }
+      case 'done': {
+        event = {
+          type: 'done',
+          payload: {
+            runId,
+            html: payload.fullHtml || '',
+            warnings: [],
+            stats: { mode: 'live', inputTokens: 0, outputTokens: 0, durationMs: 0, rounds: 1 },
+          },
+        };
+        break;
+      }
+      case 'error': {
+        event = {
+          type: 'error',
+          payload: {
+            runId,
+            code: 'PARSE_FAILED' as const,
+            message: payload.error || '生成失败',
+            retryable: true,
+            fallbackToDemo: false,
+          },
+        };
+        break;
+      }
+      case 'approval_required': {
+        event = {
+          type: 'approval_required',
+          payload: {
+            runId,
+            sessionId: payload.sessionId || '',
+            analysis: payload.analysis || '',
+            features: payload.features || { raw: '' },
+          },
+        };
+        break;
+      }
+      default:
+        console.warn('[liveEngine] 未知事件类型', eventType);
+        return;
+    }
+    onEvent(event);
+  } catch (parseError) {
+    console.warn('[liveEngine] 无法解析事件数据', eventData.slice(0, 200));
   }
 }
 
@@ -212,7 +240,9 @@ async function runPipeline(
       hasCurrentHtml: Boolean(options.currentHtml),
     });
 
-    const response = await fetch('/api/llm/generate', {
+    // 开发环境直接请求后端（绕过 Vite 代理对 SSE 的兼容问题）
+    const apiBase = import.meta.env.DEV ? 'http://localhost:3000' : '';
+    const response = await fetch(`${apiBase}/api/llm/generate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -328,6 +358,99 @@ export function createLiveEngine(): AIEngine {
       cancelActiveRun();
     },
   };
+}
+
+/* ---------------- 批准后继续生成 ---------------- */
+
+/**
+ * 批准分析结果并继续生成。
+ * 调用后端 /api/llm/approve 端点继续生成流程。
+ */
+export async function approveAndContinue(
+  sessionId: string,
+  onEvent: StreamEventHandler,
+): Promise<void> {
+  cancelActiveRun();
+
+  const controller = new AbortController();
+  const unregister = registerActiveRun(() => {
+    controller.abort();
+  });
+
+  try {
+    console.log('[liveEngine] 批准后继续生成', { sessionId });
+
+    const apiBase = import.meta.env.DEV ? 'http://localhost:3000' : '';
+    const response = await fetch(`${apiBase}/api/llm/approve`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ sessionId }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      onEvent({
+        type: 'error',
+        payload: {
+          runId: `r_${Date.now()}`,
+          code: 'PARSE_FAILED',
+          message: `批准失败（HTTP ${response.status}）`,
+          retryable: true,
+          fallbackToDemo: false,
+        },
+      });
+      return;
+    }
+
+    if (!response.body) {
+      onEvent({
+        type: 'error',
+        payload: {
+          runId: `r_${Date.now()}`,
+          code: 'NETWORK_TIMEOUT',
+          message: '后端返回了空响应体',
+          retryable: true,
+          fallbackToDemo: false,
+        },
+      });
+      return;
+    }
+
+    // 解析 SSE 流
+    await parseSSEStream(response, onEvent, controller.signal);
+
+  } catch (error) {
+    if (controller.signal.aborted) {
+      onEvent({
+        type: 'error',
+        payload: {
+          runId: `r_${Date.now()}`,
+          code: 'CANCELLED',
+          message: '已停止生成',
+          retryable: false,
+          fallbackToDemo: false,
+        },
+      });
+      return;
+    }
+
+    onEvent({
+      type: 'error',
+      payload: {
+        runId: `r_${Date.now()}`,
+        code: 'NETWORK_TIMEOUT',
+        message: '无法连接后端服务',
+        retryable: true,
+        fallbackToDemo: false,
+        detail: error instanceof Error ? error.message : String(error),
+      },
+    });
+
+  } finally {
+    unregister();
+  }
 }
 
 /* ---------------- 类型导出（保持向后兼容）---------------- */

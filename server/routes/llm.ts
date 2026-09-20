@@ -1,10 +1,16 @@
 /**
  * LLM 代理路由。
  * 服务端持有 API Key，代理调用 LLM API，SSE 流式返回。
+ * 支持批准流程：分析完成后暂停等待用户批准。
  */
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import { generateWithStages, cancelGeneration, type LLMEvent } from '../llm.js';
+import {
+  generateWithStages,
+  continueAfterApproval,
+  cancelGeneration,
+  type LLMEvent,
+} from '../llm.js';
 
 export const llmRouter = new Hono();
 
@@ -17,6 +23,7 @@ export const llmRouter = new Hono();
  * SSE 事件流：
  * - stage: { stage: 'analysis' | 'generate' | 'review' }
  * - delta: { content: string, stage?: string }
+ * - approval_required: { sessionId: string, analysis: string, features: object }
  * - done: { fullHtml: string }
  * - error: { error: string }
  */
@@ -66,8 +73,8 @@ llmRouter.post('/generate', async (c) => {
             data: JSON.stringify(event.payload),
           });
 
-          // done 或 error 后关闭流
-          if (event.type === 'done' || event.type === 'error') {
+          // done、error 或 approval_required 后关闭流
+          if (event.type === 'done' || event.type === 'error' || event.type === 'approval_required') {
             closed = true;
             break;
           }
@@ -81,6 +88,72 @@ llmRouter.post('/generate', async (c) => {
     // 并行执行生成和发送
     try {
       await Promise.all([generatePromise, sendEvents()]);
+    } catch (error) {
+      if (!closed) {
+        const message = error instanceof Error ? error.message : '未知错误';
+        await stream.writeSSE({
+          event: 'error',
+          data: JSON.stringify({ error: message }),
+        });
+      }
+    }
+  });
+});
+
+/**
+ * POST /api/llm/approve
+ * 批准分析结果并继续生成
+ *
+ * Body: { sessionId: string }
+ *
+ * SSE 事件流：继续返回 generate、review、done 事件
+ */
+llmRouter.post('/approve', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const sessionId = body.sessionId;
+
+  if (typeof sessionId !== 'string') {
+    return c.json({ error: 'sessionId 为必填字段' }, 400);
+  }
+
+  // 返回 SSE 流
+  return streamSSE(c, async (stream) => {
+    const eventQueue: LLMEvent[] = [];
+    let closed = false;
+
+    // 事件处理函数
+    const onEvent = (event: LLMEvent) => {
+      if (closed) return;
+      eventQueue.push(event);
+    };
+
+    // 继续生成
+    const continuePromise = continueAfterApproval(sessionId, onEvent);
+
+    // 轮询事件队列并发送
+    const sendEvents = async () => {
+      while (!closed) {
+        if (eventQueue.length > 0) {
+          const event = eventQueue.shift()!;
+
+          await stream.writeSSE({
+            event: event.type,
+            data: JSON.stringify(event.payload),
+          });
+
+          // done 或 error 后关闭流
+          if (event.type === 'done' || event.type === 'error') {
+            closed = true;
+            break;
+          }
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+    };
+
+    try {
+      await Promise.all([continuePromise, sendEvents()]);
     } catch (error) {
       if (!closed) {
         const message = error instanceof Error ? error.message : '未知错误';
