@@ -3,7 +3,7 @@
 ## 1. 服务器要求
 
 - Ubuntu 20.04+ / Debian / CentOS
-- Node.js 18+（已安装）
+- Node.js 22 LTS（当前 Active LTS，Node 20 已于 2026-04 EOL）
 - nginx（已安装）
 - 开放 80/443 端口
 
