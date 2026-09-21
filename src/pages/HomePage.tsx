@@ -1099,7 +1099,14 @@ export default function HomePage() {
                   <button
                     onClick={async () => {
                       try {
-                        const shareId = await saveShare(generatedHtml, currentProject?.name);
+                        // 收集所有文件用于分享
+                        const files = currentProject?.files ? Object.fromEntries(
+                          Object.entries(currentProject.files).map(([path, node]) => [
+                            path,
+                            { path, content: node.content, language: node.language }
+                          ])
+                        ) : undefined;
+                        const shareId = await saveShare(generatedHtml, currentProject?.name, files);
                         const shareUrl = getShareUrl(shareId);
                         navigator.clipboard.writeText(shareUrl);
                         toast.success('分享链接已复制到剪贴板');
@@ -1175,7 +1182,14 @@ export default function HomePage() {
                 <button
                   onClick={async () => {
                     try {
-                      const shareId = await saveShare(generatedHtml, currentProject?.name);
+                      // 收集所有文件用于分享
+                      const files = currentProject?.files ? Object.fromEntries(
+                        Object.entries(currentProject.files).map(([path, node]) => [
+                          path,
+                          { path, content: node.content, language: node.language }
+                        ])
+                      ) : undefined;
+                      const shareId = await saveShare(generatedHtml, currentProject?.name, files);
                       const shareUrl = getShareUrl(shareId);
                       navigator.clipboard.writeText(shareUrl);
                       toast.success('分享链接已复制');

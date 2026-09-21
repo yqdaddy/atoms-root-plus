@@ -3,12 +3,21 @@
  * 使用服务器存储，生成可跨设备访问的分享链接
  */
 
+/** 多文件结构 */
+export interface SharedFile {
+  path: string;
+  content: string;
+  language: string;
+}
+
 /** 分享数据结构 */
 export interface ShareData {
   /** 分享 ID */
   id: string;
-  /** HTML 内容 */
+  /** HTML 内容（入口文件） */
   html: string;
+  /** 多文件内容（可选） */
+  files?: Record<string, SharedFile> | null;
   /** 创建时间戳 */
   createdAt: number;
   /** 项目名称（可选） */
@@ -19,15 +28,20 @@ export interface ShareData {
 
 /**
  * 保存分享内容到服务器
- * @param html HTML 内容
+ * @param html 入口 HTML 内容
+ * @param files 多文件内容（可选）
  * @param projectName 项目名称（可选）
  * @returns 分享 ID
  */
-export async function saveShare(html: string, projectName?: string): Promise<string> {
+export async function saveShare(
+  html: string,
+  projectName?: string,
+  files?: Record<string, SharedFile>
+): Promise<string> {
   const response = await fetch('/api/share', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ html, projectName }),
+    body: JSON.stringify({ html, files, projectName }),
   });
 
   if (!response.ok) {
@@ -59,6 +73,7 @@ export async function loadShare(id: string): Promise<ShareData | null> {
     return {
       id: data.id,
       html: data.html,
+      files: data.files,
       projectName: data.projectName,
       createdAt: data.createdAt,
     };

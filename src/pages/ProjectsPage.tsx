@@ -61,7 +61,7 @@ function ProjectCard({
 
   return (
     <div
-      className="group relative bg-[var(--color-bg-surface)] border border-[var(--color-border-default)] rounded-xl overflow-hidden hover:border-[var(--color-border-strong)] transition-all cursor-pointer"
+      className="group relative bg-[var(--color-bg-surface)] border border-[var(--color-border-default)] rounded-xl hover:border-[var(--color-border-strong)] transition-all cursor-pointer"
       onClick={onOpen}
     >
       {/* 预览缩略图 */}

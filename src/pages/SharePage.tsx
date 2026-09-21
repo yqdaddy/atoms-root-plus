@@ -1,11 +1,91 @@
 /**
  * 分享预览页
  * 从 URL 参数读取分享 ID，从服务器获取 HTML 并渲染
+ * 支持多文件项目：将 CSS/JS 内容注入为内联标签
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Icon } from '@iconify/react';
-import { loadShare, type ShareData } from '../utils/share';
+import { loadShare, type ShareData, type SharedFile } from '../utils/share';
+
+/**
+ * 将多文件内容注入到 HTML 中
+ * - CSS 文件注入为 <style> 标签
+ * - JS 文件注入为 <script> 标签
+ * - 移除对应的外部引用
+ */
+function injectFilesIntoHtml(html: string, files: Record<string, SharedFile> | null | undefined): string {
+  if (!files || Object.keys(files).length === 0) {
+    return html;
+  }
+
+  let result = html;
+
+  // 收集需要注入的 CSS 和 JS
+  const cssFiles: Array<{ path: string; content: string }> = [];
+  const jsFiles: Array<{ path: string; content: string }> = [];
+
+  for (const [path, file] of Object.entries(files)) {
+    // 跳过入口文件（已经在 html 中）
+    if (path === '/index.html' || path === 'index.html') continue;
+
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+    if (normalizedPath.endsWith('.css')) {
+      cssFiles.push({ path: normalizedPath, content: file.content });
+    } else if (normalizedPath.endsWith('.js')) {
+      jsFiles.push({ path: normalizedPath, content: file.content });
+    }
+  }
+
+  // 注入 CSS：移除外部 link，添加内联 style
+  for (const cssFile of cssFiles) {
+    // 匹配 <link rel="stylesheet" href="styles/main.css"> 或类似引用
+    // 支持相对路径和绝对路径
+    const patterns = [
+      new RegExp(`<link[^>]*href=["']\\.\\./?${escapeRegExp(cssFile.path.slice(1))}["'][^>]*>`, 'g'),
+      new RegExp(`<link[^>]*href=["']${escapeRegExp(cssFile.path)}["'][^>]*>`, 'g'),
+      new RegExp(`<link[^>]*href=["']${escapeRegExp(cssFile.path.slice(1))}["'][^>]*>`, 'g'),
+    ];
+
+    for (const pattern of patterns) {
+      if (result.match(pattern)) {
+        result = result.replace(pattern, `<style>\n${cssFile.content}\n</style>`);
+      }
+    }
+
+    // 如果没有匹配到 link 标签但有 CSS 文件，在 </head> 前注入
+    if (!html.includes(`<link`) && result.includes('</head>')) {
+      const styleTag = `<style>\n${cssFile.content}\n</style>`;
+      result = result.replace('</head>', `${styleTag}\n</head>`);
+    }
+  }
+
+  // 注入 JS：移除外部 script src，添加内联 script
+  for (const jsFile of jsFiles) {
+    // 匹配 <script src="src/main.js"></script> 或类似引用
+    const patterns = [
+      new RegExp(`<script[^>]*src=["']\\.\\./?${escapeRegExp(jsFile.path.slice(1))}["'][^>]*>\\s*</script>`, 'g'),
+      new RegExp(`<script[^>]*src=["']${escapeRegExp(jsFile.path)}["'][^>]*>\\s*</script>`, 'g'),
+      new RegExp(`<script[^>]*src=["']${escapeRegExp(jsFile.path.slice(1))}["'][^>]*>\\s*</script>`, 'g'),
+    ];
+
+    for (const pattern of patterns) {
+      if (result.match(pattern)) {
+        result = result.replace(pattern, `<script>\n${jsFile.content}\n</script>`);
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * 转义正则表达式特殊字符
+ */
+function escapeRegExp(string: string): string {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 export default function SharePage() {
   const { id } = useParams<{ id: string }>();
@@ -42,6 +122,12 @@ export default function SharePage() {
       cancelled = true;
     };
   }, [id]);
+
+  // 注入多文件内容后的 HTML
+  const injectedHtml = useMemo(() => {
+    if (!shareData?.html) return '';
+    return injectFilesIntoHtml(shareData.html, shareData.files);
+  }, [shareData]);
 
   if (loading) {
     return (
@@ -83,6 +169,11 @@ export default function SharePage() {
           <span className="text-sm text-[var(--color-text-secondary)]">
             {shareData?.projectName || '分享预览'}
           </span>
+          {shareData?.files && Object.keys(shareData.files).length > 1 && (
+            <span className="text-xs text-[var(--color-text-tertiary)] ml-2">
+              ({Object.keys(shareData.files).length} 个文件)
+            </span>
+          )}
         </div>
         <button
           onClick={() => navigate('/')}
@@ -95,9 +186,9 @@ export default function SharePage() {
 
       {/* 预览内容 */}
       <div className="flex-1 min-h-0">
-        {shareData?.html && (
+        {injectedHtml && (
           <iframe
-            srcDoc={shareData.html}
+            srcDoc={injectedHtml}
             title="分享预览"
             className="w-full h-full border-0"
             sandbox="allow-scripts allow-modals allow-forms allow-same-origin"

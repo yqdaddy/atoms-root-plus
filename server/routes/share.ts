@@ -12,6 +12,7 @@ export const shareRouter = new Hono();
 interface ShareRecord {
   id: string;
   html: string;
+  files: string | null; // JSON 格式存储多文件 { "styles/main.css": "content...", "src/main.js": "content..." }
   project_name: string | null;
   created_at: number;
   expires_at: number;
@@ -19,17 +20,32 @@ interface ShareRecord {
 
 // 确保分享表存在
 function ensureShareTable() {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS shares (
-      id TEXT PRIMARY KEY,
-      html TEXT NOT NULL,
-      project_name TEXT,
-      created_at INTEGER NOT NULL,
-      expires_at INTEGER NOT NULL
-    )
-  `);
-  // 创建索引加速查询
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_shares_expires_at ON shares(expires_at)`);
+  // 先检查表是否存在
+  const tableExists = db.prepare(`
+    SELECT name FROM sqlite_master WHERE type='table' AND name='shares'
+  `).get();
+
+  if (!tableExists) {
+    // 创建新表（包含 files 字段）
+    db.exec(`
+      CREATE TABLE shares (
+        id TEXT PRIMARY KEY,
+        html TEXT NOT NULL,
+        files TEXT,
+        project_name TEXT,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      )
+    `);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_shares_expires_at ON shares(expires_at)`);
+  } else {
+    // 表已存在，检查是否需要添加 files 列
+    const columns = db.prepare(`PRAGMA table_info(shares)`).all() as { name: string }[];
+    const hasFilesColumn = columns.some(col => col.name === 'files');
+    if (!hasFilesColumn) {
+      db.exec(`ALTER TABLE shares ADD COLUMN files TEXT`);
+    }
+  }
 }
 
 // 初始化表
@@ -58,10 +74,16 @@ function cleanupExpiredShares() {
 shareRouter.post('/', async (c) => {
   try {
     const body = await c.req.json();
-    const { html, projectName } = body;
+    const { html, files, projectName } = body;
 
     if (!html || typeof html !== 'string') {
       return c.json({ error: 'HTML 内容不能为空' }, 400);
+    }
+
+    // 验证 files 格式（如果提供）
+    let filesJson: string | null = null;
+    if (files && typeof files === 'object' && Object.keys(files).length > 0) {
+      filesJson = JSON.stringify(files);
     }
 
     // 清理过期数据
@@ -72,8 +94,8 @@ shareRouter.post('/', async (c) => {
     const expiresAt = now + 7 * 24 * 60 * 60 * 1000; // 7 天后过期
 
     db.prepare(
-      `INSERT INTO shares (id, html, project_name, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`
-    ).run(id, html, projectName || null, now, expiresAt);
+      `INSERT INTO shares (id, html, files, project_name, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(id, html, filesJson, projectName || null, now, expiresAt);
 
     return c.json({ id, expiresAt });
   } catch (error) {
@@ -95,7 +117,7 @@ shareRouter.get('/:id', (c) => {
     }
 
     const row = db.prepare(
-      `SELECT id, html, project_name, created_at, expires_at FROM shares WHERE id = ?`
+      `SELECT id, html, files, project_name, created_at, expires_at FROM shares WHERE id = ?`
     ).get(id) as ShareRecord | undefined;
 
     if (!row) {
@@ -109,9 +131,20 @@ shareRouter.get('/:id', (c) => {
       return c.json({ error: '分享链接已过期' }, 410);
     }
 
+    // 解析 files JSON
+    let files: Record<string, { path: string; content: string; language: string }> | null = null;
+    if (row.files) {
+      try {
+        files = JSON.parse(row.files);
+      } catch {
+        console.warn('[share] 解析 files JSON 失败:', id);
+      }
+    }
+
     return c.json({
       id: row.id,
       html: row.html,
+      files,
       projectName: row.project_name,
       createdAt: row.created_at,
     });
