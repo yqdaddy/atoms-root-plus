@@ -41,21 +41,23 @@ function injectFilesIntoHtml(html: string, files: Record<string, SharedFile> | n
   // 注入 CSS：移除外部 link，添加内联 style
   for (const cssFile of cssFiles) {
     // 匹配 <link rel="stylesheet" href="styles/main.css"> 或类似引用
-    // 支持相对路径和绝对路径
+    // 前缀兼容 ./、../、/ 与无前缀四种形式
+    const relPath = escapeRegExp(cssFile.path.slice(1));
     const patterns = [
-      new RegExp(`<link[^>]*href=["']\\.\\./?${escapeRegExp(cssFile.path.slice(1))}["'][^>]*>`, 'g'),
+      new RegExp(`<link[^>]*href=["'](?:\\./|\\.\\./|/)?${relPath}["'][^>]*>`, 'g'),
       new RegExp(`<link[^>]*href=["']${escapeRegExp(cssFile.path)}["'][^>]*>`, 'g'),
-      new RegExp(`<link[^>]*href=["']${escapeRegExp(cssFile.path.slice(1))}["'][^>]*>`, 'g'),
     ];
 
+    let matched = false;
     for (const pattern of patterns) {
-      if (result.match(pattern)) {
+      if (pattern.test(result)) {
         result = result.replace(pattern, `<style>\n${cssFile.content}\n</style>`);
+        matched = true;
       }
     }
 
-    // 如果没有匹配到 link 标签但有 CSS 文件，在 </head> 前注入
-    if (!html.includes(`<link`) && result.includes('</head>')) {
+    // 兜底：引用形式未匹配到 link 标签时，直接注入到 </head> 前
+    if (!matched && result.includes('</head>')) {
       const styleTag = `<style>\n${cssFile.content}\n</style>`;
       result = result.replace('</head>', `${styleTag}\n</head>`);
     }
@@ -63,17 +65,25 @@ function injectFilesIntoHtml(html: string, files: Record<string, SharedFile> | n
 
   // 注入 JS：移除外部 script src，添加内联 script
   for (const jsFile of jsFiles) {
-    // 匹配 <script src="src/main.js"></script> 或类似引用
+    // 前缀兼容 ./、../、/ 与无前缀四种形式
+    const relPath = escapeRegExp(jsFile.path.slice(1));
     const patterns = [
-      new RegExp(`<script[^>]*src=["']\\.\\./?${escapeRegExp(jsFile.path.slice(1))}["'][^>]*>\\s*</script>`, 'g'),
+      new RegExp(`<script[^>]*src=["'](?:\\./|\\.\\./|/)?${relPath}["'][^>]*>\\s*</script>`, 'g'),
       new RegExp(`<script[^>]*src=["']${escapeRegExp(jsFile.path)}["'][^>]*>\\s*</script>`, 'g'),
-      new RegExp(`<script[^>]*src=["']${escapeRegExp(jsFile.path.slice(1))}["'][^>]*>\\s*</script>`, 'g'),
     ];
 
+    let matched = false;
     for (const pattern of patterns) {
-      if (result.match(pattern)) {
+      if (pattern.test(result)) {
         result = result.replace(pattern, `<script>\n${jsFile.content}\n</script>`);
+        matched = true;
       }
+    }
+
+    // 兜底：引用形式未匹配到 script 标签时，直接注入到 </body> 前
+    if (!matched && result.includes('</body>')) {
+      const scriptTag = `<script>\n${jsFile.content}\n</script>`;
+      result = result.replace('</body>', `${scriptTag}\n</body>`);
     }
   }
 
