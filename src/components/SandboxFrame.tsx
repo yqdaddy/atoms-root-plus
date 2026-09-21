@@ -11,9 +11,10 @@ import {
   parseSandboxMessage,
   DEFAULT_CDN_HOSTS,
 } from '../types/sandbox';
-import type { SandboxAllowFlag, FileNode } from '../types/project';
+import type { SandboxAllowFlag, FileNode, ProjectFramework } from '../types/project';
 import { useSettingsStore, type DeviceMode, DEVICE_VIEWPORTS } from '../stores/settingsStore';
-import { assembleFiles } from '../services/sandbox/assembler';
+import { assembleFiles, injectReactRuntime, injectVueRuntime } from '../services/sandbox/assembler';
+import { ESM_CDN_HOST } from '../services/sandbox/jsxCompiler';
 import CodeViewer from './CodeViewer';
 
 interface SandboxFrameProps {
@@ -23,6 +24,8 @@ interface SandboxFrameProps {
   files?: Record<string, FileNode> | undefined;
   /** 入口文件路径（多文件模式），默认 /index.html */
   entryFile?: string;
+  /** 项目目标框架，默认 html；react-cdn 时注入 React/Sucrase 运行时 */
+  framework?: ProjectFramework;
   /** 额外的 sandbox 标志 */
   extraSandboxFlags?: readonly SandboxAllowFlag[];
   /** 自定义 CDN 主机白名单 */
@@ -44,9 +47,10 @@ function generateSessionId(): string {
 function assemblePreviewHtml(
   userHtml: string,
   sessionId: string,
-  cdnHosts: readonly string[]
+  cdnHosts: readonly string[],
+  evalAllowed: boolean = false
 ): string {
-  const csp = buildPreviewCsp(cdnHosts);
+  const csp = buildPreviewCsp(cdnHosts, evalAllowed);
 
   // 注入消息桥接脚本（监听错误、日志、resize）
   const bridgeScript = `
@@ -125,11 +129,12 @@ function isMultiFile(files: Record<string, FileNode> | undefined): boolean {
 function getPreviewHtml(
   html: string | undefined,
   files: Record<string, FileNode> | undefined,
-  entryFile: string
+  entryFile: string,
+  framework: ProjectFramework
 ): string {
-  // 多文件模式：调用 assembler 组装
+  // 多文件模式：调用 assembler 组装（React/Vue CDN 模式在组装器内注入运行时）
   if (files && isMultiFile(files)) {
-    const result = assembleFiles(files, entryFile);
+    const result = assembleFiles(files, entryFile, framework);
 
     // 记录组装警告
     if (result.warnings.length > 0) {
@@ -139,23 +144,33 @@ function getPreviewHtml(
     return result.html;
   }
 
-  // 单文件模式：直接使用 html 或 files 中的入口文件
+  // 单文件模式：优先 html prop，其次 files 中的入口文件
+  let source = '';
   if (html) {
-    return html;
-  }
-
-  if (files) {
+    source = html;
+  } else if (files) {
     const entry = files[entryFile] ?? files['/index.html'];
-    return entry?.content ?? '';
+    source = entry?.content ?? '';
   }
 
-  return '';
+  // React CDN 模式：注入 React/Sucrase 运行时并包装内联 JSX
+  if (framework === 'react-cdn' && source) {
+    return injectReactRuntime(source);
+  }
+
+  // Vue CDN 模式：注入 Vue/SFC 编译器运行时并包装内联 Vue 代码
+  if (framework === 'vue-cdn' && source) {
+    return injectVueRuntime(source);
+  }
+
+  return source;
 }
 
 export default function SandboxFrame({
   html,
   files,
   entryFile = '/index.html',
+  framework = 'html',
   extraSandboxFlags = [],
   cdnHosts = DEFAULT_CDN_HOSTS,
   onReady,
@@ -171,17 +186,23 @@ export default function SandboxFrame({
   // 组装沙箱属性
   const sandboxAttr = useMemo(() => buildSandboxAttribute(extraSandboxFlags), [extraSandboxFlags]);
 
-  // 获取最终预览 HTML（支持多文件）
+  // 获取最终预览 HTML（支持多文件与 React CDN 框架）
   const previewSourceHtml = useMemo(
-    () => getPreviewHtml(html, files, entryFile),
-    [html, files, entryFile]
+    () => getPreviewHtml(html, files, entryFile, framework),
+    [html, files, entryFile, framework]
   );
 
   // 组装预览 HTML（注入 CSP 和桥接脚本）
-  const previewHtml = useMemo(
-    () => assemblePreviewHtml(previewSourceHtml, sessionId, cdnHosts),
-    [previewSourceHtml, sessionId, cdnHosts]
-  );
+  // React CDN 模式：开放 unsafe-eval（Sucrase 产物经 new Function 执行）并加白 esm.sh（Sucrase ESM 构建域）
+  // Vue CDN 模式：开放 unsafe-eval（SFC 编译器产物经 new Function 执行）
+  const previewHtml = useMemo(() => {
+    const needsEval = framework === 'react-cdn' || framework === 'vue-cdn';
+    const effectiveHosts =
+      framework === 'react-cdn' && !cdnHosts.includes(ESM_CDN_HOST)
+        ? [...cdnHosts, ESM_CDN_HOST]
+        : cdnHosts;
+    return assemblePreviewHtml(previewSourceHtml, sessionId, effectiveHosts, needsEval);
+  }, [previewSourceHtml, sessionId, cdnHosts, framework]);
 
   // 监听来自沙箱的消息
   useEffect(() => {

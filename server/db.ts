@@ -12,6 +12,7 @@ import type {
   StorageEnvelope,
   IsoDateTime,
   SessionUser,
+  DeploymentRecord,
 } from './types.js';
 import { ENTRY_FILE_PATH, CURRENT_SCHEMA_VERSION } from './types.js';
 
@@ -57,6 +58,15 @@ db.exec(`
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS deployments (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    deploy_url TEXT NOT NULL,
+    deployed_at TEXT NOT NULL,
+    file_count INTEGER,
+    total_size INTEGER
+  );
 `);
 
 // 索引不依赖 user_id 的先创建
@@ -64,6 +74,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_projects_updated_at ON projects(updated_at DESC);
   CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
   CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
+  CREATE INDEX IF NOT EXISTS idx_deployments_project_id ON deployments(project_id);
 `);
 
 // ============ 迁移：为已有 projects 表添加 user_id 列 ============
@@ -384,6 +395,79 @@ export function getValidSessionByTokenHash(
 
 export function deleteSessionByTokenHash(tokenHash: string): void {
   db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash);
+}
+
+// ============ 部署记录 ============
+
+export interface DeploymentRowInput {
+  id: string;
+  projectId: string;
+  deployUrl: string;
+  deployedAt: IsoDateTime;
+  fileCount: number;
+  totalSize: number;
+}
+
+/**
+ * 插入一条部署记录。
+ * 每次部署追加一行，保留历史；最新记录按 deployed_at 取。
+ */
+export function createDeployment(params: DeploymentRowInput): void {
+  db.prepare(
+    `INSERT INTO deployments (id, project_id, deploy_url, deployed_at, file_count, total_size)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    params.id,
+    params.projectId,
+    params.deployUrl,
+    params.deployedAt,
+    params.fileCount,
+    params.totalSize,
+  );
+}
+
+/**
+ * 获取项目最近一次部署记录。
+ */
+export function getLatestDeploymentByProjectId(
+  projectId: string,
+): DeploymentRecord | null {
+  const row = db
+    .prepare(
+      `SELECT id, project_id, deploy_url, deployed_at, file_count, total_size
+       FROM deployments WHERE project_id = ?
+       ORDER BY deployed_at DESC LIMIT 1`,
+    )
+    .get(projectId) as
+    | {
+        id: string;
+        project_id: string;
+        deploy_url: string;
+        deployed_at: string;
+        file_count: number | null;
+        total_size: number | null;
+      }
+    | undefined;
+
+  if (!row) return null;
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    deployUrl: row.deploy_url,
+    deployedAt: row.deployed_at,
+    fileCount: row.file_count ?? 0,
+    totalSize: row.total_size ?? 0,
+  };
+}
+
+/**
+ * 删除项目的全部部署记录（配合部署目录清理使用）。
+ */
+export function deleteDeploymentsByProjectId(projectId: string): number {
+  const result = db
+    .prepare('DELETE FROM deployments WHERE project_id = ?')
+    .run(projectId);
+  return result.changes;
 }
 
 // ============ 其他 ============

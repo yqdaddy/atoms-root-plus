@@ -174,9 +174,18 @@ export function parseSandboxMessage(
   }
 }
 
-/** 从 preview CSP 构造 meta 标签内容。注意不含 unsafe-eval，等于在访客内也禁了 eval。 */
-export function buildPreviewCsp(cdnHosts: readonly string[]): string {
-  const scriptSrc = ["'unsafe-inline'", ...cdnHosts.map((host) => `https://${host}`)].join(' ');
+/**
+ * 从 preview CSP 构造 meta 标签内容。
+ * 默认不含 unsafe-eval（等于在访客内禁了 eval/new Function）。
+ * React CDN 模式需要 evalAllowed=true：Sucrase 编译产物经 new Function 执行。
+ * unsafe-eval 的风险由 iframe sandbox（无 allow-same-origin）隔离缓解。
+ */
+export function buildPreviewCsp(cdnHosts: readonly string[], evalAllowed: boolean = false): string {
+  const scriptSrcParts = ["'unsafe-inline'", ...cdnHosts.map((host) => `https://${host}`)];
+  if (evalAllowed) {
+    scriptSrcParts.push("'unsafe-eval'");
+  }
+  const scriptSrc = scriptSrcParts.join(' ');
   return [
     "default-src 'none'",
     `script-src ${scriptSrc}`,

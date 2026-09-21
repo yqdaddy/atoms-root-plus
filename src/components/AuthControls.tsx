@@ -1,18 +1,20 @@
 /**
  * 首页右上角认证控件。
  * 未登录：登录 / 注册按钮组。
- * 已登录：用户胶囊 + 下拉菜单（退出登录）。
+ * 已登录：用户胶囊 + 下拉菜单（设置 / 退出登录）。
  */
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '@iconify/react';
 import { useAuthStore } from '../stores/authStore';
 import { toast } from './Toast';
+import SettingsPanel from './SettingsPanel';
 
 export function HomeAuthControls() {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // 点击外部关闭菜单
@@ -78,6 +80,16 @@ export function HomeAuthControls() {
             {user.username}
           </div>
           <button
+            onClick={() => {
+              setMenuOpen(false);
+              setShowSettings(true);
+            }}
+            className="flex items-center gap-2 w-full px-3 py-2 rounded-[10px] text-[14px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-elevated)] transition-all duration-[140ms]"
+          >
+            <Icon icon="lucide:settings" width={16} height={16} />
+            <span>设置</span>
+          </button>
+          <button
             onClick={handleLogout}
             className="flex items-center gap-2 w-full px-3 py-2 rounded-[10px] text-[14px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-elevated)] transition-all duration-[140ms]"
           >
@@ -86,6 +98,8 @@ export function HomeAuthControls() {
           </button>
         </div>
       )}
+      {/* 设置面板 */}
+      <SettingsPanel open={showSettings} onClose={() => setShowSettings(false)} />
     </div>
   );
 }

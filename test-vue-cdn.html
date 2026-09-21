@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vue CDN 测试</title>
+</head>
+<body>
+  <div id="app"></div>
+
+  <template>
+    <div class="container">
+      <h1>{{ title }}</h1>
+      <button @click="increment">点击 {{ count }} 次</button>
+      <p class="hint">Vue SFC 格式测试成功</p>
+    </div>
+  </template>
+
+  <script>
+  export default {
+    data() {
+      return {
+        title: 'Vue 计数器',
+        count: 0
+      }
+    },
+    methods: {
+      increment() {
+        this.count++;
+      }
+    }
+  }
+  </script>
+
+  <style scoped>
+  .container {
+    text-align: center;
+    padding: 40px;
+    font-family: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  h1 {
+    color: #42b883;
+    margin-bottom: 20px;
+  }
+  button {
+    padding: 12px 24px;
+    font-size: 16px;
+    border: none;
+    border-radius: 8px;
+    background: #42b883;
+    color: white;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  button:hover {
+    background: #35a572;
+  }
+  .hint {
+    margin-top: 20px;
+    color: #666;
+    font-size: 14px;
+  }
+  </style>
+</body>
+</html>

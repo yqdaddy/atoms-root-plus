@@ -1,12 +1,17 @@
 /**
  * 分享功能路由
- * POST /api/share - 保存分享内容
- * GET /api/share/:id - 获取分享内容
+ * POST /api/share - 保存分享内容（强制登录，防止滥用）
+ * GET /api/share/:id - 获取分享内容（公开访问）
  */
 import { Hono } from 'hono';
+import { requireAuth } from '../auth.js';
 import { db } from '../db.js';
+import type { AppEnv } from '../types.js';
 
-export const shareRouter = new Hono();
+export const shareRouter = new Hono<AppEnv>();
+
+// POST / 必须登录，GET /:id 保持公开
+shareRouter.post('/', requireAuth);
 
 /** 分享数据表结构 */
 interface ShareRecord {

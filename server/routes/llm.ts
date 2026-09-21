@@ -2,9 +2,12 @@
  * LLM 代理路由。
  * 服务端持有 API Key，代理调用 LLM API，SSE 流式返回。
  * 支持批准流程：分析完成后暂停等待用户批准。
+ *
+ * 安全：所有端点强制登录（requireAuth），防止匿名滥用 LLM API Key。
  */
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import { requireAuth } from '../auth.js';
 import {
   generateWithStages,
   continueAfterApproval,
@@ -18,8 +21,12 @@ import {
   getTemplateHintText,
   type OptimizerExistingContext,
 } from '../prompts.js';
+import type { AppEnv } from '../types.js';
 
-export const llmRouter = new Hono();
+export const llmRouter = new Hono<AppEnv>();
+
+// 全路由强制认证：所有 LLM 端点必须登录
+llmRouter.use('*', requireAuth);
 
 /**
  * POST /api/llm/generate
@@ -49,10 +56,38 @@ llmRouter.post('/generate', async (c) => {
   }
 
   const prompt = body.prompt.trim();
+
+  // prompt 长度上限：防止超长请求进入 LLM 造成成本放大滥用
+  if (prompt.length > MAX_PROMPT_LENGTH) {
+    return c.json({ error: `prompt 长度超过上限（最多 ${MAX_PROMPT_LENGTH} 字符）` }, 400);
+  }
+
   const currentHtml = body.options?.currentHtml;
   const currentFiles = body.options?.currentFiles;
+
+  // currentFiles 基本校验：结构、文件数量与单文件大小上限
+  const currentFilesError = validateCurrentFiles(currentFiles);
+  if (currentFilesError) {
+    return c.json({ error: currentFilesError }, 400);
+  }
+
+  // currentHtml（单文件模式向后兼容）与多文件模式共用单文件大小上限
+  if (typeof currentHtml === 'string' && currentHtml.length > MAX_CURRENT_FILE_SIZE) {
+    return c.json({ error: `currentHtml 超过大小上限（最多 ${MAX_CURRENT_FILE_SIZE} 字符）` }, 400);
+  }
   const chatTurns = parseChatTurns(body.options?.chatTurns);
   const originalRequest = typeof body.options?.originalRequest === 'string' ? body.options.originalRequest : undefined;
+  const intentOverride = parseIntentOverride(body.options?.intentOverride);
+  const preferences = Array.isArray(body.options?.preferences)
+    ? body.options.preferences.filter(
+        (p: unknown): p is { type: string; key: string; value: string; reason?: string } =>
+          typeof p === 'object' && p !== null &&
+          typeof (p as Record<string, unknown>).type === 'string' &&
+          typeof (p as Record<string, unknown>).key === 'string' &&
+          typeof (p as Record<string, unknown>).value === 'string',
+      ).slice(0, 20)
+    : undefined;
+  const framework = parseFramework(body.options?.framework);
   const requestId = body.requestId;
 
   // 如果有 requestId，检查是否有进行中的请求并取消
@@ -78,7 +113,11 @@ llmRouter.post('/generate', async (c) => {
       currentFiles: typeof currentFiles === 'object' && currentFiles !== null ? currentFiles : undefined,
       chatTurns,
       originalRequest,
+      intentOverride,
+      preferences,
+      framework,
       onEvent,
+      abortSignal: c.req.raw.signal, // 客户端断连时触发 abort
     });
 
     // 轮询事件队列并发送
@@ -147,7 +186,7 @@ llmRouter.post('/approve', async (c) => {
     };
 
     // 继续生成
-    const continuePromise = continueAfterApproval(sessionId, onEvent);
+    const continuePromise = continueAfterApproval(sessionId, onEvent, c.req.raw.signal);
 
     // 轮询事件队列并发送
     const sendEvents = async () => {
@@ -225,6 +264,35 @@ function clampNumber(value: unknown, min: number, max: number): number | undefin
   return Math.min(max, Math.max(min, value));
 }
 
+/** intentOverride 白名单：与 server/intentClassifier.ts 的 IntentType 对齐 */
+const INTENT_OVERRIDE_VALUES: readonly string[] = ['create', 'modify', 'analyze', 'diagnose'];
+
+/**
+ * 解析强制意图参数：白名单外的值整体丢弃（走服务端自动识别）。
+ * 前端误判纠正入口传 create/modify/analyze/diagnose，非法值不报错、静默忽略。
+ * @param value 前端传入的 options.intentOverride 字段
+ */
+function parseIntentOverride(value: unknown): 'create' | 'modify' | 'analyze' | 'diagnose' | undefined {
+  if (typeof value !== 'string') return undefined;
+  return INTENT_OVERRIDE_VALUES.includes(value)
+    ? (value as 'create' | 'modify' | 'analyze' | 'diagnose')
+    : undefined;
+}
+
+/** framework 白名单：与 ProjectFramework 对齐 */
+const FRAMEWORK_VALUES: readonly string[] = ['html', 'react-cdn', 'vue-cdn'];
+
+/**
+ * 解析框架参数：白名单外的值回退到 'html'。
+ * @param value 前端传入的 options.framework 字段
+ */
+function parseFramework(value: unknown): 'html' | 'react-cdn' | 'vue-cdn' {
+  if (typeof value !== 'string') return 'html';
+  return FRAMEWORK_VALUES.includes(value)
+    ? (value as 'html' | 'react-cdn' | 'vue-cdn')
+    : 'html';
+}
+
 /**
  * 解析对话轮次输入：校验数组结构与每个条目的 role/content 类型。
  * 不合规格式整体丢弃，返回 undefined。
@@ -247,6 +315,45 @@ function parseChatTurns(value: unknown, maxItems = 20): Array<{ role: 'user' | '
     result.push({ role: obj.role, content: obj.content });
   }
   return result;
+}
+
+/** prompt 长度上限：32KB 字符，足够正常需求描述，同时防止成本放大滥用 */
+const MAX_PROMPT_LENGTH = 32_768;
+
+/** currentFiles 文件数量上限 */
+const MAX_CURRENT_FILES_COUNT = 50;
+
+/** 单文件内容长度上限：1MB 字符（多文件 currentFiles 与单文件 currentHtml 共用） */
+const MAX_CURRENT_FILE_SIZE = 1_048_576;
+
+/**
+ * 校验迭代上下文 currentFiles：结构、文件数量与单文件大小上限。
+ * 防止过大载荷进入 LLM 请求体造成成本放大。
+ * @param value 前端传入的 options.currentFiles 字段
+ * @returns 错误消息；合法或未提供时返回 null
+ */
+function validateCurrentFiles(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    return 'currentFiles 必须是文件对象映射';
+  }
+  const files = Object.values(value);
+  if (files.length > MAX_CURRENT_FILES_COUNT) {
+    return `currentFiles 文件数量超过上限（最多 ${MAX_CURRENT_FILES_COUNT} 个）`;
+  }
+  for (const file of files) {
+    if (typeof file !== 'object' || file === null) {
+      return 'currentFiles 条目格式错误';
+    }
+    const content = (file as Record<string, unknown>).content;
+    if (typeof content !== 'string') {
+      return 'currentFiles 条目缺少 content 字符串';
+    }
+    if (content.length > MAX_CURRENT_FILE_SIZE) {
+      return `单个文件内容超过大小上限（最多 ${MAX_CURRENT_FILE_SIZE} 字符）`;
+    }
+  }
+  return null;
 }
 
 /**

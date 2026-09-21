@@ -4,14 +4,52 @@
  * 本文件是 Live / Demo 双引擎与前端 store 之间的唯一协议真源，双方只依赖此处导出的类型。
  */
 
+/** 意图类型：创建 / 修改 / 分析 / 诊断 */
+export type IntentType = 'create' | 'modify' | 'analyze' | 'diagnose';
+
+/** 意图识别结果 */
+export interface IntentResult {
+  type: IntentType;
+  confidence: number;
+  reasoning: string;
+}
+
+/** 单行编辑操作（diff 模式） */
+export interface FileEdit {
+  /** 行号（1-indexed） */
+  line: number;
+  /** 原行内容（必须精确匹配，包括缩进） */
+  old: string;
+  /** 新行内容 */
+  new: string;
+  /** 操作类型 */
+  type: 'replace' | 'insert' | 'delete';
+}
+
+/** 单个文件的变更集合（diff 模式） */
+export interface FileChange {
+  /** 文件路径 */
+  file: string;
+  /** 编辑操作列表 */
+  edits: FileEdit[];
+}
+
+/** 变更清单（工程师 diff 输出格式） */
+export interface ChangeList {
+  /** 变更列表 */
+  changes: FileChange[];
+  /** 变更摘要 */
+  summary: string;
+}
+
 /** 流水线执行阶段，由 stage 事件携带 */
 export type PipelineStage = 'analyzing' | 'generating' | 'reviewing';
 
 /** 生成状态机全量状态：idle → analyzing → generating → reviewing → done / error */
 export type GenerationStatus = 'idle' | PipelineStage | 'done' | 'error';
 
-/** delta 流的渲染位置：analyze 进聊天思考区，generate / repair 进代码面板 */
-export type DeltaPhase = 'analyze' | 'generate' | 'repair';
+/** delta 流的渲染位置：analyze / diagnose 进聊天思考区，generate / repair 进代码面板 */
+export type DeltaPhase = 'analyze' | 'generate' | 'repair' | 'diagnose';
 
 /** 错误码，语义与降级动作见 docs/tech-ai-pipeline.md 第 5 节降级矩阵 */
 export type ErrorCode =
@@ -69,13 +107,19 @@ export interface StageEventPayload {
   message: string;
   /** 附加信息，如 repairReason、matchedTemplate */
   meta?: Record<string, unknown>;
+  /** 意图识别结果（仅首个 stage 事件携带） */
+  intent?: IntentResult;
 }
 
-/** delta 事件负载：原始增量文本，消费方只做追加，不解析 */
+/** delta 事件负载：增量文本与可选的文件操作信息（工具参数流式渲染） */
 export interface DeltaEventPayload {
   runId: string;
   phase: DeltaPhase;
   text: string;
+  /** 正在操作的文件路径（可选；缺省时前端从累积文本推断） */
+  fileName?: string;
+  /** 操作类型：create 新建 / modify 修改（可选） */
+  operation?: 'create' | 'modify';
 }
 
 /** 一次生成的统计信息 */
@@ -99,6 +143,19 @@ export interface GenerateResult {
   /** 软性问题警告，如「内容被截断，已按可用部分交付」 */
   warnings: string[];
   stats: GenerateStats;
+  /**
+   * 分析/诊断结果文本（可选）。
+   * 意图为 analyze 或 diagnose 时，done 不携带代码，只携带本字段；
+   * 消费方应将其作为 assistant 消息展示，而不是视为空产物报错。
+   */
+  analysis?: string;
+  /**
+   * 变更清单（diff 模式 done 事件携带）。
+   * 存在时前端应显示 DiffViewer 供用户确认后再应用 files。
+   */
+  changes?: ChangeList;
+  /** 变更摘要（diff 模式 done 事件携带，与 changes.summary 一致） */
+  changeSummary?: string;
 }
 
 /** error 事件负载。message 为面向用户的中文文案，禁止包含 API key */
@@ -224,6 +281,39 @@ export interface GenerateOptions {
    * 原始需求（首次用户输入），用于在上下文中标注"用户最初需求"。
    */
   originalRequest?: string;
+  /**
+   * 强制指定意图（可选）。缺省时服务端自动识别（关键词 + 项目状态）。
+   * 前端可在识别结果提示中提供"改为此意图"的纠正入口，透传该字段。
+   * 白名单：'create' | 'modify' | 'analyze' | 'diagnose'，非法值被服务端丢弃。
+   */
+  intentOverride?: 'create' | 'modify' | 'analyze' | 'diagnose';
+  /**
+   * 项目偏好记忆（可选）。从 localStorage 读取后传入，服务端注入工程师 prompt。
+   */
+  preferences?: Array<{
+    type: string;
+    key: string;
+    value: string;
+    reason?: string;
+  }>;
+  /**
+   * 全局偏好记忆（可选，跨项目生效）。从 localStorage['atoms:global-preferences'] 读取后传入，
+   * 服务端注入分析师和工程师 prompt。
+   */
+  globalPreferences?: {
+    defaultFramework?: 'html' | 'react-cdn' | 'vue-cdn';
+    preferredLanguage?: 'zh' | 'en';
+    namingStyle?: 'camelCase' | 'snake_case' | 'PascalCase';
+    globalStyles?: string[];
+    globalCorrections?: string[];
+  };
+  /**
+   * 目标框架（可选）。缺省时服务端使用 html。
+   * - html：纯 HTML + Tailwind CDN
+   * - react-cdn：React 组件（JSX），浏览器内编译
+   * - vue-cdn：Vue 单文件组件，浏览器内编译
+   */
+  framework?: 'html' | 'react-cdn' | 'vue-cdn';
 }
 
 /** 双引擎共同接口：同一事件协议，前端不感知引擎差异 */

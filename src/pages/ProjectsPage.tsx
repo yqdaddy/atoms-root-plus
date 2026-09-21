@@ -8,6 +8,7 @@ import { Icon } from '@iconify/react';
 import { useProjectStore } from '../stores/projectStore';
 import { useAuthStore } from '../stores/authStore'; // F-002: 项目列表页守卫
 import type { ProjectSummary } from '../types/project';
+import { getFrameworkInfo } from '../components/FrameworkSelector';
 
 /** 格式化时间 */
 function formatTime(isoString: string): string {
@@ -129,6 +130,18 @@ function ProjectCard({
         </div>
         <div className="flex items-center gap-2">
           <StatusBadge status={summary.status} />
+          {(() => {
+            const fw = getFrameworkInfo(summary.framework);
+            return fw ? (
+              <span
+                className="flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full text-[var(--color-text-secondary)] bg-[var(--color-bg-base)]"
+                title={`生成框架：${fw.label}`}
+              >
+                <Icon icon={fw.icon} width={11} height={11} />
+                {fw.label}
+              </span>
+            ) : null;
+          })()}
           <span className="text-[12px] text-[var(--color-text-tertiary)]">
             {formatTime(summary.updatedAt)}
           </span>
@@ -167,7 +180,7 @@ export default function ProjectsPage() {
   if (authLoading || !user) {
     return (
       <div className="min-h-screen bg-[var(--color-bg-base)] flex items-center justify-center">
-        <Icon icon="lucide:loader-2" width={24} height={24} className="animate-spin text-[var(--color-text-tertiary)]" />
+        <Icon icon="lucide:loader-circle" width={24} height={24} className="animate-spin text-[var(--color-text-tertiary)]" />
       </div>
     );
   }
@@ -238,7 +251,7 @@ export default function ProjectsPage() {
       <main className="max-w-6xl mx-auto px-6 py-8">
         {isLoading ? (
           <div className="flex items-center justify-center py-20">
-            <Icon icon="lucide:loader-2" width={24} height={24} className="animate-spin text-[var(--color-text-tertiary)]" />
+            <Icon icon="lucide:loader-circle" width={24} height={24} className="animate-spin text-[var(--color-text-tertiary)]" />
           </div>
         ) : summaries.length === 0 ? (
           <div className="text-center py-20">

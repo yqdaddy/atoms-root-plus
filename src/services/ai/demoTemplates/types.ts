@@ -5,7 +5,7 @@
  */
 import type { FeatureList } from '../types';
 
-export type DemoTemplateId = 'dashboard' | 'landing' | 'todo' | 'chart' | 'chart-bar' | 'chart-line' | 'chart-pie' | 'chart-radar';
+export type DemoTemplateId = 'dashboard' | 'landing' | 'todo' | 'chart' | 'chart-bar' | 'chart-line' | 'chart-pie' | 'chart-radar' | 'calculator' | 'snake';
 
 /** 模板实例化配置：标题、主题色、深浅色，支持演示模式下的迭代修改 */
 export interface DemoTemplateConfig {

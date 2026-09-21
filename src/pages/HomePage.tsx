@@ -8,39 +8,42 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Icon } from '@iconify/react';
 import { useProjectStore } from '../stores/projectStore';
 import { useChatStore, getCurrentPhaseText } from '../stores/chatStore';
+import type { FileGenerationStatus } from '../stores/chatStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useAuthStore } from '../stores/authStore'; // F-001: 首页登录守卫
 import { saveShare, getShareUrl } from '../utils/share';
+import { deployProject } from '../utils/deploy';
+import { ApiError } from '../services/apiClient';
 import { getAIAPI, type StreamEvent, type GenerateOptions, validateGeneratedHtml, type DemoTemplateId, type FeatureList } from '../services/ai';
 import { approveAndContinue } from '../services/ai/liveEngine';
 import { cancelActiveRun } from '../services/ai/activeRun';
-import { ENTRY_FILE_PATH, type ChatMessage as ProjectChatMessage, type FileNode as ProjectFileNode } from '../types/project';
+import { ENTRY_FILE_PATH, type ProjectFramework, type ChatMessage as ProjectChatMessage, type FileNode as ProjectFileNode } from '../types/project';
+import { loadMemoryForGeneration, isRecallQuery, generateRecallResponse, extractAndUpdateGlobalPreferences } from '../services/memory';
 import { toast } from '../components/Toast';
 import { HomeAuthControls } from '../components/AuthControls';
 import SandboxFrame from '../components/SandboxFrame';
-import { FileTreePanel, type TreeNode, type FileNode, buildTree } from '../components/FileTree';
+import { FrameworkSelector } from '../components/FrameworkSelector';
+import { FileTreePanel, type TreeNode, buildTree } from '../components/FileTree';
 import { RequirementPanel } from '../components/RequirementPanel';
+import { VersionHistory } from '../components/VersionHistory';
 import { useOptimizerStore } from '../stores/optimizerStore';
 import type { ConfirmedRequirement, OptimizedRequirement } from '../services/ai/optimizer';
+import { extractProgressInfo, parseReviewChecks } from '../utils/streamParser';
+import { ReviewSummary } from '../components/ReviewSummary';
+import { extractPreferences } from '../services/ai/preferenceExtractor';
+import type { ChangeList } from '../services/ai/types';
+import { DiffViewer } from '../components/DiffViewer';
+import { StreamingMessage } from '../components/StreamingMessage';
+import ReactMarkdown from 'react-markdown';
 
-const TEMPLATE_CHIPS: { id: DemoTemplateId; label: string; prompt: string; icon: string }[] = [
-  { id: 'todo', label: '待办清单', prompt: '做一个待办清单，可以添加、完成和删除任务', icon: 'lucide:check-square' },
-  { id: 'chart', label: '数据看板', prompt: '做一个数据看板，显示图表和统计信息', icon: 'lucide:bar-chart-2' },
-  { id: 'landing', label: '落地页', prompt: '做一个产品落地页，展示产品特性', icon: 'lucide:layout' },
-  { id: 'dashboard', label: '控制面板', prompt: '做一个控制面板，包含多个功能卡片', icon: 'lucide:grid-3x3' },
+const TEMPLATE_CHIPS: { id: DemoTemplateId; label: string; prompt: string; icon: string; framework: ProjectFramework }[] = [
+  { id: 'todo', label: '待办清单', prompt: '做一个待办清单，可以添加、完成和删除任务', icon: 'lucide:check-square', framework: 'react-cdn' },
+  { id: 'chart', label: '数据看板', prompt: '做一个数据看板，显示图表和统计信息', icon: 'lucide:bar-chart-2', framework: 'react-cdn' },
+  { id: 'landing', label: '落地页', prompt: '做一个产品落地页，展示产品特性', icon: 'lucide:layout', framework: 'html' },
+  { id: 'dashboard', label: '控制面板', prompt: '做一个控制面板，包含多个功能卡片', icon: 'lucide:grid-3x3', framework: 'react-cdn' },
+  { id: 'calculator', label: '计算器', prompt: '创建一个计算器应用，支持加减乘除和百分比计算', icon: 'lucide:calculator', framework: 'html' },
+  { id: 'snake', label: '贪吃蛇', prompt: '创建一个贪吃蛇游戏，用方向键控制，显示得分', icon: 'lucide:gamepad-2', framework: 'html' },
 ];
-
-/** 文件状态 */
-type FileStatus = 'pending' | 'generating' | 'completed';
-
-/** 文件信息 */
-interface FileItem {
-  name: string;
-  path: string;
-  status: FileStatus;
-  size: number;
-  lines: number;
-}
 
 /** 消息状态（用于 UI 展示，与持久化解耦） */
 type MessageStatus = 'processing' | 'done' | 'error' | 'waiting_approval';
@@ -84,6 +87,14 @@ function formatTime(date: Date): string {
 function isFeatureList(features: unknown): features is FeatureList {
   return typeof features === 'object' && features !== null && 'appTitle' in features && 'features' in features;
 }
+
+/** 意图类型到标签文案和颜色的映射 */
+const INTENT_CONFIG: Record<string, { label: string; color: string; bgColor: string }> = {
+  create: { label: '创建', color: 'text-blue-500', bgColor: 'bg-blue-500/10' },
+  modify: { label: '修改', color: 'text-green-500', bgColor: 'bg-green-500/10' },
+  analyze: { label: '分析', color: 'text-yellow-500', bgColor: 'bg-yellow-500/10' },
+  diagnose: { label: '诊断', color: 'text-orange-500', bgColor: 'bg-orange-500/10' },
+};
 
 /**
  * 生成失败后回退当前项目状态
@@ -130,15 +141,24 @@ function highlightHtml(code: string): React.ReactNode {
 }
 
 /** 文件树项组件 */
-function FileTreeItem({ file, isActive }: { file: FileItem; isActive: boolean }) {
+function FileTreeItem({ file, isActive }: { file: FileGenerationStatus; isActive: boolean }) {
   const statusIcon = useMemo(() => {
     switch (file.status) {
       case 'pending':
         return <span className="w-4 h-4 flex items-center justify-center text-[var(--color-text-tertiary)]">○</span>;
       case 'generating':
-        return <Icon icon="lucide:loader-2" width={14} height={14} className="animate-spin text-[var(--color-accent)]" />;
+        // 状态点：生成中闪烁
+        return (
+          <div className="w-4 h-4 flex items-center justify-center">
+            <div className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-pulse" />
+          </div>
+        );
       case 'completed':
+        // 状态点：完成绿色
         return <Icon icon="lucide:check" width={14} height={14} className="text-green-500" />;
+      case 'failed':
+        // 状态点：失败红色
+        return <Icon icon="lucide:x" width={14} height={14} className="text-red-500" />;
     }
   }, [file.status]);
 
@@ -149,9 +169,14 @@ function FileTreeItem({ file, isActive }: { file: FileItem; isActive: boolean })
       {statusIcon}
       <Icon icon="lucide:file-code" width={14} height={14} />
       <span className="flex-1 truncate">{file.name}</span>
-      {file.status === 'completed' && file.size > 0 && (
-        <span className="text-[11px] text-[var(--color-text-tertiary)]">
-          {(file.size / 1024).toFixed(1)}KB
+      {file.status === 'generating' && file.charCount > 0 && (
+        <span className="text-[11px] text-[var(--color-text-tertiary)] tabular-nums">
+          {file.lineCount} 行
+        </span>
+      )}
+      {file.status === 'completed' && file.charCount > 0 && (
+        <span className="text-[11px] text-[var(--color-text-tertiary)] tabular-nums">
+          {(file.charCount / 1024).toFixed(1)}KB
         </span>
       )}
     </div>
@@ -188,7 +213,15 @@ function MessageBubble({
           ? 'bg-[var(--color-accent)] text-white'
           : 'bg-[var(--color-bg-base)] border border-[var(--color-border-default)]'
       }`}>
-        <p className="text-[13px] leading-[1.6] whitespace-pre-wrap">{message.content}</p>
+        {isUser ? (
+          // 用户消息：纯文本显示
+          <p className="text-[13px] leading-[1.6] whitespace-pre-wrap">{message.content}</p>
+        ) : (
+          // AI 消息：Markdown 渲染
+          <div className="prose prose-sm max-w-none text-[13px] text-[var(--color-text-primary)] leading-[1.6]">
+            <ReactMarkdown>{message.content}</ReactMarkdown>
+          </div>
+        )}
 
         {/* 功能清单展示 */}
         {!isUser && isWaitingApproval && features && isFeatureList(features) && (
@@ -246,14 +279,25 @@ function MessageBubble({
 
 export default function HomePage() {
   const [inputValue, setInputValue] = useState('');
+  // 新项目的目标框架：仅在首条消息创建项目时生效，默认 html
+  const [selectedFramework, setSelectedFramework] = useState<ProjectFramework>('html');
   const [isGenerating, setIsGenerating] = useState(false);
+  // ZIP 导出进行中标记（防重复点击）
+  const [isExporting, setIsExporting] = useState(false);
   const [viewTab, setViewTab] = useState<'preview' | 'code'>('preview');
   // deviceMode 已移至 SandboxFrame 组件（通过 useSettingsStore）
   const [showConsole, setShowConsole] = useState(false);
   // 当前正在生成的消息 ID（用于跟踪 UI 状态）
   const [pendingMessageId, setPendingMessageId] = useState<string | null>(null);
+  // 部署进行中标记（防重复点击）
+  const [isDeploying, setIsDeploying] = useState(false);
   // 当前消息的 UI 状态（步骤数、status 等）
   const [messageUIState, setMessageUIState] = useState<{ steps: number; status: MessageStatus; features?: FeatureList | { raw: string }; sessionId?: string } | null>(null);
+  // 待确认的变更（diff 模式）：用户批准后应用，拒绝则丢弃
+  const [pendingDiff, setPendingDiff] = useState<{
+    changes: ChangeList;
+    files: Record<string, ProjectFileNode>;
+  } | null>(null);
   const navigate = useNavigate();
 
   // F-001: 首页登录守卫
@@ -262,6 +306,7 @@ export default function HomePage() {
 
   // 流式输出状态
   const streamBuffer = useChatStore((state) => state.streamBuffer);
+  const reviewChecks = useChatStore((state) => state.reviewChecks);
   const streamingText = getCurrentPhaseText(streamBuffer);
   const scrollRef = useRef<HTMLDivElement>(null);
   const codeRef = useRef<HTMLDivElement>(null);
@@ -270,8 +315,6 @@ export default function HomePage() {
   const currentProject = useProjectStore((state) => state.currentProject);
   const generatedHtml = currentProject?.files[ENTRY_FILE_PATH]?.content ?? '';
 
-  // 文件列表（目前只有 index.html，后续可扩展）
-  const [files, setFiles] = useState<FileItem[]>([]);
   // 当前选中的文件路径（用于文件树高亮和代码查看）
   const [activeFilePath, setActiveFilePath] = useState<string | null>(ENTRY_FILE_PATH);
 
@@ -280,18 +323,8 @@ export default function HomePage() {
     if (currentProject?.files) {
       return buildTree(currentProject.files);
     }
-    // 兼容本地状态（生成中的临时展示）
-    return files.map((file): FileNode => ({
-      id: file.path,
-      name: file.name,
-      path: file.path,
-      type: 'file',
-      fileType: 'html', // 目前只有 HTML
-      status: file.status,
-      size: file.size,
-      lines: file.lines,
-    }));
-  }, [currentProject?.files, files]);
+    return [];
+  }, [currentProject?.files]);
 
   // 当前选中文件内容
   const activeFileContent = useMemo(() => {
@@ -321,48 +354,8 @@ export default function HomePage() {
     }
   }, [streamingText, generatedHtml, viewTab]);
 
-  // 更新文件状态
-  useEffect(() => {
-    if (isGenerating) {
-      if (streamBuffer.stage === 'generating') {
-        // 正在生成代码
-        setFiles([
-          {
-            name: 'index.html',
-            path: ENTRY_FILE_PATH,
-            status: 'generating',
-            size: streamingText.length,
-            lines: (streamingText.match(/\n/g) || []).length + 1,
-          },
-        ]);
-      } else if (streamBuffer.stage === 'analyzing') {
-        // 分析阶段
-        setFiles([
-          {
-            name: 'index.html',
-            path: ENTRY_FILE_PATH,
-            status: 'pending',
-            size: 0,
-            lines: 0,
-          },
-        ]);
-      }
-    } else if (generatedHtml && streamBuffer.stage === 'done') {
-      // 生成完成
-      setFiles([
-        {
-          name: 'index.html',
-          path: ENTRY_FILE_PATH,
-          status: 'completed',
-          size: generatedHtml.length,
-          lines: (generatedHtml.match(/\n/g) || []).length + 1,
-        },
-      ]);
-    }
-  }, [isGenerating, streamBuffer.stage, streamingText, generatedHtml]);
-
-  const { createProject, updateEntryFile, updateFiles, updateProjectStatus, addMessage } = useProjectStore();
-  const { startGeneration, updateStage, appendDelta, finishGeneration, setError, setAwaitingApproval } = useChatStore();
+  const { createProject, updateEntryFile, updateFiles, updateProjectStatus, addMessage, saveVersion } = useProjectStore();
+  const { startGeneration, updateStage, appendDelta, finishGeneration, setError, setAwaitingApproval, updateFileStatus, setReviewChecks, setIntent } = useChatStore();
   const { apiKey, getEffectiveBaseURL } = useSettingsStore();
 
   // 提示词优化器（需求确认前置流程）
@@ -409,14 +402,16 @@ export default function HomePage() {
     }
   };
 
-  const handleChipClick = (prompt: string) => {
+  const handleChipClick = (chip: typeof TEMPLATE_CHIPS[number]) => {
     if (isGenerating) return;
     // F-001: 未登录时点击模板按钮跳转到登录页
     if (!isLoggedIn) {
       navigate('/login?redirect=%2Fworkspace');
       return;
     }
-    setInputValue(prompt);
+    // 模板自带推荐框架，填充提示词的同时同步框架选择
+    setSelectedFramework(chip.framework);
+    setInputValue(chip.prompt);
   };
 
   // 处理生成事件
@@ -425,28 +420,73 @@ export default function HomePage() {
       console.log('[HomePage] 收到事件:', event.type, event.payload);
       switch (event.type) {
         case 'stage':
-          updateStage(event.payload.stage, event.payload.attempt, event.payload.message);
+          updateStage(event.payload.stage, event.payload.attempt, event.payload.message, event.payload.intent);
           // 更新消息步骤计数
           setMessageUIState(prev => prev ? { ...prev, steps: (prev.steps || 0) + 1 } : { steps: 1, status: 'processing' });
           break;
-        case 'delta':
-          appendDelta(event.payload.phase, event.payload.text);
+        case 'delta': {
+          // 工具参数流式渲染：优先用 payload 携带的文件信息，缺省时从累积文本推断
+          const { fileName, operation } = event.payload;
+          const currentBuffer = useChatStore.getState().streamBuffer;
+          const currentStreamingText = getCurrentPhaseText(currentBuffer);
+          const resolvedFileName = fileName
+            ?? ((event.payload.phase === 'generate' || event.payload.phase === 'repair')
+              ? extractProgressInfo(currentStreamingText + event.payload.text).fileName
+              : null);
+          appendDelta(event.payload.phase, event.payload.text, resolvedFileName ?? undefined, operation);
           // UI 状态保持 processing
           setMessageUIState(prev => prev ? { ...prev, status: 'processing' } : { steps: 0, status: 'processing' });
           break;
+        }
         case 'done': {
           console.log('[HomePage] done 事件:', {
             htmlLength: event.payload.html?.length || 0,
             htmlPreview: event.payload.html?.slice(0, 200) || '(empty)',
             hasFiles: !!(event.payload as { files?: Record<string, ProjectFileNode> }).files,
+            hasChanges: !!(event.payload as { changes?: ChangeList }).changes,
           });
 
+          // 从流式文本解析审查者检查结果，折叠为单行摘要展示
+          const doneBuffer = useChatStore.getState().streamBuffer;
+          setReviewChecks(parseReviewChecks(doneBuffer.generateText + doneBuffer.repairText));
+
+          // 将追踪中的文件标记为完成
+          for (const f of doneBuffer.files) {
+            if (f.status === 'generating') {
+              updateFileStatus(f.path, 'completed', f.charCount, f.lineCount);
+            }
+          }
+
           // 兼容多文件格式：检查 payload.files 是否存在
-          const payload = event.payload as { html?: string; files?: Record<string, ProjectFileNode>; warnings?: string[] };
+          const payload = event.payload as {
+            html?: string;
+            files?: Record<string, ProjectFileNode>;
+            warnings?: string[];
+            changes?: ChangeList;
+            changeSummary?: string;
+          };
           const hasFiles = payload.files && Object.keys(payload.files).length > 0;
+          const hasChanges = !!payload.changes && payload.changes.changes.length > 0;
+
+          // diff 模式：有 changes 时先显示 DiffViewer，等待用户确认
+          if (hasChanges && hasFiles) {
+            console.log('[HomePage] diff 模式，等待用户确认变更');
+            finishGeneration();
+            setIsGenerating(false);
+            setPendingDiff({
+              changes: payload.changes!,
+              files: payload.files!,
+            });
+            // 添加提示消息
+            addMessage({ role: 'assistant', content: `代码修改完成，${payload.changes!.summary}。请确认后应用变更。` });
+            // 清除 UI 状态
+            setPendingMessageId(null);
+            setMessageUIState(null);
+            break;
+          }
 
           if (hasFiles) {
-            // 多文件模式
+            // 多文件模式（非 diff 模式或 diff 解析失败后的降级）
             const files = payload.files!;
             console.log('[HomePage] 多文件模式，文件数:', Object.keys(files).length);
 
@@ -461,15 +501,34 @@ export default function HomePage() {
             finishGeneration();
             setIsGenerating(false);
 
-            if (validation.ok) {
-              addMessage({ role: 'assistant', content: `应用已生成完成！共 ${Object.keys(files).length} 个文件。你可以继续描述需求来修改它。` });
-              toast.success('生成完成');
-            } else {
-              const warningMsg = `生成完成，但代码存在 ${validation.issues.length} 个问题，可能影响功能`;
-              addMessage({ role: 'assistant', content: warningMsg });
-              toast.info(warningMsg);
-              console.warn('[HomePage] 验证问题:', validation.issues);
-            }
+            // 组合完整的 LLM 输出（分析 + 生成内容）
+              const filesBuffer = useChatStore.getState().streamBuffer;
+              const fullContent = [
+                filesBuffer.analyzeText,
+                filesBuffer.generateText,
+              ].filter(Boolean).join('\n\n').trim();
+
+              if (validation.ok) {
+                // 保存版本快照
+                const summary = `生成应用，共 ${Object.keys(files).length} 个文件`;
+                const isFirstVersion = useProjectStore.getState().versions.length === 0;
+                saveVersion(summary, isFirstVersion ? 'initial' : 'iteration');
+
+                // 添加完整消息：优先使用 LLM 输出，fallback 到简短提示
+                addMessage({
+                  role: 'assistant',
+                  content: fullContent || `应用已生成完成！共 ${Object.keys(files).length} 个文件。你可以继续描述需求来修改它。`
+                });
+                toast.success('生成完成');
+              } else {
+                const warningMsg = `生成完成，但代码存在 ${validation.issues.length} 个问题，可能影响功能`;
+                addMessage({
+                  role: 'assistant',
+                  content: fullContent || warningMsg
+                });
+                toast.info(warningMsg);
+                console.warn('[HomePage] 验证问题:', validation.issues);
+              }
 
             // 清除 UI 状态
             setPendingMessageId(null);
@@ -487,12 +546,31 @@ export default function HomePage() {
             finishGeneration();
             setIsGenerating(false);
 
+            // 组合完整的 LLM 输出（分析 + 生成内容）
+            const singleBuffer = useChatStore.getState().streamBuffer;
+            const fullContent = [
+              singleBuffer.analyzeText,
+              singleBuffer.generateText,
+            ].filter(Boolean).join('\n\n').trim();
+
             if (validation.ok) {
-              addMessage({ role: 'assistant', content: '应用已生成完成！你可以继续描述需求来修改它。' });
+              // 保存版本快照
+              const summary = '生成应用';
+              const isFirstVersion = useProjectStore.getState().versions.length === 0;
+              saveVersion(summary, isFirstVersion ? 'initial' : 'iteration');
+
+              // 添加完整消息：优先使用 LLM 输出，fallback 到简短提示
+              addMessage({
+                role: 'assistant',
+                content: fullContent || '应用已生成完成！你可以继续描述需求来修改它。'
+              });
               toast.success('生成完成');
             } else {
               const warningMsg = `生成完成，但代码存在 ${validation.issues.length} 个问题，可能影响功能`;
-              addMessage({ role: 'assistant', content: warningMsg });
+              addMessage({
+                role: 'assistant',
+                content: fullContent || warningMsg
+              });
               toast.info(warningMsg);
               console.warn('[HomePage] 验证问题:', validation.issues);
             }
@@ -580,24 +658,43 @@ export default function HomePage() {
    * 执行一次三阶段流水线生成。
    * @param userMessage 展示在对话区的用户消息（原始需求）
    * @param llmPrompt 实际发给模型的内容（原始需求或附带结构化文档的富输入）
+   * @param opts 附加选项（如 intentOverride）
    */
-  const runGeneration = useCallback(async (userMessage: string, llmPrompt: string) => {
+  const runGeneration = useCallback(async (userMessage: string, llmPrompt: string, opts?: { intentOverride?: 'create' | 'modify' | 'analyze' | 'diagnose' }) => {
     if (!userMessage.trim() || isGenerating) return;
 
     setIsGenerating(true);
-    setFiles([]); // 重置文件列表
 
     // 确保项目存在（首条用户消息才能入库）
-    const project = currentProject ?? createProject('未命名项目');
+    const project = currentProject ?? createProject('未命名项目', selectedFramework);
 
-    // 判断是否为迭代：存在历史对话 或 已有生成内容（页面刷新后 currentProject 可能未恢复）
+    // 判断是否为迭代：存在历史对话 或 已有实质性生成内容（非空白骨架）
     const priorChat = project.chat ?? [];
-    const hasExistingFiles = Object.keys(project.files).some(p => p !== ENTRY_FILE_PATH || project.files[p]?.content?.includes('</html>'));
-    const isIteration = priorChat.length > 0 || (generatedHtml && generatedHtml.length > 100) || hasExistingFiles;
+    // 检查是否有实质内容：入口文件内容超过骨架模板（约 250 字符）才算有内容
+    const entryContent = project.files[ENTRY_FILE_PATH]?.content ?? '';
+    const hasSubstantialContent = entryContent.length > 300 || Object.keys(project.files).some(p => p !== ENTRY_FILE_PATH);
+    const isIteration = priorChat.length > 0 || hasSubstantialContent;
+
+    // 调试日志：追踪 framework 参数传递
+    console.log('[HomePage] runGeneration 参数追踪:', {
+      selectedFramework,
+      projectFramework: project.framework,
+      isIteration,
+      priorChatLength: priorChat.length,
+      entryContentLength: entryContent.length,
+      hasSubstantialContent,
+      willUseFramework: isIteration ? (project.framework ?? 'html') : selectedFramework,
+    });
 
     // 添加用户消息到持久化层
     addMessage({ role: 'user', content: userMessage });
     updateProjectStatus('generating');
+
+    // 后台提取项目偏好：从用户消息中识别纠正（如"不要渐变"）与风格偏好（如"深色模式"）
+    const extractedPrefs = extractPreferences(project.id, userMessage);
+    if (extractedPrefs.length > 0) {
+      console.log('[HomePage] 已提取项目偏好:', extractedPrefs.map(p => `${p.key}=${p.value}`));
+    }
 
     // 获取 AI API
     const baseURL = getEffectiveBaseURL();
@@ -626,23 +723,45 @@ export default function HomePage() {
           : {};
 
       // 构建生成选项
-      const baseOpts: GenerateOptions = isIteration ? {
-        currentHtml: generatedHtml,
-        currentFiles: filesToSend,
-        // 最近 12 条对话（用户+助手交替），前端预裁剪每条上限 2000 字符
-        chatTurns: priorChat.slice(-12)
-          .filter(m => m.role === 'user' || m.role === 'assistant')
-          .map(m => ({
-            role: m.role as 'user' | 'assistant',
-            content: m.content.slice(0, 2000)
-          })),
-      } : {};
+      const baseOpts: GenerateOptions = {
+        // 目标框架：首次创建用 selectedFramework，迭代修改用项目的 framework
+        framework: isIteration ? (project.framework ?? 'html') : selectedFramework,
+        ...(isIteration ? {
+          currentHtml: generatedHtml,
+          currentFiles: filesToSend,
+          // 最近 12 条对话（用户+助手交替），前端预裁剪每条上限 2000 字符
+          chatTurns: priorChat.slice(-12)
+            .filter(m => m.role === 'user' || m.role === 'assistant')
+            .map(m => ({
+              role: m.role as 'user' | 'assistant',
+              content: m.content.slice(0, 2000)
+            })),
+        } : {}),
+      };
 
       // 原始需求：首条用户消息（仅在迭代时添加）
       const firstUserContent = priorChat.find(m => m.role === 'user')?.content?.slice(0, 300);
-      const opts = firstUserContent ? { ...baseOpts, originalRequest: firstUserContent } : baseOpts;
 
-      await api.generateStream(llmPrompt, handleStreamEvent, opts);
+      // 加载记忆：项目偏好 + 全局偏好
+      const memory = loadMemoryForGeneration(project.id);
+
+      const generateOpts: GenerateOptions = {
+        ...baseOpts,
+        ...(firstUserContent ? { originalRequest: firstUserContent } : {}),
+        ...(memory.projectPreferences.length > 0 ? { preferences: memory.projectPreferences } : {}),
+        ...(memory.globalPreferences ? { globalPreferences: memory.globalPreferences } : {}),
+        ...(opts?.intentOverride ? { intentOverride: opts.intentOverride } : {}),
+      };
+
+      // 调试日志：最终发送的 generateOpts
+      console.log('[HomePage] 最终 generateOpts:', {
+        framework: generateOpts.framework,
+        hasCurrentFiles: !!generateOpts.currentFiles,
+        hasChatTurns: !!generateOpts.chatTurns,
+        chatTurnsLength: generateOpts.chatTurns?.length || 0,
+      });
+
+      await api.generateStream(llmPrompt, handleStreamEvent, generateOpts);
     } catch (error) {
       const errorMsg = '生成过程发生异常，请重试';
       setError(errorMsg);
@@ -664,6 +783,7 @@ export default function HomePage() {
     startGeneration,
     handleStreamEvent,
     generatedHtml,
+    selectedFramework,
     setError,
     addMessage,
   ]);
@@ -680,8 +800,23 @@ export default function HomePage() {
 
     const prompt = inputValue.trim();
     setInputValue('');
+
+    // 提取并更新全局偏好（如"以后都用 React"）
+    extractAndUpdateGlobalPreferences(prompt);
+
+    // 检查是否为 Recall 查询（查询偏好）
+    if (isRecallQuery(prompt)) {
+      const memory = loadMemoryForGeneration(currentProject?.id);
+      const response = generateRecallResponse(memory);
+      // 添加用户消息
+      addMessage({ role: 'user', content: prompt });
+      // 添加 AI 响应
+      addMessage({ role: 'assistant', content: response });
+      return;
+    }
+
     void runGeneration(prompt, prompt);
-  }, [inputValue, isGenerating, isOptimizing, isLoggedIn, navigate, runGeneration]);
+  }, [inputValue, isGenerating, isOptimizing, isLoggedIn, navigate, runGeneration, currentProject, addMessage]);
 
   // 帮我完善需求：触发提示词优化器（需求确认前置流程）
   const handleStartOptimize = useCallback(() => {
@@ -735,6 +870,29 @@ export default function HomePage() {
     void runGeneration(confirmed.originalPrompt, composePipelinePrompt(confirmed));
   }, [runGeneration]);
 
+  /**
+   * 意图纠正：取消当前生成，使用 intentOverride 重新调用 API
+   */
+  const handleIntentCorrect = useCallback((intentOverride: 'create' | 'modify' | 'analyze' | 'diagnose') => {
+    // 取消当前生成
+    cancelActiveRun();
+    finishGeneration();
+    setIsGenerating(false);
+
+    // 清空当前缓冲区
+    setIntent(null);
+
+    // 使用 intentOverride 重新调用 API
+    const lastUserMessage = currentProject?.chat.filter(m => m.role === 'user').pop()?.content;
+    if (!lastUserMessage) {
+      toast.error('无法重新生成，未找到上次输入');
+      return;
+    }
+
+    // 重新生成
+    void runGeneration(lastUserMessage, lastUserMessage, { intentOverride });
+  }, [currentProject?.chat, finishGeneration, setIntent, runGeneration]);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -760,15 +918,25 @@ export default function HomePage() {
     }
   }, [streamBuffer.stage]);
 
-  // 当前阶段标题
+  // 当前阶段标题：四角色现在进行时文案（参考 Claude Code 的 getActivityDescription）
   const stageTitle = useMemo(() => {
     switch (streamBuffer.stage) {
       case 'analyzing':
-        return '分析需求';
-      case 'generating':
-        return '生成代码';
+        // 分析师：正在分析功能
+        return '正在分析功能...';
+      case 'generating': {
+        // 工程师：正在生成 <文件名>（有活跃文件时带文件名，类 Claude Code 的 "Writing index.html"）
+        const activeFile = streamBuffer.activeFilePath
+          ?? streamBuffer.files.find((f) => f.status === 'generating')?.name;
+        if (activeFile) {
+          const fileName = activeFile.split('/').pop() ?? activeFile;
+          return `正在生成 ${fileName}...`;
+        }
+        return '正在生成代码...';
+      }
       case 'reviewing':
-        return '审查代码';
+        // 审查者：正在审查代码
+        return '正在审查代码...';
       case 'done':
         return '完成';
       case 'error':
@@ -776,7 +944,7 @@ export default function HomePage() {
       default:
         return '准备中';
     }
-  }, [streamBuffer.stage]);
+  }, [streamBuffer.stage, streamBuffer.activeFilePath, streamBuffer.files]);
 
   return (
     <div className="h-screen flex flex-col bg-[var(--color-bg-base)]">
@@ -838,7 +1006,7 @@ export default function HomePage() {
                 {TEMPLATE_CHIPS.map((chip) => (
                   <button
                     key={chip.id}
-                    onClick={() => handleChipClick(chip.prompt)}
+                    onClick={() => handleChipClick(chip)}
                     disabled={isGenerating}
                     className="flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] text-[var(--color-text-secondary)] bg-[var(--color-bg-base)] border border-[var(--color-border-default)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-primary)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
@@ -853,6 +1021,15 @@ export default function HomePage() {
             {messages.map((msg) => (
               <MessageBubble key={msg.id} message={msg} onApprove={handleApprove} />
             ))}
+
+            {/* 流式生成中的消息：在消息列表末尾显示 LLM 的实时输出 */}
+            {isGenerating && streamingText && (
+              <StreamingMessage
+                content={streamingText}
+                stage={streamBuffer.stage}
+                activeFilePath={streamBuffer.activeFilePath}
+              />
+            )}
 
             {/* 独立的批准面板：不依赖 chat 数组中的消息 */}
             {streamBuffer.awaitingApproval && messageUIState?.status === 'waiting_approval' && messageUIState?.features && (
@@ -974,17 +1151,57 @@ export default function HomePage() {
                       </div>
                     </div>
                   </div>
+
+                  {/* 意图识别结果 */}
+                  {streamBuffer.intent && (
+                    <div className="flex items-center gap-2 pt-3 border-t border-[var(--color-border-default)]">
+                      <span className="text-[11px] text-[var(--color-text-tertiary)]">识别为</span>
+                      <span className={`text-[12px] px-2 py-0.5 rounded ${INTENT_CONFIG[streamBuffer.intent.type]?.bgColor || ''} ${INTENT_CONFIG[streamBuffer.intent.type]?.color || ''}`}>
+                        {INTENT_CONFIG[streamBuffer.intent.type]?.label || streamBuffer.intent.type}
+                      </span>
+                      {streamBuffer.intent.confidence < 0.7 && (
+                        <span title="置信度较低，建议检查">
+                          <Icon icon="lucide:alert-triangle" width={12} height={12} className="text-amber-500" />
+                        </span>
+                      )}
+                      <span className="text-[11px] text-[var(--color-text-tertiary)]">
+                        {Math.round(streamBuffer.intent.confidence * 100)}% 置信度
+                      </span>
+
+                      {/* 纠正按钮组：confidence < 0.8 时显示 */}
+                      {streamBuffer.intent.confidence < 0.8 && (
+                        <div className="flex items-center gap-1 ml-auto">
+                          {(['create', 'modify', 'analyze', 'diagnose'] as const).map((intentType) => {
+                            if (intentType === streamBuffer.intent?.type) return null;
+                            const config = INTENT_CONFIG[intentType];
+                            return (
+                              <button
+                                key={intentType}
+                                onClick={() => handleIntentCorrect(intentType)}
+                                className={`text-[11px] px-2 py-0.5 rounded border border-[var(--color-border-default)] hover:border-[var(--color-border-strong)] ${config?.color || ''} hover:${config?.bgColor || ''} transition-colors`}
+                              >
+                                改为{config?.label || intentType}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                {/* 文件面板 */}
-                {files.length > 0 && (
+                {/* 文件面板：实时生成进度（文件名 + 状态点） */}
+                {streamBuffer.files.length > 0 && (
                   <div className="bg-[var(--color-bg-base)] rounded-xl p-3">
                     <div className="flex items-center gap-2 mb-2 text-[12px] text-[var(--color-text-tertiary)]">
                       <Icon icon="lucide:folder-open" width={12} height={12} />
                       <span>项目文件</span>
+                      <span className="ml-auto tabular-nums">
+                        {streamBuffer.files.filter((f) => f.status === 'completed').length}/{streamBuffer.files.length}
+                      </span>
                     </div>
                     <div className="space-y-1">
-                      {files.map((file) => (
+                      {streamBuffer.files.map((file) => (
                         <FileTreeItem
                           key={file.path}
                           file={file}
@@ -992,19 +1209,6 @@ export default function HomePage() {
                         />
                       ))}
                     </div>
-                  </div>
-                )}
-
-                {/* 流式输出 */}
-                {streamingText && (
-                  <div className="bg-[var(--color-bg-surface)] rounded-xl p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-pulse" />
-                      <span className="text-[12px] text-[var(--color-text-tertiary)]">正在生成...</span>
-                    </div>
-                    <pre className="text-[12px] text-[var(--color-text-secondary)] leading-[1.6] whitespace-pre-wrap font-mono max-h-[150px] overflow-y-auto">
-                      {streamingText.slice(-500)}
-                    </pre>
                   </div>
                 )}
               </div>
@@ -1021,6 +1225,57 @@ export default function HomePage() {
                   应用已生成，你可以在右侧预览查看效果。继续描述需求可以修改应用。
                 </p>
               </div>
+            )}
+
+            {/* 变更确认面板：diff 模式下等待用户批准 */}
+            {pendingDiff && (
+              <DiffViewer
+                diff={{
+                  changes: pendingDiff.changes.changes.map((c) => ({
+                    path: c.file,
+                    edits: c.edits.map((e) => ({
+                      line: e.line,
+                      old: e.old,
+                      new: e.new,
+                      type: e.type,
+                    })),
+                  })),
+                  summary: pendingDiff.changes.summary,
+                }}
+                onAccept={() => {
+                  // 应用变更
+                  const entryPath = ENTRY_FILE_PATH;
+                  const entryContent = pendingDiff.files[entryPath]?.content ?? '';
+                  const validation = validateGeneratedHtml(entryContent);
+
+                  updateFiles(pendingDiff.files, entryPath);
+                  updateProjectStatus(validation.ok ? 'ready' : 'draft');
+
+                  if (validation.ok) {
+                    const summary = `应用变更：${pendingDiff.changes.summary}`;
+                    saveVersion(summary, 'iteration');
+                    addMessage({ role: 'assistant', content: '变更已应用。' });
+                    toast.success('变更已应用');
+                  } else {
+                    const warningMsg = `变更已应用，但代码存在 ${validation.issues.length} 个问题`;
+                    addMessage({ role: 'assistant', content: warningMsg });
+                    toast.info(warningMsg);
+                  }
+
+                  setPendingDiff(null);
+                }}
+                onReject={() => {
+                  // 拒绝变更
+                  addMessage({ role: 'assistant', content: '变更已取消，代码保持原样。' });
+                  toast.info('变更已取消');
+                  setPendingDiff(null);
+                }}
+              />
+            )}
+
+            {/* 审查摘要：确定性校验/构建日志折叠为单行，点击展开详情 */}
+            {!isGenerating && reviewChecks && reviewChecks.length > 0 && (
+              <ReviewSummary checks={reviewChecks} />
             )}
           </div>
 
@@ -1041,6 +1296,20 @@ export default function HomePage() {
                 <Icon icon="lucide:square" width={14} height={14} />
                 <span className="text-[13px] font-medium">停止生成</span>
               </button>
+            )}
+            {/* 框架选择：仅新会话显示，项目创建后随项目固定不再变更 */}
+            {!currentProject && !isGenerating && !isOptimizing && (
+              <div className="flex items-center gap-2 mb-2">
+                <span className="flex items-center gap-1 text-[11px] text-[var(--color-text-tertiary)] shrink-0">
+                  <Icon icon="lucide:code-2" width={12} height={12} />
+                  生成框架
+                </span>
+                <FrameworkSelector
+                  value={selectedFramework}
+                  onChange={setSelectedFramework}
+                  disabled={!isLoggedIn}
+                />
+              </div>
             )}
             <div className="relative">
               <textarea
@@ -1067,7 +1336,7 @@ export default function HomePage() {
                 disabled={!inputValue.trim() || isGenerating || isOptimizing}
                 className="absolute right-3 bottom-3 flex items-center justify-center w-8 h-8 rounded-lg bg-[var(--color-accent)] text-white disabled:bg-transparent disabled:text-[var(--color-text-tertiary)] disabled:border disabled:border-[var(--color-border-default)] transition-all hover:bg-[var(--color-accent-hover)] active:scale-95"
               >
-                <Icon icon={isGenerating ? 'lucide:loader-2' : 'lucide:send'} width={16} height={16} className={isGenerating ? 'animate-spin' : ''} />
+                <Icon icon={isGenerating ? 'lucide:loader-circle' : 'lucide:send'} width={16} height={16} className={isGenerating ? 'animate-spin' : ''} />
               </button>
             </div>
             <div className="flex items-center justify-between mt-2 gap-2">
@@ -1157,6 +1426,12 @@ export default function HomePage() {
               {/* Divider */}
               <div className="w-px h-5 bg-[var(--color-border-default)] mx-2" />
 
+              {/* 版本历史按钮（仅在代码视图显示） */}
+              {viewTab === 'code' && <VersionHistory />}
+
+              {/* Divider */}
+              <div className="w-px h-5 bg-[var(--color-border-default)] mx-2" />
+
               {/* 设备切换已移至 SandboxFrame 组件内 */}
             </div>
 
@@ -1204,6 +1479,70 @@ export default function HomePage() {
                 </button>
               )}
 
+              {/* Export ZIP */}
+              {generatedHtml && currentProject && (
+                <button
+                  onClick={async () => {
+                    if (isExporting) return;
+                    setIsExporting(true);
+                    try {
+                      // 动态导入：仅在导出时加载 jszip（约 95KB）
+                      const { exportProjectAsZip } = await import('../services/export/zipExporter');
+                      await exportProjectAsZip(currentProject);
+                      toast.success('ZIP 包已开始下载');
+                    } catch (error) {
+                      const msg = error instanceof Error ? error.message : '导出失败，请稍后重试';
+                      toast.error(msg);
+                    } finally {
+                      setIsExporting(false);
+                    }
+                  }}
+                  disabled={isExporting}
+                  className="p-1.5 rounded text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] disabled:opacity-50 transition-colors"
+                  title={isExporting ? '正在打包下载...' : '导出代码为 ZIP'}
+                >
+                  <Icon
+                    icon={isExporting ? 'lucide:loader-circle' : 'lucide:download'}
+                    width={16}
+                    height={16}
+                    className={isExporting ? 'animate-spin' : ''}
+                  />
+                </button>
+              )}
+
+              {/* Deploy to server */}
+              {generatedHtml && currentProject && (
+                <button
+                  onClick={async () => {
+                    if (isDeploying) return;
+                    setIsDeploying(true);
+                    try {
+                      const result = await deployProject(currentProject.id, currentProject.files);
+                      navigator.clipboard.writeText(result.deployUrl);
+                      toast.success(`部署成功，链接已复制：${result.deployUrl}`);
+                    } catch (error) {
+                      // 401 已由 apiClient 统一提示并跳转登录，此处不重复提示
+                      if (!(error instanceof ApiError && error.status === 401)) {
+                        const message = error instanceof ApiError ? error.message : '部署失败，请稍后重试';
+                        toast.error(message);
+                      }
+                    } finally {
+                      setIsDeploying(false);
+                    }
+                  }}
+                  disabled={isDeploying}
+                  className="p-1.5 rounded text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] disabled:opacity-50 transition-colors"
+                  title="部署到服务器"
+                >
+                  <Icon
+                    icon={isDeploying ? 'lucide:loader-circle' : 'lucide:rocket'}
+                    width={16}
+                    height={16}
+                    className={isDeploying ? 'animate-spin' : ''}
+                  />
+                </button>
+              )}
+
               {/* Console toggle */}
               <button
                 onClick={() => setShowConsole(!showConsole)}
@@ -1226,7 +1565,11 @@ export default function HomePage() {
                 <div className="flex-1 flex items-center justify-center p-4">
                   {generatedHtml ? (
                     <div className="w-full h-full">
-                      <SandboxFrame html={generatedHtml} files={currentProject?.files} />
+                      <SandboxFrame
+                        html={generatedHtml}
+                        files={currentProject?.files}
+                        framework={currentProject?.framework ?? 'html'}
+                      />
                     </div>
                   ) : (
                     <div className="text-center text-[var(--color-text-tertiary)]">

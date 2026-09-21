@@ -14,6 +14,7 @@ import { projectsRouter } from './routes/projects.js';
 import { llmRouter } from './routes/llm.js';
 import { authRouter } from './routes/auth.js';
 import { shareRouter } from './routes/share.js';
+import { deployRouter } from './routes/deploy.js';
 import { closeDatabase } from './db.js';
 
 const app = new Hono();
@@ -44,6 +45,7 @@ app.route('/api/auth', authRouter);
 app.route('/api/projects', projectsRouter);
 app.route('/api/llm', llmRouter);
 app.route('/api/share', shareRouter);
+app.route('/api/deploy', deployRouter);
 
 // 优雅关闭
 process.on('SIGINT', () => {

@@ -40,7 +40,7 @@ export interface MigrationResult<T> {
 }
 
 /** 存储作用域，对应 localStorage key 的第三段 */
-export type StorageScope = 'meta' | 'projects' | 'settings' | 'backup';
+export type StorageScope = 'meta' | 'projects' | 'settings' | 'backup' | 'preferences' | 'versions' | 'plans';
 
 const APP_PREFIX = 'atoms';
 /** key 中的格式代际。仅当值形态无法用数据变换表达时才 bump，正常演进走 schemaVersion */

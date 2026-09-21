@@ -85,6 +85,59 @@ export interface User {
 export type SessionUser = Pick<User, 'id' | 'username' | 'createdAt'>;
 
 /**
+ * 项目 ID 格式校验（仅字母、数字、连字符，1-64 位）。
+ * 部署目录以 projectId 命名，进入文件系统路径前必须通过该校验，
+ * 防止路径穿越（../）与特殊字符注入。
+ */
+export const PROJECT_ID_PATTERN = /^[a-zA-Z0-9-]{1,64}$/;
+
+/**
+ * 单行编辑操作
+ */
+export interface FileEdit {
+  /** 行号（1-indexed） */
+  line: number;
+  /** 原行内容（必须精确匹配，包括缩进） */
+  old: string;
+  /** 新行内容 */
+  new: string;
+  /** 操作类型 */
+  type: 'replace' | 'insert' | 'delete';
+}
+
+/**
+ * 单个文件的变更集合
+ */
+export interface FileChange {
+  /** 文件路径 */
+  file: string;
+  /** 编辑操作列表 */
+  edits: FileEdit[];
+}
+
+/**
+ * 变更清单（工程师 diff 输出格式）
+ */
+export interface ChangeList {
+  /** 变更列表 */
+  changes: FileChange[];
+  /** 变更摘要 */
+  summary: string;
+}
+
+/**
+ * 部署记录（对应 SQLite deployments 表）。
+ */
+export interface DeploymentRecord {
+  id: string;
+  projectId: string;
+  deployUrl: string;
+  deployedAt: IsoDateTime;
+  fileCount: number;
+  totalSize: number;
+}
+
+/**
  * Hono 上下文变量类型
  */
 export interface AppEnv {

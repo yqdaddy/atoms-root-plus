@@ -7,6 +7,7 @@ import { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Icon } from '@iconify/react';
 import { loadShare, type ShareData, type SharedFile } from '../utils/share';
+import { buildSandboxAttribute, buildPreviewCsp, DEFAULT_CDN_HOSTS } from '../types/sandbox';
 
 /**
  * 将多文件内容注入到 HTML 中
@@ -136,14 +137,32 @@ export default function SharePage() {
   // 注入多文件内容后的 HTML
   const injectedHtml = useMemo(() => {
     if (!shareData?.html) return '';
-    return injectFilesIntoHtml(shareData.html, shareData.files);
+    let html = injectFilesIntoHtml(shareData.html, shareData.files);
+
+    // 注入 CSP meta 标签（限制外部资源访问，只允许默认 CDN 域名，不允许 eval）
+    const csp = buildPreviewCsp(DEFAULT_CDN_HOSTS, false);
+    const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
+
+    if (html.includes('<head>')) {
+      html = html.replace('<head>', `<head>${cspMeta}`);
+    } else if (html.includes('<html>')) {
+      html = html.replace('<html>', `<html><head>${cspMeta}</head>`);
+    } else {
+      // 最小化 HTML 包装
+      html = `<!DOCTYPE html><html><head>${cspMeta}</head><body>${html}</body></html>`;
+    }
+
+    return html;
   }, [shareData]);
+
+  // 构建安全的 sandbox 属性（移除 allow-same-origin，与主预览沙箱一致）
+  const sandboxAttr = useMemo(() => buildSandboxAttribute(['allow-forms', 'allow-modals']), []);
 
   if (loading) {
     return (
       <div className="min-h-screen bg-[var(--color-bg-base)] flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
-          <Icon icon="lucide:loader-2" width={32} height={32} className="animate-spin text-[var(--color-accent)]" />
+          <Icon icon="lucide:loader-circle" width={32} height={32} className="animate-spin text-[var(--color-accent)]" />
           <p className="text-[var(--color-text-secondary)]">加载中...</p>
         </div>
       </div>
@@ -201,7 +220,7 @@ export default function SharePage() {
             srcDoc={injectedHtml}
             title="分享预览"
             className="w-full h-full border-0"
-            sandbox="allow-scripts allow-modals allow-forms allow-same-origin"
+            sandbox={sandboxAttr}
           />
         )}
       </div>

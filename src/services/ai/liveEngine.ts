@@ -24,16 +24,19 @@ const STAGE_MAP: Record<string, PipelineStage> = {
   analysis: 'analyzing',
   generate: 'generating',
   review: 'reviewing',
+  diagnose: 'analyzing',
 };
 
 /**
  * 后端 stage 到前端 DeltaPhase 映射
- * review 阶段的输出也归入 generate phase
+ * review 阶段的输出也归入 generate phase；
+ * diagnose 阶段的输出归入 analyze phase（思考区展示）
  */
 const STAGE_TO_PHASE: Record<string, DeltaPhase> = {
   analysis: 'analyze',
   generate: 'generate',
   review: 'generate',
+  diagnose: 'analyze',
 };
 
 /**
@@ -43,6 +46,7 @@ const STAGE_MESSAGES: Record<string, string> = {
   analysis: '正在分析需求...',
   generate: '正在生成代码...',
   review: '正在审查代码...',
+  diagnose: '正在诊断问题...',
 };
 
 /* ---------------- SSE 解析 ---------------- */
@@ -98,7 +102,6 @@ async function parseSSEStream(
 
       chunkCount += 1;
       buffer += decoder.decode(chunk.value, { stream: true });
-      console.log('[liveEngine] 收到 chunk', chunkCount, '长度:', buffer.length);
 
       // 逐行解析 SSE
       const lines = buffer.split('\n');
@@ -136,7 +139,6 @@ function processSSEEvent(
 ): void {
   try {
     const payload = JSON.parse(eventData);
-    console.log('[liveEngine] 解析事件:', eventType, eventData.slice(0, 100));
 
     // 转换后端格式到前端格式
     let event: StreamEvent;
@@ -145,7 +147,7 @@ function processSSEEvent(
         const backendStage = payload.phase as string;
         const frontendStage = STAGE_MAP[backendStage] || 'analyzing';
         const message = STAGE_MESSAGES[backendStage] || `${backendStage} 阶段`;
-        console.log('[liveEngine] stage 事件:', { backendStage, frontendStage, message });
+        console.log('[liveEngine] stage 事件:', { backendStage, frontendStage, message, intent: payload.intent });
         event = {
           type: 'stage',
           payload: {
@@ -153,6 +155,7 @@ function processSSEEvent(
             stage: frontendStage,
             attempt: 1,
             message,
+            ...(payload.intent ? { intent: payload.intent } : {}),
           },
         };
         break;
@@ -172,11 +175,20 @@ function processSSEEvent(
       case 'done': {
         const html = payload.html || '';
         const files = payload.files;
+        const analysis = typeof payload.analysis === 'string' ? payload.analysis : undefined;
+        const changes = payload.changes;
+        const changeSummary = payload.changeSummary;
+        // 从后端读取 token 统计，后端未返回时使用默认值
+        const backendStats = payload.stats;
         console.log('[liveEngine] done 事件:', {
           htmlLength: html.length,
           htmlPreview: html.slice(0, 200),
           hasFiles: !!files,
           fileCount: files ? Object.keys(files).length : 0,
+          hasAnalysis: !!analysis,
+          hasChanges: !!changes,
+          changeSummary,
+          stats: backendStats,
         });
         event = {
           type: 'done',
@@ -185,7 +197,16 @@ function processSSEEvent(
             html,
             files: files,
             warnings: [],
-            stats: { mode: 'live', inputTokens: 0, outputTokens: 0, durationMs: 0, rounds: 1 },
+            stats: {
+              mode: 'live',
+              inputTokens: backendStats?.inputTokens ?? 0,
+              outputTokens: backendStats?.outputTokens ?? 0,
+              durationMs: 0,
+              rounds: 1,
+            },
+            ...(analysis ? { analysis } : {}),
+            ...(changes ? { changes } : {}),
+            ...(changeSummary ? { changeSummary } : {}),
           },
         };
         break;
@@ -201,6 +222,25 @@ function processSSEEvent(
             fallbackToDemo: false,
           },
         };
+        break;
+      }
+      case 'retry': {
+        // 重试进度事件：在思考区展示重试状态
+        const retry = payload.retry;
+        if (retry) {
+          console.log('[liveEngine] retry 事件:', retry);
+          event = {
+            type: 'delta',
+            payload: {
+              runId,
+              phase: 'generate',
+              text: `\n[重试中，第 ${retry.attempt}/${retry.maxRetries} 次，等待 ${Math.round(retry.delayMs / 1000)}s]\n`,
+            },
+          };
+        } else {
+          console.warn('[liveEngine] retry 事件缺少 retry 字段');
+          return;
+        }
         break;
       }
       case 'approval_required': {
@@ -235,6 +275,9 @@ async function runPipeline(
   options: GenerateOptions,
   onEvent: StreamEventHandler,
 ): Promise<void> {
+  // 调试日志：framework 参数
+  console.log('[liveEngine] runPipeline framework 参数:', options.framework);
+
   // 新提交隐式取消进行中的旧任务
   cancelActiveRun();
 
@@ -249,6 +292,7 @@ async function runPipeline(
       hasCurrentFiles: Boolean(options.currentFiles),
       hasChatTurns: Boolean(options.chatTurns),
       hasCurrentHtml: Boolean(options.currentHtml),
+      framework: options.framework,
     });
 
     // 统一走反向代理：开发环境由 Vite 代理转发，生产环境同源直出
@@ -265,6 +309,10 @@ async function runPipeline(
           currentFiles: options.currentFiles,
           chatTurns: options.chatTurns,
           originalRequest: options.originalRequest,
+          intentOverride: options.intentOverride,
+          preferences: options.preferences,
+          globalPreferences: options.globalPreferences,
+          framework: options.framework,
         },
       }),
       signal: controller.signal,

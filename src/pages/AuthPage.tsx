@@ -67,6 +67,67 @@ export default function AuthPage({ mode }: AuthPageProps) {
     navigate(newMode === 'register' ? '/register' : '/login', { replace: true });
   }, [navigate]);
 
+  // 随机生成用户名：user_ + 6位数字
+  const generateRandomUsername = (): string => {
+    const digits = Math.floor(100000 + Math.random() * 900000); // 6位数字
+    return `user_${digits}`;
+  };
+
+  // 随机生成密码：8位字母数字组合
+  const generateRandomPassword = (): string => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'; // 移除易混淆字符
+    let password = '';
+    for (let i = 0; i < 8; i++) {
+      password += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return password;
+  };
+
+  // 一键注册登录
+  const handleQuickRegister = useCallback(async () => {
+    setSubmitError(null);
+    setFieldErrors({});
+    setIsSubmitting(true);
+
+    const maxRetries = 3;
+    let retryCount = 0;
+
+    while (retryCount < maxRetries) {
+      const randomUsername = generateRandomUsername();
+      const randomPassword = generateRandomPassword();
+
+      try {
+        // 注册
+        await register(randomUsername, randomPassword);
+        toast.success('注册成功，已自动登录。');
+
+        // 跳转到工作台
+        const redirect = searchParams.get('redirect');
+        if (redirect) {
+          navigate(redirect, { replace: true });
+        } else {
+          navigate('/workspace', { replace: true });
+        }
+        return; // 成功，退出循环
+      } catch (e) {
+        const message = e instanceof Error ? e.message : '注册失败，请重试。';
+
+        // 用户名冲突时重试
+        if (message.includes('用户名已存在') && retryCount < maxRetries - 1) {
+          retryCount++;
+          continue;
+        }
+
+        // 其他错误或重试次数用尽
+        setSubmitError(message);
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
+    setIsSubmitting(false);
+  }, [register, navigate, searchParams]);
+
   // 提交
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
@@ -286,6 +347,17 @@ export default function AuthPage({ mode }: AuthPageProps) {
             ) : (
               <span>{mode === 'register' ? '注册' : '登录'}</span>
             )}
+          </button>
+
+          {/* 一键注册登录 */}
+          <button
+            type="button"
+            onClick={handleQuickRegister}
+            disabled={isSubmitting}
+            className="w-full h-[44px] flex items-center justify-center gap-2 rounded-[10px] text-[13px] font-medium text-[var(--color-text-secondary)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text-primary)] active:scale-[0.98] transition-all duration-[80ms] disabled:opacity-50"
+          >
+            <Icon icon="lucide:sparkles" width={16} height={16} />
+            <span>一键注册登录</span>
           </button>
         </form>
 

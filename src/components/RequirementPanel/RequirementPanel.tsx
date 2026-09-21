@@ -74,7 +74,7 @@ export function RequirementPanel({
   if (isOptimizing) {
     return (
       <div className="bg-[var(--color-bg-base)] border border-[var(--color-border-default)] rounded-xl p-4">
-        <PanelHeader subtitle="AI 正在分析需求，补充细节" tone="loading" />
+        <PanelHeader subtitle="正在优化需求，补充细节" tone="loading" />
         <div className="rounded-lg bg-[var(--color-bg-surface)] px-3 py-2">
           <div className="flex items-center gap-2 mb-1.5">
             <span className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-pulse" />

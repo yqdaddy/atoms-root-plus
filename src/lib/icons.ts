@@ -9,20 +9,30 @@
  */
 import { addCollection } from '@iconify/react';
 
+import atom from '../../assets/icons/lucide/atom.svg?raw';
+import alertCircle from '../../assets/icons/lucide/alert-circle.svg?raw';
 import arrowUp from '../../assets/icons/lucide/arrow-up.svg?raw';
+import bot from '../../assets/icons/lucide/bot.svg?raw';
 import check from '../../assets/icons/lucide/check.svg?raw';
+import chevronDown from '../../assets/icons/lucide/chevron-down.svg?raw';
+import chevronRight from '../../assets/icons/lucide/chevron-right.svg?raw';
 import code from '../../assets/icons/lucide/code.svg?raw';
+import code2 from '../../assets/icons/lucide/code-2.svg?raw';
 import copy from '../../assets/icons/lucide/copy.svg?raw';
 import database from '../../assets/icons/lucide/database.svg?raw';
 import download from '../../assets/icons/lucide/download.svg?raw';
 import eye from '../../assets/icons/lucide/eye.svg?raw';
 import eyeOff from '../../assets/icons/lucide/eye-off.svg?raw';
+import file from '../../assets/icons/lucide/file.svg?raw';
+import fileCode from '../../assets/icons/lucide/file-code.svg?raw';
 import fileText from '../../assets/icons/lucide/file-text.svg?raw';
 import folder from '../../assets/icons/lucide/folder.svg?raw';
+import gitCompare from '../../assets/icons/lucide/git-compare.svg?raw';
 import hammer from '../../assets/icons/lucide/hammer.svg?raw';
 import helpCircle from '../../assets/icons/lucide/help-circle.svg?raw';
 import history from '../../assets/icons/lucide/history.svg?raw';
 import home from '../../assets/icons/lucide/home.svg?raw';
+import layers from '../../assets/icons/lucide/layers.svg?raw';
 import layoutTemplate from '../../assets/icons/lucide/layout-template.svg?raw';
 import lightbulb from '../../assets/icons/lucide/lightbulb.svg?raw';
 import listChecks from '../../assets/icons/lucide/list-checks.svg?raw';
@@ -68,20 +78,30 @@ function parseSvg(raw: string): { body: string; width: number; height: number } 
 
 /** 图标名到 SVG 原文的映射，与 assets/icons/index.json 保持一致 */
 const LOCAL_ICONS: Record<string, string> = {
+  atom,
+  'alert-circle': alertCircle,
   'arrow-up': arrowUp,
+  bot,
   check,
+  'chevron-down': chevronDown,
+  'chevron-right': chevronRight,
   code,
+  'code-2': code2,
   copy,
   database,
   download,
   eye,
   'eye-off': eyeOff,
+  file,
+  'file-code': fileCode,
   'file-text': fileText,
   folder,
+  'git-compare': gitCompare,
   hammer,
   'help-circle': helpCircle,
   history,
   home,
+  layers,
   'layout-template': layoutTemplate,
   lightbulb,
   'list-checks': listChecks,

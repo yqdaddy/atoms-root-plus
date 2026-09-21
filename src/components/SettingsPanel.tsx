@@ -4,9 +4,11 @@
  */
 import { useState, useCallback } from 'react';
 import Modal from './Modal';
+import { Icon } from '@iconify/react';
 import { useSettingsStore } from '../stores/settingsStore';
 import { PROVIDER_PRESETS } from '../services/ai/liveEngine';
 import { toast } from './Toast';
+import PermissionSettingsSection from './PermissionSettingsSection';
 
 export interface SettingsPanelProps {
   open: boolean;
@@ -137,6 +139,22 @@ export default function SettingsPanel({ open, onClose }: SettingsPanelProps) {
             未配置 API Key 时，将使用演示模式生成示例应用。
           </p>
         </div>
+      </div>
+
+      {/* 权限配置分隔 */}
+      <div className="mt-6 pt-6 border-t border-[var(--color-border-default)]">
+        <div className="flex items-center gap-2 mb-4">
+          <Icon
+            icon="lucide:shield-check"
+            width={16}
+            height={16}
+            className="text-[var(--color-text-tertiary)]"
+          />
+          <h3 className="text-[15px] font-semibold text-[var(--color-text-primary)]">
+            工具权限
+          </h3>
+        </div>
+        <PermissionSettingsSection />
       </div>
 
       {/* 底部按钮 */}

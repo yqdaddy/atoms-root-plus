@@ -6,6 +6,7 @@
 import { Hono } from 'hono';
 import { optionalAuth } from '../auth.js';
 import * as db from '../db.js';
+import { cleanupProjectDeployment } from './deploy.js';
 import type { Project, ProjectStatus, AppEnv } from '../types.js';
 import { ENTRY_FILE_PATH, UUID_PATTERN } from '../types.js';
 
@@ -242,6 +243,9 @@ projectsRouter.delete('/:id', (c) => {
   if (!success) {
     return c.json({ error: 'Project not found' }, 404);
   }
+
+  // 项目已删除，尽力清理其部署目录与部署记录（失败不影响删除主流程）
+  cleanupProjectDeployment(id);
 
   return c.json({ success: true });
 });

@@ -1,9 +1,26 @@
 /**
  * 对话状态管理。
- * 负责流式渲染状态、生成阶段、当前消息缓冲。
+ * 负责流式渲染状态、生成阶段、当前消息缓冲、文件生成进度、审查摘要。
  */
 import { create } from 'zustand';
-import type { GenerationStatus, PipelineStage, DeltaPhase } from '../services/ai/types';
+import type { GenerationStatus, PipelineStage, DeltaPhase, IntentResult } from '../services/ai/types';
+import type { ReviewCheckItem } from '../components/ReviewSummary';
+
+/** 文件生成状态 */
+export interface FileGenerationStatus {
+  /** 文件路径 */
+  path: string;
+  /** 文件名 */
+  name: string;
+  /** 状态：pending 等待中 / generating 生成中 / completed 已完成 / failed 失败 */
+  status: 'pending' | 'generating' | 'completed' | 'failed';
+  /** 已生成字符数 */
+  charCount: number;
+  /** 行数估算 */
+  lineCount: number;
+  /** 操作类型：create 新建 / modify 修改 */
+  operation?: 'create' | 'modify';
+}
 
 export interface StreamBuffer {
   /** 当前运行 ID */
@@ -22,6 +39,12 @@ export interface StreamBuffer {
   stageMessage: string;
   /** 是否等待用户批准（approval_required 时设为 true，批准后继续生成时设为 false） */
   awaitingApproval: boolean;
+  /** 文件生成进度列表（工具参数流式渲染） */
+  files: FileGenerationStatus[];
+  /** 当前正在生成的文件路径 */
+  activeFilePath: string | null;
+  /** 意图识别结果（仅首个 stage 事件携带） */
+  intent: IntentResult | null;
 }
 
 interface ChatState {
@@ -33,15 +56,17 @@ interface ChatState {
   error: string | null;
   /** 当前用户输入 */
   currentInput: string;
+  /** 审查检查结果（生成完成后展示折叠摘要，null 表示无审查结果） */
+  reviewChecks: ReviewCheckItem[] | null;
 }
 
 interface ChatActions {
   /** 开始新的生成 */
   startGeneration: (runId: string) => void;
   /** 更新阶段 */
-  updateStage: (stage: PipelineStage, attempt: number, message: string) => void;
-  /** 追加 delta 文本 */
-  appendDelta: (phase: DeltaPhase, text: string) => void;
+  updateStage: (stage: PipelineStage, attempt: number, message: string, intent?: IntentResult) => void;
+  /** 追加 delta 文本（fileName/operation 用于文件级进度追踪） */
+  appendDelta: (phase: DeltaPhase, text: string, fileName?: string, operation?: 'create' | 'modify') => void;
   /** 完成生成 */
   finishGeneration: () => void;
   /** 设置错误 */
@@ -54,6 +79,12 @@ interface ChatActions {
   resetStreamBuffer: () => void;
   /** 设置等待批准状态 */
   setAwaitingApproval: (awaiting: boolean) => void;
+  /** 更新文件生成状态 */
+  updateFileStatus: (path: string, status: FileGenerationStatus['status'], charCount?: number, lineCount?: number) => void;
+  /** 设置审查检查结果（用于折叠摘要展示） */
+  setReviewChecks: (checks: ReviewCheckItem[] | null) => void;
+  /** 设置意图识别结果 */
+  setIntent: (intent: IntentResult | null) => void;
 }
 
 const initialStreamBuffer: StreamBuffer = {
@@ -65,6 +96,9 @@ const initialStreamBuffer: StreamBuffer = {
   repairText: '',
   stageMessage: '',
   awaitingApproval: false,
+  files: [],
+  activeFilePath: null,
+  intent: null,
 };
 
 export type ChatStore = ChatState & ChatActions;
@@ -74,6 +108,7 @@ export const useChatStore = create<ChatStore>()((set) => ({
   isGenerating: false,
   error: null,
   currentInput: '',
+  reviewChecks: null,
 
   startGeneration: (runId) => {
     set({
@@ -82,35 +117,78 @@ export const useChatStore = create<ChatStore>()((set) => ({
         runId,
         stage: 'analyzing',
         attempt: 1,
-        stageMessage: '正在分析需求...',
+        stageMessage: '正在分析功能...',
       },
       isGenerating: true,
       error: null,
+      reviewChecks: null,
     });
   },
 
-  updateStage: (stage, attempt, message) => {
+  updateStage: (stage, attempt, message, intent) => {
     set((state) => ({
       streamBuffer: {
         ...state.streamBuffer,
         stage,
         attempt,
         stageMessage: message,
+        ...(intent ? { intent } : {}),
       },
     }));
   },
 
-  appendDelta: (phase, text) => {
+  appendDelta: (phase, text, fileName, operation) => {
     set((state) => {
       const buffer = state.streamBuffer;
-      return {
-        streamBuffer: {
-          ...buffer,
-          analyzeText: phase === 'analyze' ? buffer.analyzeText + text : buffer.analyzeText,
-          generateText: phase === 'generate' ? buffer.generateText + text : buffer.generateText,
-          repairText: phase === 'repair' ? buffer.repairText + text : buffer.repairText,
-        },
+      const isThinkingPhase = phase === 'analyze';
+      const isGeneratePhase = phase === 'generate';
+      const isRepairPhase = phase === 'repair';
+      const nextBuffer: StreamBuffer = {
+        ...buffer,
+        analyzeText: isThinkingPhase ? buffer.analyzeText + text : buffer.analyzeText,
+        generateText: isGeneratePhase ? buffer.generateText + text : buffer.generateText,
+        repairText: isRepairPhase ? buffer.repairText + text : buffer.repairText,
       };
+
+      // 文件生成进度追踪（仅在 generate/repair 阶段且携带文件名时）
+      if ((isGeneratePhase || isRepairPhase) && fileName) {
+        const existingIdx = buffer.files.findIndex((f) => f.path === fileName);
+
+        if (existingIdx !== -1) {
+          const updatedFiles = [...buffer.files];
+          const existing = updatedFiles[existingIdx];
+          if (existing) {
+            // 累加当前 delta 的长度，跟踪每个文件的独立字符计数
+            const newCharCount = existing.charCount + text.length;
+            const newLineCount = existing.lineCount + (text.match(/\n/g) || []).length;
+            updatedFiles[existingIdx] = {
+              ...existing,
+              status: 'generating',
+              charCount: newCharCount,
+              lineCount: newLineCount,
+            };
+          }
+          nextBuffer.files = updatedFiles;
+        } else {
+          // 新文件：初始化字符计数为当前 delta 的长度
+          const initialCharCount = text.length;
+          const initialLineCount = 1 + (text.match(/\n/g) || []).length;
+          nextBuffer.files = [
+            ...buffer.files,
+            {
+              path: fileName,
+              name: fileName.split('/').pop() ?? fileName,
+              status: 'generating',
+              charCount: initialCharCount,
+              lineCount: initialLineCount,
+              operation: operation ?? 'create',
+            },
+          ];
+        }
+        nextBuffer.activeFilePath = fileName;
+      }
+
+      return { streamBuffer: nextBuffer };
     });
   },
 
@@ -154,6 +232,63 @@ export const useChatStore = create<ChatStore>()((set) => ({
       streamBuffer: {
         ...state.streamBuffer,
         awaitingApproval: awaiting,
+      },
+    }));
+  },
+
+  updateFileStatus: (path, status, charCount, lineCount) => {
+    set((state) => {
+      const buffer = state.streamBuffer;
+      const idx = buffer.files.findIndex((f) => f.path === path);
+
+      if (idx !== -1) {
+        const updatedFiles = [...buffer.files];
+        const existing = updatedFiles[idx];
+        if (existing) {
+          updatedFiles[idx] = {
+            ...existing,
+            status,
+            charCount: charCount ?? existing.charCount,
+            lineCount: lineCount ?? existing.lineCount,
+          };
+        }
+        return {
+          streamBuffer: {
+            ...buffer,
+            files: updatedFiles,
+            activeFilePath: status === 'generating' ? path : buffer.activeFilePath,
+          },
+        };
+      }
+
+      // 添加新文件（用于完成阶段补记未追踪的文件）
+      return {
+        streamBuffer: {
+          ...buffer,
+          files: [
+            ...buffer.files,
+            {
+              path,
+              name: path.split('/').pop() ?? path,
+              status,
+              charCount: charCount ?? 0,
+              lineCount: lineCount ?? 0,
+            },
+          ],
+        },
+      };
+    });
+  },
+
+  setReviewChecks: (checks) => {
+    set({ reviewChecks: checks });
+  },
+
+  setIntent: (intent) => {
+    set((state) => ({
+      streamBuffer: {
+        ...state.streamBuffer,
+        intent,
       },
     }));
   },

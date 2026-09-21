@@ -25,6 +25,50 @@ export interface FileNode {
 
 export type ProjectStatus = 'draft' | 'generating' | 'ready' | 'error';
 
+/** 版本类型：初始版本 / 迭代版本 / 回滚版本 */
+export type VersionType = 'initial' | 'iteration' | 'rollback';
+
+/** 计划工件：分析师产出的结构化计划 */
+export interface Plan {
+  /** 计划 ID */
+  id: string;
+  /** 所属项目 ID */
+  projectId: string;
+  /** 版本号（用户编辑后自增） */
+  version: number;
+  /** 分析师产出的结构化计划（JSON 字符串） */
+  content: string;
+  /** 能力声明：需要沙箱开放的能力 */
+  capabilities?: string[];
+  /** 用户是否编辑过 */
+  editedByUser?: boolean;
+  /** 创建时间 */
+  createdAt: IsoDateTime;
+  /** 更新时间 */
+  updatedAt: IsoDateTime;
+}
+
+/** 版本快照：每次 AI 生成完成后自动保存 */
+export interface Version {
+  /** 版本 ID */
+  id: string;
+  /** 所属项目 ID */
+  projectId: string;
+  /** 创建时间（ISO DateTime） */
+  createdAt: IsoDateTime;
+  /** 变更摘要 */
+  summary: string;
+  /** 版本类型 */
+  type: VersionType;
+  /** 文件快照 */
+  files: Record<string, FileNode>;
+  /** 回滚来源版本 ID（仅 type 为 rollback 时存在） */
+  rollbackFrom?: string;
+}
+
+/** 项目目标框架：原生 HTML / React CDN（浏览器内 JSX 编译）/ Vue CDN */
+export type ProjectFramework = 'html' | 'react-cdn' | 'vue-cdn';
+
 export type ChatRole = 'user' | 'assistant' | 'system';
 
 export interface ChatMessage {
@@ -64,6 +108,8 @@ export interface Project {
   name: string;
   description: string;
   status: ProjectStatus;
+  /** 生成代码的目标框架，默认 html；react-cdn 时沙箱注入 React/Sucrase 运行时 */
+  framework?: ProjectFramework;
   /** path 到 FileNode 的映射。读取入口永远走 ENTRY_FILE_PATH */
   files: Record<string, FileNode>;
   /** 对话历史，按 createdAt 升序 */
@@ -78,9 +124,34 @@ export interface ProjectSummary {
   id: string;
   name: string;
   status: ProjectStatus;
+  /** 生成代码的目标框架，列表页展示框架标签用 */
+  framework?: ProjectFramework;
   updatedAt: IsoDateTime;
   /** 入口文件字节数，用于列表页体积提示与 quota 预估 */
   entryBytes: number;
+}
+
+/** 项目偏好类型 */
+export type PreferenceType = 'style' | 'tech' | 'correction' | 'preference';
+
+/** 项目偏好记忆：记录用户对项目的偏好选择，用于后续生成时复用 */
+export interface ProjectPreference {
+  /** UUID v4 */
+  id: string;
+  /** 所属项目 ID */
+  projectId: string;
+  /** 偏好类型 */
+  type: PreferenceType;
+  /** 偏好键名，如 "color-scheme", "framework" */
+  key: string;
+  /** 偏好值，如 "dark", "react" */
+  value: string;
+  /** 偏好来源说明（Why），记录用户原话或上下文 */
+  reason?: string;
+  /** 创建时间 */
+  createdAt: IsoDateTime;
+  /** 最后更新时间 */
+  updatedAt: IsoDateTime;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
