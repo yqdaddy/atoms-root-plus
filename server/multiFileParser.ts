@@ -136,17 +136,45 @@ export function parseMultiFileOutput(text: string): MultiFileOutput {
   // 剥离 markdown 围栏
   const cleanText = stripMarkdownFence(text);
 
-  // 尝试提取 JSON
-  const jsonMatch = cleanText.match(/\{[\s\S]*"files"[\s\S]*\}/);
-  if (!jsonMatch) {
+  // 使用括号配平提取首个完整 JSON 对象（避免贪婪匹配跨多个 JSON 块）
+  let jsonStr: string | null = null;
+  let depth = 0;
+  let start = -1;
+
+  for (let i = 0; i < cleanText.length; i++) {
+    const ch = cleanText[i];
+    if (ch === '"') {
+      // 跳过字符串字面量，避免 JSON 内部的花括号干扰配对
+      i = skipJsonString(cleanText, i) - 1; // -1 因为循环会 i++
+      continue;
+    }
+    if (ch === '{') {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        jsonStr = cleanText.slice(start, i + 1);
+        break;
+      }
+    }
+  }
+
+  if (!jsonStr) {
+    // 增强错误日志：记录完整输出的前 1000 字符，便于排查
+    const preview = cleanText.length > 1000 ? cleanText.slice(0, 1000) + '...(truncated)' : cleanText;
+    console.error('[parseMultiFileOutput] 无法提取 JSON 对象，原始输出（前 1000 字符）:', preview);
     throw new Error('无法从输出中提取 JSON 对象');
   }
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(jsonMatch[0]);
+    parsed = JSON.parse(jsonStr);
   } catch (e) {
     const errorMessage = e instanceof Error ? e.message : String(e);
+    // 增强错误日志：记录提取到的 JSON 片段（前 500 字符）
+    const jsonPreview = jsonStr.length > 500 ? jsonStr.slice(0, 500) + '...(truncated)' : jsonStr;
+    console.error('[parseMultiFileOutput] JSON 解析失败:', errorMessage, '\nJSON 片段（前 500 字符）:', jsonPreview);
     throw new Error(`JSON 解析失败: ${errorMessage}`);
   }
 

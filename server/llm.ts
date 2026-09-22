@@ -764,6 +764,8 @@ export interface StreamChatCallOptions {
   maxTokens?: number;
   /** 采样温度；不传则不下发该字段，由上游默认值决定 */
   temperature?: number;
+  /** 总超时时间（毫秒），默认 120000（2 分钟） */
+  timeout?: number;
   /** 重试进度回调（withRetry 触发时通知调用方，用于向客户端转发 retry 事件） */
   onRetry?: (event: RetryProgressEvent) => void;
 }
@@ -853,6 +855,7 @@ export async function streamChatCompletionWithUsage(
 
   const baseUrl = (process.env.LLM_BASE_URL || 'https://api.agnes-ai.cn/v1').replace(/\/+$/, '');
   const model = process.env.LLM_MODEL || 'agnes-3.0-flash';
+  const timeout = callOptions?.timeout ?? 120000; // 默认 2 分钟总超时
 
   const requestBody: Record<string, unknown> = {
     model: callOptions?.model || model,
@@ -870,81 +873,121 @@ export async function streamChatCompletionWithUsage(
     requestBody.temperature = callOptions.temperature;
   }
 
+  // 创建超时控制器
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => {
+    timeoutController.abort();
+  }, timeout);
+
+  // 合并外部 abortSignal 与超时信号
+  const combinedSignal = abortSignal
+    ? AbortSignal.any([abortSignal, timeoutController.signal])
+    : timeoutController.signal;
+
   // 核心 fetch 与流消费（可重试单元：每次重试从头建立连接，delta 只在上游
   // 返回 2xx 后才产生，重试不会向前端重复推送已发出的增量）
   const fetchStream = async (): Promise<StreamChatResult> => {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(requestBody),
-      signal: abortSignal,
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      // 状态码必须以 "HTTP <code>" 形式出现在消息中：classifyAPIError 依赖
-      // /HTTP (\d+)/ 正则提取状态码做重试分类
-      throw new Error(`LLM API 错误 (HTTP ${response.status}): ${errorText}`);
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error('无法获取响应流');
-    }
-
-    const decoder = new TextDecoder();
-    let fullContent = '';
-    let buffer = '';
-    let usage: LLMUsage | undefined;
-
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(requestBody),
+        signal: combinedSignal,
+      });
 
-        buffer += decoder.decode(value, { stream: true });
+      if (!response.ok) {
+        const errorText = await response.text();
+        // 状态码必须以 "HTTP <code>" 形式出现在消息中：classifyAPIError 依赖
+        // /HTTP (\d+)/ 正则提取状态码做重试分类
+        throw new Error(`LLM API 错误 (HTTP ${response.status}): ${errorText}`);
+      }
 
-        // 解析 SSE 数据
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // 保留未完成的行
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('无法获取响应流');
+      }
 
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed === 'data: [DONE]') continue;
+      const decoder = new TextDecoder();
+      let fullContent = '';
+      let buffer = '';
+      let usage: LLMUsage | undefined;
+      let finishReason: string | undefined;
 
-          if (trimmed.startsWith('data: ')) {
-            try {
-              const json = JSON.parse(trimmed.slice(6));
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-              // 提取内容增量
-              const content = json.choices?.[0]?.delta?.content;
-              if (content) {
-                fullContent += content;
-                onDelta(content);
+          buffer += decoder.decode(value, { stream: true });
+
+          // 解析 SSE 数据
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // 保留未完成的行
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed === 'data: [DONE]') continue;
+
+            if (trimmed.startsWith('data: ')) {
+              try {
+                const json = JSON.parse(trimmed.slice(6));
+
+                // 提取内容增量
+                const content = json.choices?.[0]?.delta?.content;
+                if (content) {
+                  fullContent += content;
+                  onDelta(content);
+                }
+
+                // 提取 finish_reason（P1-3：检测截断信号）
+                const reason = json.choices?.[0]?.finish_reason;
+                if (reason) {
+                  finishReason = reason;
+                }
+
+                // 提取 usage 字段（通常在最后一个 chunk）
+                if (json.usage) {
+                  usage = {
+                    prompt_tokens: json.usage.prompt_tokens ?? 0,
+                    completion_tokens: json.usage.completion_tokens ?? 0,
+                    total_tokens: json.usage.total_tokens ?? 0,
+                  };
+                }
+              } catch {
+                // 忽略解析错误
               }
-
-              // 提取 usage 字段（通常在最后一个 chunk）
-              if (json.usage) {
-                usage = {
-                  prompt_tokens: json.usage.prompt_tokens ?? 0,
-                  completion_tokens: json.usage.completion_tokens ?? 0,
-                  total_tokens: json.usage.total_tokens ?? 0,
-                };
-              }
-            } catch {
-              // 忽略解析错误
             }
           }
         }
+      } finally {
+        reader.releaseLock();
       }
-    } finally {
-      reader.releaseLock();
-    }
 
-    return { content: fullContent, usage };
+      // P1-3：检测 finish_reason === 'length'，触发截断抢救
+      if (finishReason === 'length') {
+        console.warn(
+          '[streamChatCompletion] 检测到输出因 max_tokens 截断，finish_reason=length'
+        );
+        // 将截断标记附加到结果，由调用方决定是否触发 repairTruncatedMultiFileOutput
+        // 这里不直接抢救，因为不同调用方有不同的输出格式（单文件/多文件/变更清单）
+        // 抢救逻辑在 continueAfterApproval 和 parseChangeList 中处理
+      }
+
+      return { content: fullContent, usage };
+    } catch (error) {
+      // 区分超时错误与其他错误
+      if (error instanceof Error && error.name === 'AbortError') {
+        // 检查是否是超时导致的 abort
+        if (timeoutController.signal.aborted && !abortSignal?.aborted) {
+          throw new Error('LLM 调用超时（超过 120 秒），请稍后重试');
+        }
+        throw error;
+      }
+      throw error;
+    }
   };
 
   // 带重试执行
@@ -959,6 +1002,9 @@ export async function streamChatCompletionWithUsage(
       console.error('[streamChatCompletion] 连续容量错误，触发降级');
     }
     throw error;
+  } finally {
+    // 清理超时定时器
+    clearTimeout(timeoutId);
   }
 }
 
