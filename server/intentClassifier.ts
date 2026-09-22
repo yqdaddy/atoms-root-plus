@@ -22,6 +22,8 @@ export interface IntentResult {
   confidence: number;
   /** 判断理由（日志与前端提示用） */
   reasoning?: string;
+  /** 建议框架：html / react-cdn / vue-cdn */
+  suggestedFramework?: 'html' | 'react-cdn' | 'vue-cdn';
 }
 
 /** 意图识别上下文 */
@@ -45,6 +47,10 @@ export const INTENT_CONFIG = {
   ANALYZE_KEYWORDS: ['分析', '检查一下', '解释', '说明一下', '介绍一下', '是什么', 'analyze', 'explain', 'describe', 'walk me through'],
   /** 诊断关键词：遇到问题要求定位 */
   DIAGNOSE_KEYWORDS: ['为什么', '报错', '不工作', '不生效', '没反应', '有问题', 'bug', '出错', '修复', '排查', 'why', 'error', 'broken', 'fix', 'debug'],
+  /** React 框架关键词 */
+  REACT_KEYWORDS: ['react', 'jsx', 'react组件', 'React 组件', '用 React', '用react', 'React 做一个', 'react 做一个', 'React 写', 'react 写'],
+  /** Vue 框架关键词 */
+  VUE_KEYWORDS: ['vue', 'vue组件', 'Vue 组件', '用 Vue', '用vue', 'Vue 做一个', 'vue 做一个', 'Vue 写', 'vue 写', '单文件组件'],
 } as const;
 
 /**
@@ -60,7 +66,9 @@ export async function classifyIntent(
   // 1. 关键词快速匹配（零成本，命中即返回）
   const keywordResult = matchKeywords(context);
   if (keywordResult && keywordResult.confidence >= INTENT_CONFIG.KEYWORD_CONFIDENCE_THRESHOLD) {
-    return keywordResult;
+    // 框架识别：关键词命中时也进行框架识别
+    const suggestedFramework = detectFramework(context);
+    return { ...keywordResult, suggestedFramework };
   }
 
   // 2. LLM 精确分类（预留；未传入时跳过）
@@ -70,22 +78,28 @@ export async function classifyIntent(
       const result = parseLLMOutput(llmOutput);
       // LLM 置信度不足时回退关键词结果（如有）
       if (result.confidence < 0.7 && keywordResult) {
-        return keywordResult;
+        const suggestedFramework = detectFramework(context);
+        return { ...keywordResult, suggestedFramework };
       }
-      return result;
+      // LLM 结果也进行框架识别
+      const suggestedFramework = detectFramework(context);
+      return { ...result, suggestedFramework };
     } catch (error) {
       console.error('[classifyIntent] LLM classification failed:', error);
       if (keywordResult) {
-        return keywordResult;
+        const suggestedFramework = detectFramework(context);
+        return { ...keywordResult, suggestedFramework };
       }
     }
   }
 
   // 3. 兜底：按项目状态推断（空项目 → 创建，已有项目 → 修改迭代）
+  const suggestedFramework = detectFramework(context);
   return {
     type: context.hasExistingProject ? 'modify' : 'create',
     confidence: INTENT_CONFIG.DEFAULT_CONFIDENCE,
     reasoning: '关键词未命中，基于项目状态推断',
+    suggestedFramework,
   };
 }
 
@@ -208,3 +222,40 @@ export const INTENT_LABELS: Record<IntentType, string> = {
   analyze: '功能分析',
   diagnose: '问题诊断',
 };
+
+/**
+ * 框架识别：根据用户提示词关键词识别建议使用的框架。
+ *
+ * 识别规则：
+ * 1. React 关键词命中 → React CDN
+ * 2. Vue 关键词命中 → Vue CDN
+ * 3. 默认 → HTML
+ *
+ * @param context 意图识别上下文
+ * @returns 建议的框架
+ */
+export function detectFramework(context: IntentContext): 'html' | 'react-cdn' | 'vue-cdn' {
+  const { userPrompt } = context;
+  const prompt = userPrompt.toLowerCase();
+
+  // 检查 React 关键词
+  const reactKeywords = INTENT_CONFIG.REACT_KEYWORDS as readonly string[];
+  for (const kw of reactKeywords) {
+    if (prompt.includes(kw.toLowerCase())) {
+      console.info(`[detectFramework] 命中 React 关键词: ${kw}`);
+      return 'react-cdn';
+    }
+  }
+
+  // 检查 Vue 关键词
+  const vueKeywords = INTENT_CONFIG.VUE_KEYWORDS as readonly string[];
+  for (const kw of vueKeywords) {
+    if (prompt.includes(kw.toLowerCase())) {
+      console.info(`[detectFramework] 命中 Vue 关键词: ${kw}`);
+      return 'vue-cdn';
+    }
+  }
+
+  // 默认使用 HTML
+  return 'html';
+}

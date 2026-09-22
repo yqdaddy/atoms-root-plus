@@ -256,6 +256,12 @@ export class Assembler {
       if (/type\s*=\s*["']module["']/i.test(attrs)) {
         return match;
       }
+      // 跳过已包装的代码（防止嵌套包装）
+      // inlineJsScripts 可能已将 JSX 文件包装为 __compileAndRun("...", "./src/main.jsx")
+      // 此检测避免对已包装内容再次包装，产生 __compileAndRun("\n__compileAndRun(...") 嵌套错误
+      if (content.includes('__compileAndRun(')) {
+        return match;
+      }
       if (containsJsx(content)) {
         return `<script${attrs}>__compileAndRun(${JSON.stringify(content)}, "inline-jsx");</script>`;
       }

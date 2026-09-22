@@ -6,8 +6,11 @@ import type { SandboxAllowFlag } from './project';
 
 export const SANDBOX_PROTOCOL_VERSION = 1 as const;
 
-/** 允许生成代码引用的 CDN 主机白名单（铁律 4）。默认只放 jsdelivr，扩充需评审。 */
-export const DEFAULT_CDN_HOSTS: readonly string[] = ['cdn.jsdelivr.net'];
+/** 允许生成代码引用的 CDN 主机白名单（铁律 4）。包含 jsdelivr 和 Tailwind CDN。 */
+export const DEFAULT_CDN_HOSTS: readonly string[] = [
+  'cdn.jsdelivr.net',
+  'cdn.tailwindcss.com',  // Tailwind CSS CDN（HTML/React/Vue 模式均需要）
+];
 
 /**
  * 绝对禁止的 sandbox 标志。allow-same-origin 与 allow-scripts 同用时

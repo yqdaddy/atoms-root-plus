@@ -87,7 +87,7 @@ llmRouter.post('/generate', async (c) => {
           typeof (p as Record<string, unknown>).value === 'string',
       ).slice(0, 20)
     : undefined;
-  const framework = parseFramework(body.options?.framework);
+  const { framework: userFramework, isExplicitlySet: isFrameworkExplicitlySet } = parseFramework(body.options?.framework);
   const requestId = body.requestId;
 
   // 如果有 requestId，检查是否有进行中的请求并取消
@@ -115,7 +115,10 @@ llmRouter.post('/generate', async (c) => {
       originalRequest,
       intentOverride,
       preferences,
-      framework,
+      // 用户明确选择框架时，使用 explicitFramework（最高优先级）
+      // 否则使用默认的 framework 参数，让意图识别决定
+      explicitFramework: isFrameworkExplicitlySet ? userFramework : undefined,
+      framework: userFramework,
       onEvent,
       abortSignal: c.req.raw.signal, // 客户端断连时触发 abort
     });
@@ -284,13 +287,18 @@ const FRAMEWORK_VALUES: readonly string[] = ['html', 'react-cdn', 'vue-cdn'];
 
 /**
  * 解析框架参数：白名单外的值回退到 'html'。
+ * 返回值包含 isExplicitlySet 字段，用于判断是否为用户手动选择。
  * @param value 前端传入的 options.framework 字段
  */
-function parseFramework(value: unknown): 'html' | 'react-cdn' | 'vue-cdn' {
-  if (typeof value !== 'string') return 'html';
-  return FRAMEWORK_VALUES.includes(value)
-    ? (value as 'html' | 'react-cdn' | 'vue-cdn')
-    : 'html';
+function parseFramework(value: unknown): { framework: 'html' | 'react-cdn' | 'vue-cdn'; isExplicitlySet: boolean } {
+  if (typeof value !== 'string') {
+    return { framework: 'html', isExplicitlySet: false };
+  }
+  const isValid = FRAMEWORK_VALUES.includes(value);
+  return {
+    framework: isValid ? (value as 'html' | 'react-cdn' | 'vue-cdn') : 'html',
+    isExplicitlySet: true,
+  };
 }
 
 /**

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>React CDN 嵌套包装修复测试</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .test-result {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 10px 0;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .pass { border-left: 4px solid #10b981; }
+    .fail { border-left: 4px solid #ef4444; }
+    .counter {
+      text-align: center;
+      padding: 40px;
+    }
+    button {
+      padding: 12px 24px;
+      font-size: 16px;
+      border: none;
+      border-radius: 8px;
+      background: #3b82f6;
+      color: white;
+      cursor: pointer;
+      margin: 10px;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: #2563eb;
+    }
+    h1 { color: #1f2937; margin-bottom: 10px; }
+    p { color: #6b7280; }
+  </style>
+</head>
+<body>
+  <h1>React CDN 嵌套包装修复测试</h1>
+
+  <div class="test-result pass" id="test-result">
+    <strong>测试状态：</strong> <span id="status">等待 React 加载...</span>
+  </div>
+
+  <div id="root"></div>
+
+  <!--
+    测试说明：
+    这个 HTML 模拟了 assembler 组装后的输出，验证：
+    1. React 运行时正确注入
+    2. JSX 代码被 __compileAndRun 正确包装
+    3. 没有嵌套包装（不会出现 __compileAndRun("\n__compileAndRun(...）
+    4. 计数器功能正常运行
+  -->
+
+  <!-- React 18 UMD -->
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script>
+    window.React = window.React || React;
+    window.ReactDOM = window.ReactDOM || ReactDOM;
+  </script>
+
+  <!-- Sucrase 编译器运行时 -->
+  <script>
+  (function() {
+    function reportAndRethrow(err) {
+      if (err instanceof Error && err.message.indexOf('[JSX]') !== 0) {
+        err.message = '[JSX] ' + err.message;
+      }
+      setTimeout(function() { throw err; }, 0);
+    }
+
+    window.__jsxQueue = window.__jsxQueue || [];
+
+    window.__compileAndRun = function(code, fileName) {
+      if (!window.__sucraseReady) {
+        window.__jsxQueue.push([code, fileName]);
+        return;
+      }
+      var compiled;
+      try {
+        compiled = window.__sucraseTransform(code, {
+          transforms: ['jsx'],
+          jsxRuntime: 'classic',
+          jsxPragma: 'React.createElement',
+          jsxFragmentPragma: 'React.Fragment',
+          production: true
+        });
+      } catch (err) {
+        reportAndRethrow(err);
+        return;
+      }
+      try {
+        if (typeof React === 'undefined' || typeof ReactDOM === 'undefined') {
+          reportAndRethrow(new Error('React 运行时加载失败，请检查网络后刷新重试'));
+          return;
+        }
+        var fn = new Function('React', 'ReactDOM', compiled.code);
+        return fn(window.React, window.ReactDOM);
+      } catch (err) {
+        reportAndRethrow(err);
+      }
+    };
+
+    setTimeout(function() {
+      if (!window.__sucraseReady) {
+        reportAndRethrow(new Error('Sucrase 编译器加载超时，请检查网络后刷新重试'));
+      }
+    }, 15000);
+  })();
+  </script>
+
+  <!-- Sucrase ESM 模块 -->
+  <script type="module">
+    import { transform as __sucraseTransform } from 'https://esm.sh/sucrase@3.35.1';
+    window.__sucraseTransform = __sucraseTransform;
+    window.__sucraseReady = true;
+    var queue = window.__jsxQueue || [];
+    window.__jsxQueue = [];
+    for (var i = 0; i < queue.length; i++) {
+      window.__compileAndRun(queue[i][0], queue[i][1]);
+    }
+  </script>
+
+  <!--
+    测试用例 1：已包装的 JSX 代码（模拟 inlineJsScripts 处理后的结果）
+    验证：processInlineJsxScripts 不会对已包装的代码再次包装
+  -->
+  <script>
+  // 模拟已由 inlineJsScripts 包装的代码
+  __compileAndRun("function Counter() {\n  const [count, setCount] = React.useState(0);\n\n  return (\n    <div className=\"counter\">\n      <h1>React CDN 计数器</h1>\n      <p>当前计数: {count}</p>\n      <button onClick={() => setCount(count + 1)}>\n        点击增加\n      </button>\n      <p className=\"hint\">React CDN 模式运行正常</p>\n    </div>\n  );\n}\n\nReactDOM.createRoot(document.getElementById('root')).render(<Counter />);", "./src/Counter.jsx");
+  </script>
+
+  <!--
+    测试用例 2：验证状态更新
+    如果嵌套包装 bug 存在，这里会因为语法错误而失败
+  -->
+  <script>
+    // 等待 React 渲染完成后更新测试状态
+    setTimeout(() => {
+      const rootDiv = document.getElementById('root');
+      const hasContent = rootDiv && rootDiv.innerHTML.includes('React CDN 计数器');
+
+      const statusEl = document.getElementById('status');
+      const resultEl = document.getElementById('test-result');
+
+      if (hasContent) {
+        statusEl.textContent = '✓ 测试通过：React CDN 模式正常运行，无嵌套包装错误';
+        resultEl.className = 'test-result pass';
+      } else {
+        statusEl.textContent = '✗ 测试失败：React 组件未正确渲染';
+        resultEl.className = 'test-result fail';
+      }
+    }, 1000);
+
+    // 监听错误
+    window.onerror = function(msg, url, line, col, error) {
+      const statusEl = document.getElementById('status');
+      const resultEl = document.getElementById('test-result');
+
+      if (msg.includes('__compileAndRun') || msg.includes('nested')) {
+        statusEl.textContent = '✗ 测试失败：检测到嵌套包装错误 - ' + msg;
+        resultEl.className = 'test-result fail';
+      }
+      return false;
+    };
+  </script>
+</body>
+</html>

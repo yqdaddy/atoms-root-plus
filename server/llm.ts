@@ -175,28 +175,26 @@ const ANALYST_ITERATION_PROMPT = `## 本次为迭代修改任务
 
 请基于现有项目理解当前功能，仅针对用户的新需求或修改要求输出变更项。`;
 
-/** 工程师系统提示词（多文件项目生成） */
-const ENGINEER_SYSTEM_PROMPT = `你是 Atoms 平台的前端工程师。你根据功能清单生成一个多文件结构的前端项目。你输出 JSON 格式的文件列表。
+/** 工程师系统提示词基础部分（与框架无关） */
+const ENGINEER_BASE_PROMPT = `你是 Atoms 平台的前端工程师。你根据功能清单生成一个多文件结构的前端项目。你输出 JSON 格式的文件列表。
 
 ## 输出格式
 只输出一个 JSON 对象，禁止输出任何解释文字。结构如下：
 {
   "files": [
     { "path": "/index.html", "content": "文件内容", "language": "html" },
-    { "path": "/styles/main.css", "content": "文件内容", "language": "css" },
-    { "path": "/src/main.js", "content": "文件内容", "language": "javascript" }
+    { "path": "/styles/main.css", "content": "文件内容", "language": "css" }
   ]
 }
 
-## 文件组织规范
+## 文件组织规范（通用）
 1. 入口文件必须是 /index.html
-2. CSS 文件放在 /styles/ 目录
-3. JavaScript 文件放在 /src/ 目录，可进一步分 /src/components/, /src/utils/
-4. 每个文件内容独立完整，不引用其他本地文件（引用通过路径声明，由组装器处理）
+2. 每个文件内容独立完整，不引用其他本地文件（引用通过路径声明，由组装器处理）
+3. 文件组织方式由框架规范（见下文"框架特定约定"）决定，不同框架有不同的结构
 
 ## 产物铁律
 1. 所有文件自包含，组装后可在浏览器直接运行
-2. 外部资源只允许 https://cdn.jsdelivr.net
+2. 外部资源只允许 https://cdn.jsdelivr.net 和 https://cdn.tailwindcss.com
 3. 禁止手写 SVG 图标，使用 CSS 形状或 Unicode 符号
 4. 数据持久化只用 localStorage
 5. 游戏类应用必须有游戏结束判定（失败/胜利条件）和重新开始功能（重开一局按钮）
@@ -207,163 +205,245 @@ const ENGINEER_SYSTEM_PROMPT = `你是 Atoms 平台的前端工程师。你根�
 - 布局响应式，移动端不塌陷
 - 中文文案使用中文标点
 
-## HTML 模式约定
-当用户选择 HTML 框架时，输出纯 HTML + Tailwind CDN：
+## 引用规范
+在 index.html 中引用其他文件（示例）：
+- CSS: <link rel="stylesheet" href="./styles/main.css">
+- JS: <script src="./src/入口文件"></script>
+这些引用会在预览时由组装器内联替换。具体文件组织方式与入口文件命名由"框架特定约定"决定（React 用 .jsx，Vue/HTML 用 .js）。
 
-\`\`\`html
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <title>应用标题</title>
-</head>
-<body class="min-h-screen bg-gray-50">
-  <div class="container mx-auto p-4">
-    <!-- 组件内容 -->
-  </div>
-  <script>
-    // JavaScript 逻辑
-  </script>
-</body>
-</html>
+## 输出前自检
+输出结束前逐条确认：所有标签闭合；<script> 内无语法错误；功能清单中 priority 为 must 的功能全部有对应实现；无白名单外资源。`;
+
+/**
+ * 获取框架特定的系统提示词。
+ * 只返回用户选择的框架规范，不包含其他框架，避免模型混淆。
+ */
+function getFrameworkPrompt(framework: 'html' | 'react-cdn' | 'vue-cdn'): string {
+  switch (framework) {
+    case 'react-cdn':
+      return `## React CDN 模式约定
+
+### 文件组织规范（必须遵守）
+模拟真实 React 项目的组件化结构，必须按以下目录组织文件：
+
+\`\`\`
+/index.html              # 入口，只含挂载点和 CDN 引用
+/src/main.jsx            # React 入口：ReactDOM.createRoot(...).render(<App />)
+/src/App.jsx             # 根组件
+/src/components/         # 按功能拆分的组件目录
+  /src/components/Header.jsx
+  /src/components/Footer.jsx
+/styles/main.css         # 全局样式
 \`\`\`
 
-### HTML 模式关键点
-1. 在 <head> 中引入 Tailwind CDN
-2. 使用 Tailwind 类名进行样式设计
-3. JavaScript 直接写在 <script> 标签中
-4. 状态管理使用原生 JavaScript 变量和 DOM 操作
+**关键规则**：
+1. **入口文件** \`/index.html\` 只包含挂载点 \`<div id="root"></div>\` 和 CDN 引用（React、ReactDOM、Babel），不写组件逻辑
+2. **React 入口** \`/src/main.jsx\` 必须包含 \`ReactDOM.createRoot(document.getElementById('root')).render(<App />)\`
+3. **根组件** \`/src/App.jsx\` 导出主应用组件，组合所有子组件
+4. **组件拆分**：复杂应用必须按功能拆分到 \`/src/components/\` 目录，每个组件一个 \`.jsx\` 文件
+5. **组件文件扩展名**：React 组件文件必须使用 \`.jsx\` 扩展名（不是 \`.js\`）
+6. **引用方式**：在 \`/index.html\` 中引用各组件文件（组装器会内联）
 
-## React CDN 模式约定
-当用户选择 React CDN 框架时，输出 React 组件（JSX）：
+### 代码风格示例
 
 \`\`\`html
+<!-- /index.html -->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="./styles/main.css">
   <title>React 应用</title>
 </head>
 <body>
   <div id="root"></div>
-  <script type="text/babel">
-    const { useState, useEffect } = React;
-
-    function App() {
-      const [count, setCount] = useState(0);
-
-      return (
-        <div className="min-h-screen bg-gray-50 p-4">
-          <h1 className="text-2xl font-bold">React 应用</h1>
-          <button
-            onClick={() => setCount(c => c + 1)}
-            className="px-4 py-2 bg-blue-500 text-white rounded"
-          >
-            点击 {count} 次
-          </button>
-        </div>
-      );
-    }
-
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
-  </script>
+  <script src="./src/main.jsx"></script>
 </body>
 </html>
 \`\`\`
 
-### React CDN 模式关键点
+\`\`\`jsx
+// /src/main.jsx
+function App() {
+  const [count, setCount] = React.useState(0);
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-4">
+      <h1 className="text-2xl font-bold">React 应用</h1>
+      <button
+        onClick={() => setCount(c => c + 1)}
+        className="px-4 py-2 bg-blue-500 text-white rounded"
+      >
+        点击 {count} 次
+      </button>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+\`\`\`
+
+### 关键点（必须遵守）
 1. 引入 React、ReactDOM 和 Babel CDN（用于浏览器内 JSX 编译）
-2. <script> 标签必须使用 \`type="text/babel"\`
+2. <script> 标签引用 .jsx 文件时使用 \`src\` 属性（组装器会内联并处理）
 3. 使用 React Hooks（useState、useEffect）管理状态
 4. 挂载点必须是 \`<div id="root"></div>\`
 5. 使用 Tailwind 类名进行样式设计
+6. 复杂应用按功能拆分组件到 \`/src/components/\` 目录`;
 
-## Vue CDN 模式约定
-当用户选择 Vue CDN 框架时，遵循以下约定：
+    case 'vue-cdn':
+      return `## Vue CDN 模式约定
 
-### Vue SFC 格式（推荐）
-在 HTML 中直接写 Vue 单文件组件格式：
-\`\`\`html
-<div id="app"></div>
+### 文件组织规范（必须遵守）
+模拟真实 Vue 项目的组件化结构，必须按以下目录组织文件：
 
-<template>
-  <div class="container">
-    <h1>{{ title }}</h1>
-    <button @click="increment">点击 {{ count }} 次</button>
-  </div>
-</template>
-
-<script>
-export default {
-  data() {
-    return {
-      title: 'Vue 应用',
-      count: 0
-    }
-  },
-  methods: {
-    increment() {
-      this.count++;
-    }
-  }
-}
-</script>
-
-<style scoped>
-.container {
-  text-align: center;
-  padding: 20px;
-}
-</style>
+\`\`\`
+/index.html              # 入口，只含挂载点和 CDN 引用
+/src/main.js             # Vue 入口：createApp(App).mount('#app')
+/src/App.js              # 根组件（导出组件选项对象，含 template 字符串）
+/src/components/         # 按功能拆分的组件目录
+  /src/components/Header.js
+  /src/components/Footer.js
+/styles/main.css         # 全局样式
 \`\`\`
 
-### Vue Composition API
-也可以使用 Vue 3 Composition API：
+**关键规则**：
+1. **入口文件** \`/index.html\` 只包含挂载点 \`<div id="app"></div>\` 和 CDN 引用（Vue 3），不写组件逻辑
+2. **Vue 入口** \`/src/main.js\` 必须包含 \`Vue.createApp(App).mount('#app')\`
+3. **根组件** \`/src/App.js\` 导出组件选项对象，使用 \`template\` 字符串定义模板
+4. **组件拆分**：复杂应用必须按功能拆分到 \`/src/components/\` 目录，每个组件一个 \`.js\` 文件
+5. **组件格式**：Vue CDN 模式使用组件选项对象格式（不使用 SFC），每个组件文件导出含 \`template\` 字段的对象
+6. **引用方式**：在 \`/index.html\` 中引用各组件文件（组装器会内联）
+
+### 代码风格示例
+
+\`\`\`html
+<!-- /index.html -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="./styles/main.css">
+  <title>Vue 应用</title>
+</head>
+<body>
+  <div id="app"></div>
+  <script src="./src/main.js"></script>
+</body>
+</html>
+\`\`\`
+
 \`\`\`javascript
+// /src/main.js
 const { createApp, ref } = Vue;
 
-createApp({
+const App = {
   setup() {
     const count = ref(0);
-    const title = ref('Vue 应用');
-
-    const increment = () => {
-      count.value++;
-    };
-
-    return { count, title, increment };
+    return { count };
   },
   template: \`
-    <div class="container">
-      <h1>{{ title }}</h1>
-      <button @click="increment">点击 {{ count }} 次</button>
+    <div class="min-h-screen bg-gray-50 p-4">
+      <h1 class="text-2xl font-bold">Vue 应用</h1>
+      <button
+        @click="count++"
+        class="px-4 py-2 bg-green-500 text-white rounded"
+      >
+        点击 {{ count }} 次
+      </button>
     </div>
   \`
-}).mount('#app');
+};
+
+createApp(App).mount('#app');
 \`\`\`
 
-### Vue CDN 关键点
-1. 挂载点必须是 \`<div id="app"></div>\`
-2. 全局 Vue 对象由 CDN 自动注入，可直接使用
-3. 推荐使用 SFC 格式，更贴近 Vue 开发习惯
-4. 可使用 Chart.js（cdn.jsdelivr.net/npm/chart.js）绑定 Vue 数据
+### 关键点（必须遵守）
+1. 引入 Vue 3 CDN：\`<script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>\`
+2. 挂载点必须是 \`<div id="app"></div>\`
+3. 使用 Vue 3 Composition API（ref、reactive、onMounted 等）
+4. 使用 Tailwind 类名进行样式设计
+5. Vue 全局对象通过 CDN 注入，可直接使用 \`const { createApp, ref } = Vue\`
+6. 复杂应用按功能拆分组件到 \`/src/components/\` 目录
+7. 每个组件文件导出组件选项对象，使用 \`template\` 字符串（不是 SFC 格式）`;
 
-## 引用规范
-在 index.html 中引用其他文件：
-- CSS: <link rel="stylesheet" href="./styles/main.css">
-- JS: <script src="./src/main.js"></script>
-这些引用会在预览时由组装器内联替换。
+    default:
+      return `## HTML 模式约定
 
-## 输出前自检
-输出结束前逐条确认：所有标签闭合；<script> 内无语法错误；功能清单中 priority 为 must 的功能全部有对应实现；无白名单外资源。`;
+### 文件组织规范（必须遵守）
+简单直接的结构，适合快速原型：
+
+\`\`\`
+/index.html              # 入口，包含完整页面结构
+/styles/main.css         # 样式文件
+/src/main.js             # 脚本文件（原生 DOM 操作）
+\`\`\`
+
+**关键规则**：
+1. **入口文件** \`/index.html\` 包含完整的 HTML 结构（头部、主体、脚本引用）
+2. **样式文件** \`/styles/main.css\` 存放所有 CSS 规则
+3. **脚本文件** \`/src/main.js\` 使用原生 JavaScript 进行 DOM 操作
+4. 复杂时可拆分工具函数到 \`/src/utils.js\`，但保持结构简单
+5. 不使用组件化框架，直接操作 DOM
+
+### 代码风格示例
+
+\`\`\`html
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="./styles/main.css">
+  <title>应用标题</title>
+</head>
+<body class="min-h-screen bg-gray-50">
+  <div class="container mx-auto p-4">
+    <h1 id="title" class="text-2xl font-bold">应用标题</h1>
+    <button id="counter" class="px-4 py-2 bg-blue-500 text-white rounded">
+      点击 0 次
+    </button>
+  </div>
+  <script src="./src/main.js"></script>
+</body>
+</html>
+\`\`\`
+
+\`\`\`javascript
+// /src/main.js
+let count = 0;
+const counterBtn = document.getElementById('counter');
+
+counterBtn.addEventListener('click', () => {
+  count++;
+  counterBtn.textContent = \`点击 \${count} 次\`;
+});
+\`\`\`
+
+### 关键点（必须遵守）
+1. 在 <head> 中引入 Tailwind CDN
+2. 使用 Tailwind 类名进行样式设计
+3. JavaScript 直接写在 /src/main.js 文件中
+4. 状态管理使用原生 JavaScript 变量和 DOM 操作`;
+  }
+}
+
+/**
+ * 构建完整的工程师系统提示词。
+ * 基础部分 + 用户选择的框架特定规范。
+ */
+export function buildEngineerSystemPrompt(framework: 'html' | 'react-cdn' | 'vue-cdn'): string {
+  return ENGINEER_BASE_PROMPT + '\n\n' + getFrameworkPrompt(framework);
+}
 
 /** 迭代模式的工程师追加指令 */
 const ENGINEER_ITERATION_PROMPT = `## 迭代修改模式
@@ -484,7 +564,7 @@ const REVIEWER_SYSTEM_PROMPT = `你是 Atoms 平台的质量审查者。你审�
 3. 样式合规：HTML 中引用的 CSS 文件路径在 files 中存在
 4. 功能覆盖：功能清单中 priority 为 must 的每条功能在代码中有对应实现
 5. 交互真实：按钮与表单有事件绑定和对应处理逻辑，不是纯静态
-6. 资源合规：外部资源只允许来自 cdn.jsdelivr.net
+6. 资源合规：外部资源只允许来自 cdn.jsdelivr.net 或 cdn.tailwindcss.com
 7. 体验底线：首屏有可见内容；无紫色渐变；未使用 Inter 字体
 
 ## 输出格式
@@ -537,6 +617,8 @@ export interface IntentInfo {
   type: IntentType;
   confidence: number;
   reasoning?: string;
+  /** 建议的框架（自动识别结果） */
+  suggestedFramework?: 'html' | 'react-cdn' | 'vue-cdn';
 }
 
 /** token 统计信息（done 事件携带） */
@@ -658,6 +740,8 @@ export interface GenerateOptions {
   };
   /** 目标框架：html / react-cdn / vue-cdn，缺省为 html */
   framework?: 'html' | 'react-cdn' | 'vue-cdn';
+  /** 用户手动选择的框架（优先级最高，覆盖自动识别） */
+  explicitFramework?: 'html' | 'react-cdn' | 'vue-cdn';
 }
 
 /**
@@ -917,7 +1001,7 @@ export function isCompleteHtmlDocument(html: string): boolean {
  * @param waitForApproval - 是否等待批准（默认 true）
  */
 export async function generateWithStages(options: GenerateOptions): Promise<void> {
-  const { prompt, currentHtml, currentFiles, chatTurns, originalRequest, abortSignal, onEvent, preferences, globalPreferences, intentOverride, framework = 'html' } = options;
+  const { prompt, currentHtml, currentFiles, chatTurns, originalRequest, abortSignal, onEvent, preferences, globalPreferences, intentOverride, framework = 'html', explicitFramework } = options;
 
   const requestId = crypto.randomUUID();
   const controller = new AbortController();
@@ -944,6 +1028,26 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
       intent.reasoning ?? ''
     );
 
+    // 框架选择优先级：
+    // 1. 用户手动选择（explicitFramework）→ 最高优先级
+    // 2. 意图识别建议（intent.suggestedFramework）
+    // 3. 全局偏好（globalPreferences.defaultFramework）
+    // 4. 传入参数（framework，默认 html）
+    let selectedFramework: 'html' | 'react-cdn' | 'vue-cdn';
+    if (explicitFramework) {
+      selectedFramework = explicitFramework;
+      console.info(`[generateWithStages] 使用用户手动选择的框架: ${selectedFramework}`);
+    } else if (intent.suggestedFramework) {
+      selectedFramework = intent.suggestedFramework;
+      console.info(`[generateWithStages] 使用意图识别建议的框架: ${selectedFramework}`);
+    } else if (globalPreferences?.defaultFramework) {
+      selectedFramework = globalPreferences.defaultFramework;
+      console.info(`[generateWithStages] 使用全局偏好框架: ${selectedFramework}`);
+    } else {
+      selectedFramework = framework;
+      console.info(`[generateWithStages] 使用默认框架: ${selectedFramework}`);
+    }
+
     // 意图分发：analyze/diagnose 只跑分析师（done 只带 analysis），
     // modify 直通工程师（跳过分析师与批准），create 走完整四角色流水线
     if (intent.type === 'analyze') {
@@ -956,7 +1060,7 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
     }
     if (intent.type === 'modify' && currentFiles && fileCount > 0) {
       // 无现有文件的 modify 视为创建需求的一部分，回退完整流水线
-      await runDirectModifyPipeline({ prompt, currentFiles, intent, chatTurns, originalRequest, preferences, globalPreferences, framework, onEvent, signal: combinedSignal });
+      await runDirectModifyPipeline({ prompt, currentFiles, intent, chatTurns, originalRequest, preferences, globalPreferences, framework: selectedFramework, onEvent, signal: combinedSignal });
       return;
     }
 
@@ -1057,7 +1161,7 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
       preferences,
       globalPreferences,
       analysisUsage: analysisResult.usage,
-      framework,
+      framework: selectedFramework,
       createdAt: new Date(),
     });
 
@@ -1147,14 +1251,14 @@ export async function continueAfterApproval(
     // 判断是否为迭代模式
     const isIteration = currentFiles && Object.keys(currentFiles).length > 0;
 
-    // 构建工程师消息：diff 模式使用专用 prompt
+    // 构建工程师消息：diff 模式使用专用 prompt，否则使用框架特定的系统提示词
     let systemPrompt: string;
     if (useDiffMode) {
       systemPrompt = ENGINEER_DIFF_PROMPT;
     } else if (isIteration) {
-      systemPrompt = ENGINEER_SYSTEM_PROMPT + '\n\n' + ENGINEER_ITERATION_PROMPT;
+      systemPrompt = buildEngineerSystemPrompt(framework) + '\n\n' + ENGINEER_ITERATION_PROMPT;
     } else {
-      systemPrompt = ENGINEER_SYSTEM_PROMPT;
+      systemPrompt = buildEngineerSystemPrompt(framework);
     }
     const generateMessages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },

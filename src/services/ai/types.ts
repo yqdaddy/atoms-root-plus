@@ -12,6 +12,8 @@ export interface IntentResult {
   type: IntentType;
   confidence: number;
   reasoning: string;
+  /** 建议的框架（自动识别结果） */
+  suggestedFramework?: 'html' | 'react-cdn' | 'vue-cdn';
 }
 
 /** 单行编辑操作（diff 模式） */

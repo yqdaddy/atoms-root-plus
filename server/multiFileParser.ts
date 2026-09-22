@@ -63,6 +63,58 @@ function isValidLanguage(language: unknown): language is FileLanguage {
 }
 
 /**
+ * 从文件路径扩展名推断语言类型。
+ * 未知扩展名默认返回 'text'。
+ */
+function inferLanguageFromPath(path: string): FileLanguage {
+  const ext = path.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'html':
+    case 'htm':
+      return 'html';
+    case 'css':
+      return 'css';
+    case 'js':
+    case 'mjs':
+    case 'cjs':
+    case 'jsx':
+    case 'tsx':
+      return 'javascript';
+    case 'vue':
+      return 'html'; // Vue SFC 含 template 主体，按 html 处理
+    case 'json':
+      return 'json';
+    default:
+      return 'text';
+  }
+}
+
+/**
+ * 校验并补全单个文件结构。
+ * 如果缺少 language 字段，从路径扩展名推断。
+ */
+function normalizeFile(file: unknown): GeneratedFile | null {
+  if (typeof file !== 'object' || file === null) return null;
+  const f = file as Record<string, unknown>;
+
+  // path 和 content 是必需的
+  if (!isValidPath(f.path) || typeof f.content !== 'string') {
+    return null;
+  }
+
+  // language 可选，缺失时从路径推断
+  const language = isValidLanguage(f.language)
+    ? f.language
+    : inferLanguageFromPath(f.path);
+
+  return {
+    path: f.path,
+    content: f.content,
+    language,
+  };
+}
+
+/**
  * 校验单个文件结构。
  */
 function isValidFile(file: unknown): file is GeneratedFile {
@@ -108,12 +160,12 @@ export function parseMultiFileOutput(text: string): MultiFileOutput {
     throw new Error('files 字段不是数组');
   }
 
-  // 校验每个文件
+  // 校验并补全每个文件
   const files: GeneratedFile[] = [];
   for (let i = 0; i < obj.files.length; i++) {
-    const file = obj.files[i];
-    if (!isValidFile(file)) {
-      throw new Error(`files[${i}] 结构不合法：需要 { path: "/...", content: "...", language: "html|css|javascript|json|text" }`);
+    const file = normalizeFile(obj.files[i]);
+    if (!file) {
+      throw new Error(`files[${i}] 结构不合法：需要 { path: "/...", content: "..." }（language 可选）`);
     }
     files.push(file);
   }
@@ -200,8 +252,9 @@ function salvageCompleteFiles(text: string): GeneratedFile[] {
         const candidate = text.slice(i, end + 1);
         try {
           const parsed: unknown = JSON.parse(candidate);
-          if (isValidFile(parsed)) {
-            salvaged.push(parsed);
+          const normalized = normalizeFile(parsed);
+          if (normalized) {
+            salvaged.push(normalized);
             i = end + 1;
             continue;
           }

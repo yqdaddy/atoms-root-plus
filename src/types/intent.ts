@@ -14,6 +14,8 @@ export interface IntentResult {
   confidence: number;
   /** 判断理由（LLM 分类时给出） */
   reasoning?: string;
+  /** 建议的框架（自动识别结果） */
+  suggestedFramework?: 'html' | 'react-cdn' | 'vue-cdn';
 }
 
 /** 意图识别上下文 */

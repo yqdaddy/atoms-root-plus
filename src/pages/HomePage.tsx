@@ -22,7 +22,6 @@ import { loadMemoryForGeneration, isRecallQuery, generateRecallResponse, extract
 import { toast } from '../components/Toast';
 import { HomeAuthControls } from '../components/AuthControls';
 import SandboxFrame from '../components/SandboxFrame';
-import { FrameworkSelector } from '../components/FrameworkSelector';
 import { FileTreePanel, type TreeNode, buildTree } from '../components/FileTree';
 import { RequirementPanel } from '../components/RequirementPanel';
 import { VersionHistory } from '../components/VersionHistory';
@@ -1154,36 +1153,52 @@ export default function HomePage() {
 
                   {/* 意图识别结果 */}
                   {streamBuffer.intent && (
-                    <div className="flex items-center gap-2 pt-3 border-t border-[var(--color-border-default)]">
-                      <span className="text-[11px] text-[var(--color-text-tertiary)]">识别为</span>
-                      <span className={`text-[12px] px-2 py-0.5 rounded ${INTENT_CONFIG[streamBuffer.intent.type]?.bgColor || ''} ${INTENT_CONFIG[streamBuffer.intent.type]?.color || ''}`}>
-                        {INTENT_CONFIG[streamBuffer.intent.type]?.label || streamBuffer.intent.type}
-                      </span>
-                      {streamBuffer.intent.confidence < 0.7 && (
-                        <span title="置信度较低，建议检查">
-                          <Icon icon="lucide:alert-triangle" width={12} height={12} className="text-amber-500" />
+                    <div className="space-y-2 pt-3 border-t border-[var(--color-border-default)]">
+                      {/* 意图类型 */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-[var(--color-text-tertiary)]">识别为</span>
+                        <span className={`text-[12px] px-2 py-0.5 rounded ${INTENT_CONFIG[streamBuffer.intent.type]?.bgColor || ''} ${INTENT_CONFIG[streamBuffer.intent.type]?.color || ''}`}>
+                          {INTENT_CONFIG[streamBuffer.intent.type]?.label || streamBuffer.intent.type}
                         </span>
-                      )}
-                      <span className="text-[11px] text-[var(--color-text-tertiary)]">
-                        {Math.round(streamBuffer.intent.confidence * 100)}% 置信度
-                      </span>
+                        {streamBuffer.intent.confidence < 0.7 && (
+                          <span title="置信度较低，建议检查">
+                            <Icon icon="lucide:alert-triangle" width={12} height={12} className="text-amber-500" />
+                          </span>
+                        )}
+                        <span className="text-[11px] text-[var(--color-text-tertiary)]">
+                          {Math.round(streamBuffer.intent.confidence * 100)}% 置信度
+                        </span>
 
-                      {/* 纠正按钮组：confidence < 0.8 时显示 */}
-                      {streamBuffer.intent.confidence < 0.8 && (
-                        <div className="flex items-center gap-1 ml-auto">
-                          {(['create', 'modify', 'analyze', 'diagnose'] as const).map((intentType) => {
-                            if (intentType === streamBuffer.intent?.type) return null;
-                            const config = INTENT_CONFIG[intentType];
-                            return (
-                              <button
-                                key={intentType}
-                                onClick={() => handleIntentCorrect(intentType)}
-                                className={`text-[11px] px-2 py-0.5 rounded border border-[var(--color-border-default)] hover:border-[var(--color-border-strong)] ${config?.color || ''} hover:${config?.bgColor || ''} transition-colors`}
-                              >
-                                改为{config?.label || intentType}
-                              </button>
-                            );
-                          })}
+                        {/* 纠正按钮组：confidence < 0.8 时显示 */}
+                        {streamBuffer.intent.confidence < 0.8 && (
+                          <div className="flex items-center gap-1 ml-auto">
+                            {(['create', 'modify', 'analyze', 'diagnose'] as const).map((intentType) => {
+                              if (intentType === streamBuffer.intent?.type) return null;
+                              const config = INTENT_CONFIG[intentType];
+                              return (
+                                <button
+                                  key={intentType}
+                                  onClick={() => handleIntentCorrect(intentType)}
+                                  className={`text-[11px] px-2 py-0.5 rounded border border-[var(--color-border-default)] hover:border-[var(--color-border-strong)] ${config?.color || ''} hover:${config?.bgColor || ''} transition-colors`}
+                                >
+                                  改为{config?.label || intentType}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 框架建议 */}
+                      {streamBuffer.intent.suggestedFramework && streamBuffer.intent.suggestedFramework !== 'html' && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-[var(--color-text-tertiary)]">自动识别框架</span>
+                          <span className="text-[12px] px-2 py-0.5 rounded bg-blue-500/10 text-blue-500">
+                            {streamBuffer.intent.suggestedFramework === 'react-cdn' ? 'React' :
+                             streamBuffer.intent.suggestedFramework === 'vue-cdn' ? 'Vue' :
+                             streamBuffer.intent.suggestedFramework}
+                          </span>
+                          <Icon icon="lucide:sparkles" width={12} height={12} className="text-[var(--color-text-tertiary)]" />
                         </div>
                       )}
                     </div>
@@ -1297,21 +1312,7 @@ export default function HomePage() {
                 <span className="text-[13px] font-medium">停止生成</span>
               </button>
             )}
-            {/* 框架选择：仅新会话显示，项目创建后随项目固定不再变更 */}
-            {!currentProject && !isGenerating && !isOptimizing && (
-              <div className="flex items-center gap-2 mb-2">
-                <span className="flex items-center gap-1 text-[11px] text-[var(--color-text-tertiary)] shrink-0">
-                  <Icon icon="lucide:code-2" width={12} height={12} />
-                  生成框架
-                </span>
-                <FrameworkSelector
-                  value={selectedFramework}
-                  onChange={setSelectedFramework}
-                  disabled={!isLoggedIn}
-                />
-              </div>
-            )}
-            <div className="relative">
+                        <div className="relative">
               <textarea
                 value={inputValue}
                 onChange={handleInputChange}
