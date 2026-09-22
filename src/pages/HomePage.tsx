@@ -144,6 +144,25 @@ function composePipelinePrompt(confirmed: ConfirmedRequirement): string {
 }
 
 /**
+ * 复制文本到剪贴板（兼容非安全上下文）
+ */
+async function copyToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+  } else {
+    // Fallback: 使用 textarea + execCommand
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+  }
+}
+
+/**
  * 简单的代码高亮（HTML）
  */
 function highlightHtml(code: string): React.ReactNode {
@@ -1732,7 +1751,7 @@ export default function HomePage() {
                         ) : undefined;
                         const shareId = await saveShare(generatedHtml, currentProject?.name, files);
                         const shareUrl = getShareUrl(shareId);
-                        navigator.clipboard.writeText(shareUrl);
+                        await copyToClipboard(shareUrl);
                         toast.success('分享链接已复制到剪贴板');
                       } catch (error) {
                         // apiClient 已对 401 统一处理（提示会话过期并跳转登录）
@@ -1827,7 +1846,7 @@ export default function HomePage() {
                       ) : undefined;
                       const shareId = await saveShare(generatedHtml, currentProject?.name, files);
                       const shareUrl = getShareUrl(shareId);
-                      navigator.clipboard.writeText(shareUrl);
+                      await copyToClipboard(shareUrl);
                       toast.success('分享链接已复制');
                     } catch (error) {
                       // apiClient 已对 401 统一处理（提示会话过期并跳转登录）
@@ -1889,7 +1908,7 @@ export default function HomePage() {
                     setIsDeploying(true);
                     try {
                       const result = await deployProject(currentProject.id, currentProject.files);
-                      navigator.clipboard.writeText(result.deployUrl);
+                      await copyToClipboard(result.deployUrl);
                       toast.success(`部署成功，链接已复制：${result.deployUrl}`);
                     } catch (error) {
                       // 401 已由 apiClient 统一提示并跳转登录，此处不重复提示
