@@ -13,6 +13,7 @@ import atom from '../../assets/icons/lucide/atom.svg?raw';
 import alertCircle from '../../assets/icons/lucide/alert-circle.svg?raw';
 import arrowUp from '../../assets/icons/lucide/arrow-up.svg?raw';
 import bot from '../../assets/icons/lucide/bot.svg?raw';
+import calculator from '../../assets/icons/lucide/calculator.svg?raw';
 import check from '../../assets/icons/lucide/check.svg?raw';
 import chevronDown from '../../assets/icons/lucide/chevron-down.svg?raw';
 import chevronRight from '../../assets/icons/lucide/chevron-right.svg?raw';
@@ -27,6 +28,7 @@ import file from '../../assets/icons/lucide/file.svg?raw';
 import fileCode from '../../assets/icons/lucide/file-code.svg?raw';
 import fileText from '../../assets/icons/lucide/file-text.svg?raw';
 import folder from '../../assets/icons/lucide/folder.svg?raw';
+import gamepad2 from '../../assets/icons/lucide/gamepad-2.svg?raw';
 import gitCompare from '../../assets/icons/lucide/git-compare.svg?raw';
 import hammer from '../../assets/icons/lucide/hammer.svg?raw';
 import helpCircle from '../../assets/icons/lucide/help-circle.svg?raw';
@@ -53,6 +55,7 @@ import search from '../../assets/icons/lucide/search.svg?raw';
 import searchCode from '../../assets/icons/lucide/search-code.svg?raw';
 import send from '../../assets/icons/lucide/send.svg?raw';
 import settings from '../../assets/icons/lucide/settings.svg?raw';
+import share from '../../assets/icons/lucide/share.svg?raw';
 import shieldCheck from '../../assets/icons/lucide/shield-check.svg?raw';
 import smartphone from '../../assets/icons/lucide/smartphone.svg?raw';
 import sparkles from '../../assets/icons/lucide/sparkles.svg?raw';
@@ -82,6 +85,7 @@ const LOCAL_ICONS: Record<string, string> = {
   'alert-circle': alertCircle,
   'arrow-up': arrowUp,
   bot,
+  calculator,
   check,
   'chevron-down': chevronDown,
   'chevron-right': chevronRight,
@@ -96,6 +100,7 @@ const LOCAL_ICONS: Record<string, string> = {
   'file-code': fileCode,
   'file-text': fileText,
   folder,
+  'gamepad-2': gamepad2,
   'git-compare': gitCompare,
   hammer,
   'help-circle': helpCircle,
@@ -122,6 +127,7 @@ const LOCAL_ICONS: Record<string, string> = {
   'search-code': searchCode,
   send,
   settings,
+  share,
   'shield-check': shieldCheck,
   smartphone,
   sparkles,

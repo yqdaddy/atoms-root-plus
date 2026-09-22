@@ -34,6 +34,17 @@ import type { ChangeList } from '../services/ai/types';
 import { DiffViewer } from '../components/DiffViewer';
 import { StreamingMessage } from '../components/StreamingMessage';
 import ReactMarkdown from 'react-markdown';
+import { ImagePreview } from '../components/ImagePreview';
+import { CommandDropdown } from '../commands/CommandDropdown';
+import { parseCommandInput, executeCommand, type CommandContext } from '../commands/index';
+import { useKeybinding } from '../hooks/useKeybinding';
+
+/** 图片限制配置 */
+const IMAGE_CONFIG = {
+  maxSize: 5 * 1024 * 1024, // 5MB
+  maxCount: 4,
+  allowedTypes: ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'],
+};
 
 const TEMPLATE_CHIPS: { id: DemoTemplateId; label: string; prompt: string; icon: string; framework: ProjectFramework }[] = [
   { id: 'todo', label: '待办清单', prompt: '做一个待办清单，可以添加、完成和删除任务', icon: 'lucide:check-square', framework: 'react-cdn' },
@@ -56,21 +67,28 @@ interface UIMessage {
   steps?: number;
   status?: MessageStatus;
   /** 分析结果（用于批准流程） */
-  features?: FeatureList | { raw: string } | undefined;
+  features?: FeatureList | { raw: string };
   /** 会话 ID（用于批准后继续） */
-  sessionId?: string | undefined;
+  sessionId?: string;
+  /** 用户上传的图片（Base64 Data URL 数组） */
+  images?: string[];
 }
 
 /** 将持久化消息转换为 UI 消息（过滤 system 消息） */
 function toUIMessage(msg: ProjectChatMessage): UIMessage | null {
   // 过滤掉 system 消息，UI 不显示
   if (msg.role === 'system') return null;
-  return {
+  const result: UIMessage = {
     id: msg.id,
     role: msg.role as 'user' | 'assistant',
     content: msg.content,
     timestamp: new Date(msg.createdAt),
   };
+  // 仅在有图片时添加 images 属性
+  if (msg.images && msg.images.length > 0) {
+    result.images = msg.images;
+  }
+  return result;
 }
 
 /** 格式化时间 */
@@ -212,6 +230,22 @@ function MessageBubble({
           ? 'bg-[var(--color-accent)] text-white'
           : 'bg-[var(--color-bg-base)] border border-[var(--color-border-default)]'
       }`}>
+        {/* 用户图片 */}
+        {isUser && message.images && message.images.length > 0 && (
+          <div className="mb-2 -mx-1">
+            <div className="flex flex-wrap gap-2">
+              {message.images.map((image, index) => (
+                <img
+                  key={`${image.slice(0, 50)}-${index}`}
+                  src={image}
+                  alt={`附件图片 ${index + 1}`}
+                  className="w-24 h-24 rounded-lg object-cover"
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
         {isUser ? (
           // 用户消息：纯文本显示
           <p className="text-[13px] leading-[1.6] whitespace-pre-wrap">{message.content}</p>
@@ -297,6 +331,12 @@ export default function HomePage() {
     changes: ChangeList;
     files: Record<string, ProjectFileNode>;
   } | null>(null);
+  // 已粘贴/拖拽的图片列表（Base64 Data URL）
+  const [pastedImages, setPastedImages] = useState<string[]>([]);
+  // 是否正在拖拽图片
+  const [isDragging, setIsDragging] = useState(false);
+  // 命令下拉是否可见
+  const [showCommandDropdown, setShowCommandDropdown] = useState(false);
   const navigate = useNavigate();
 
   // F-001: 首页登录守卫
@@ -377,16 +417,21 @@ export default function HomePage() {
       if (idx !== -1) {
         const existing = uiMessages[idx];
         if (existing) {
-          uiMessages[idx] = {
+          const updated: UIMessage = {
             id: existing.id,
             role: existing.role,
             content: existing.content,
             timestamp: existing.timestamp,
             steps: messageUIState.steps,
             status: messageUIState.status,
-            features: messageUIState.features,
-            sessionId: messageUIState.sessionId,
           };
+          if (messageUIState.features !== undefined) {
+            updated.features = messageUIState.features;
+          }
+          if (messageUIState.sessionId !== undefined) {
+            updated.sessionId = messageUIState.sessionId;
+          }
+          uiMessages[idx] = updated;
         }
       }
     }
@@ -398,6 +443,8 @@ export default function HomePage() {
     const value = e.target.value;
     if (value.length <= 2000) {
       setInputValue(value);
+      // 检测命令：以 / 开头时显示下拉
+      setShowCommandDropdown(value.trim().startsWith('/'));
     }
   };
 
@@ -610,17 +657,20 @@ export default function HomePage() {
           setIsGenerating(false);
           // 更新消息状态，显示分析结果和批准按钮
           const features = event.payload.features;
-          setMessageUIState(prev => prev ? {
-            ...prev,
-            status: 'waiting_approval',
-            features,
-            sessionId: event.payload.sessionId,
-            steps: (prev.steps || 0) + 1,
-          } : {
-            steps: 1,
-            status: 'waiting_approval',
-            features,
-            sessionId: event.payload.sessionId,
+          const sessionId = event.payload.sessionId;
+          setMessageUIState(prev => {
+            const base = prev ? {
+              ...prev,
+              steps: (prev.steps || 0) + 1,
+            } : {
+              steps: 1,
+            };
+            return {
+              ...base,
+              status: 'waiting_approval',
+              ...(features ? { features } : {}),
+              ...(sessionId ? { sessionId } : {}),
+            };
           });
           break;
         }
@@ -657,9 +707,9 @@ export default function HomePage() {
    * 执行一次三阶段流水线生成。
    * @param userMessage 展示在对话区的用户消息（原始需求）
    * @param llmPrompt 实际发给模型的内容（原始需求或附带结构化文档的富输入）
-   * @param opts 附加选项（如 intentOverride）
+   * @param opts 附加选项（如 intentOverride、images）
    */
-  const runGeneration = useCallback(async (userMessage: string, llmPrompt: string, opts?: { intentOverride?: 'create' | 'modify' | 'analyze' | 'diagnose' }) => {
+  const runGeneration = useCallback(async (userMessage: string, llmPrompt: string, opts?: { intentOverride?: 'create' | 'modify' | 'analyze' | 'diagnose'; images?: string[] | undefined }) => {
     if (!userMessage.trim() || isGenerating) return;
 
     setIsGenerating(true);
@@ -685,8 +735,8 @@ export default function HomePage() {
       willUseFramework: isIteration ? (project.framework ?? 'html') : selectedFramework,
     });
 
-    // 添加用户消息到持久化层
-    addMessage({ role: 'user', content: userMessage });
+    // 添加用户消息到持久化层（包含图片）
+    addMessage({ role: 'user', content: userMessage, images: opts?.images });
     updateProjectStatus('generating');
 
     // 后台提取项目偏好：从用户消息中识别纠正（如"不要渐变"）与风格偏好（如"深色模式"）
@@ -787,6 +837,11 @@ export default function HomePage() {
     addMessage,
   ]);
 
+  // 清空图片
+  const handleClearImages = useCallback(() => {
+    setPastedImages([]);
+  }, []);
+
   // 直接生成：跳过优化器，以原始输入进入流水线
   const handleSubmit = useCallback(() => {
     if (!inputValue.trim() || isGenerating || isOptimizing) return;
@@ -798,7 +853,54 @@ export default function HomePage() {
     }
 
     const prompt = inputValue.trim();
+
+    // 检查是否为命令
+    const parsed = parseCommandInput(prompt);
+    if (parsed.isCommand && parsed.commandName) {
+      // 构建命令上下文
+      const commandContext: CommandContext = {
+        clearChat: () => {
+          // 清空对话
+          useProjectStore.getState().clearChat();
+        },
+        createNewProject: () => {
+          // 新建项目：跳转到项目列表
+          navigate('/projects');
+        },
+        exportProject: async () => {
+          // 导出项目
+          if (!currentProject) {
+            toast.error('没有可导出的项目');
+            return;
+          }
+          try {
+            const { exportProjectAsZip } = await import('../services/export/zipExporter');
+            await exportProjectAsZip(currentProject);
+            toast.success('ZIP 包已开始下载');
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : '导出失败，请稍后重试';
+            toast.error(msg);
+          }
+        },
+        showToast: (message, type = 'info') => {
+          if (type === 'success') toast.success(message);
+          else if (type === 'error') toast.error(message);
+          else toast.info(message);
+        },
+      };
+      // 添加可选的 projectId
+      if (currentProject?.id) {
+        commandContext.projectId = currentProject.id;
+      }
+
+      void executeCommand(parsed.commandName, parsed.args ?? '', commandContext);
+      setInputValue('');
+      setShowCommandDropdown(false);
+      return;
+    }
+
     setInputValue('');
+    setShowCommandDropdown(false);
 
     // 提取并更新全局偏好（如"以后都用 React"）
     extractAndUpdateGlobalPreferences(prompt);
@@ -807,15 +909,21 @@ export default function HomePage() {
     if (isRecallQuery(prompt)) {
       const memory = loadMemoryForGeneration(currentProject?.id);
       const response = generateRecallResponse(memory);
-      // 添加用户消息
-      addMessage({ role: 'user', content: prompt });
+      // 添加用户消息（包含图片）
+      addMessage({ role: 'user', content: prompt, images: pastedImages.length > 0 ? pastedImages : undefined });
       // 添加 AI 响应
       addMessage({ role: 'assistant', content: response });
+      // 清空图片
+      handleClearImages();
       return;
     }
 
-    void runGeneration(prompt, prompt);
-  }, [inputValue, isGenerating, isOptimizing, isLoggedIn, navigate, runGeneration, currentProject, addMessage]);
+    // 保存当前图片列表，避免清空后丢失
+    const imagesToSend = pastedImages.length > 0 ? [...pastedImages] : undefined;
+    handleClearImages();
+
+    void runGeneration(prompt, prompt, { images: imagesToSend });
+  }, [inputValue, isGenerating, isOptimizing, isLoggedIn, navigate, runGeneration, currentProject, addMessage, pastedImages, handleClearImages]);
 
   // 帮我完善需求：触发提示词优化器（需求确认前置流程）
   const handleStartOptimize = useCallback(() => {
@@ -898,6 +1006,179 @@ export default function HomePage() {
       handleSubmit();
     }
   };
+
+  // 快捷键处理函数
+  const handleCancel = useCallback(() => {
+    if (isGenerating) {
+      cancelActiveRun();
+      finishGeneration();
+      setIsGenerating(false);
+      setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
+      toast.info('已停止生成');
+    }
+  }, [isGenerating, finishGeneration]);
+
+  const handleClearChat = useCallback(() => {
+    if (!currentProject) {
+      toast.info('当前没有项目');
+      return;
+    }
+    if (isGenerating) {
+      toast.info('请先停止生成');
+      return;
+    }
+    useProjectStore.getState().clearChat();
+    toast.success('对话已清空');
+  }, [currentProject, isGenerating]);
+
+  const handleNewProject = useCallback(() => {
+    if (isGenerating) {
+      toast.info('请先停止生成');
+      return;
+    }
+    useProjectStore.getState().newProject();
+    navigate('/workspace');
+    toast.success('已创建新项目');
+  }, [isGenerating, navigate]);
+
+  const handleExport = useCallback(async () => {
+    if (!currentProject) {
+      toast.error('没有可导出的项目');
+      return;
+    }
+    if (isExporting) return;
+    setIsExporting(true);
+    try {
+      const { exportProjectAsZip } = await import('../services/export/zipExporter');
+      await exportProjectAsZip(currentProject);
+      toast.success('ZIP 包已开始下载');
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : '导出失败，请稍后重试';
+      toast.error(msg);
+    } finally {
+      setIsExporting(false);
+    }
+  }, [currentProject, isExporting]);
+
+  // 注册全局快捷键
+  useKeybinding([
+    { key: 'Enter', ctrl: true, action: handleSubmit, description: '提交输入' },
+    { key: 'Escape', action: handleCancel, description: '取消生成' },
+    { key: 'l', ctrl: true, action: handleClearChat, description: '清空对话' },
+    { key: 'n', ctrl: true, action: handleNewProject, description: '新建项目' },
+    { key: 'e', ctrl: true, action: handleExport, description: '导出项目' },
+  ]);
+
+  /**
+   * 处理文件（图片）添加
+   * - 检查文件类型
+   * - 检查文件大小
+   * - 检查图片数量限制
+   * - 转换为 Base64 Data URL
+   */
+  const handleFiles = useCallback((files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+
+    for (const file of fileArray) {
+      // 检查文件类型
+      if (!IMAGE_CONFIG.allowedTypes.includes(file.type)) {
+        toast.error(`不支持的图片格式：${file.name}`);
+        continue;
+      }
+
+      // 检查文件大小
+      if (file.size > IMAGE_CONFIG.maxSize) {
+        toast.error(`图片 ${file.name} 超过 5MB 限制`);
+        continue;
+      }
+
+      // 检查图片数量
+      if (pastedImages.length >= IMAGE_CONFIG.maxCount) {
+        toast.error('最多上传 4 张图片');
+        return;
+      }
+
+      // 转换为 Base64
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result;
+        if (typeof result === 'string') {
+          setPastedImages((prev) => [...prev, result]);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  }, [pastedImages.length]);
+
+  /**
+   * 处理粘贴事件
+   */
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const files: File[] = [];
+    for (const item of items) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          files.push(file);
+        }
+      }
+    }
+
+    if (files.length > 0) {
+      e.preventDefault();
+      handleFiles(files);
+    }
+  }, [handleFiles]);
+
+  /**
+   * 处理拖拽进入
+   */
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  }, []);
+
+  /**
+   * 处理拖拽离开
+   */
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  }, []);
+
+  /**
+   * 处理拖拽悬停
+   */
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  /**
+   * 处理拖拽放置
+   */
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = e.dataTransfer?.files;
+    if (files && files.length > 0) {
+      handleFiles(files);
+    }
+  }, [handleFiles]);
+
+  /**
+   * 删除已粘贴的图片
+   */
+  const handleRemoveImage = useCallback((index: number) => {
+    setPastedImages((prev) => prev.filter((_, i) => i !== index));
+  }, []);
 
   // 阶段图标映射
   const stageIcon = useMemo(() => {
@@ -1312,11 +1593,59 @@ export default function HomePage() {
                 <span className="text-[13px] font-medium">停止生成</span>
               </button>
             )}
-                        <div className="relative">
+
+            {/* 图片预览 */}
+            {pastedImages.length > 0 && (
+              <div className="mb-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] text-[var(--color-text-tertiary)]">
+                    已粘贴 {pastedImages.length} 张图片
+                  </span>
+                  <button
+                    onClick={handleClearImages}
+                    className="text-[11px] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]"
+                  >
+                    清空全部
+                  </button>
+                </div>
+                <ImagePreview images={pastedImages} onRemove={handleRemoveImage} />
+              </div>
+            )}
+
+            {/* 输入框容器：支持拖拽 */}
+            <div
+              className="relative"
+              onDragEnter={handleDragEnter}
+              onDragLeave={handleDragLeave}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+            >
+              {/* 命令下拉 */}
+              <CommandDropdown
+                input={inputValue}
+                visible={showCommandDropdown && !isGenerating && !isOptimizing}
+                onSelect={(command) => {
+                  setInputValue(`/${command.name} `);
+                  setShowCommandDropdown(false);
+                }}
+                onClose={() => setShowCommandDropdown(false)}
+              />
+
+              {/* 拖拽覆盖层 */}
+              {isDragging && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--color-accent)]/10 border-2 border-dashed border-[var(--color-accent)] rounded-xl">
+                  <div className="text-center">
+                    <Icon icon="lucide:upload" width={24} height={24} className="mx-auto mb-2 text-[var(--color-accent)]" />
+                    <p className="text-[13px] text-[var(--color-accent)]">拖拽图片到此处上传</p>
+                  </div>
+                </div>
+              )}
+
               <textarea
                 value={inputValue}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
                 placeholder={
                   isGenerating ? '正在生成中...' :
                   isOptimizing ? '正在分析需求...' :
@@ -1341,9 +1670,19 @@ export default function HomePage() {
               </button>
             </div>
             <div className="flex items-center justify-between mt-2 gap-2">
-              <p className="text-[11px] text-[var(--color-text-tertiary)] shrink-0">
-                按 Enter 发送 · Shift+Enter 换行
-              </p>
+              <div className="flex items-center gap-3">
+                <p className="text-[11px] text-[var(--color-text-tertiary)] shrink-0">
+                  按 Enter 发送 · Shift+Enter 换行
+                </p>
+                <div className="w-px h-3 bg-[var(--color-border-default)]" />
+                <p className="text-[11px] text-[var(--color-text-tertiary)] shrink-0">
+                  支持粘贴或拖拽图片
+                </p>
+                <div className="w-px h-3 bg-[var(--color-border-default)]" />
+                <p className="text-[11px] text-[var(--color-text-tertiary)] shrink-0">
+                  输入 / 使用命令
+                </p>
+              </div>
               <div className="flex items-center gap-2">
                 {optimizerEnabled && (
                   <button

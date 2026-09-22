@@ -100,6 +100,8 @@ interface ProjectActions {
   updateFiles: (files: Record<string, FileNode>, entryFile?: string) => void;
   /** 添加消息到当前项目 */
   addMessage: (message: Omit<ChatMessage, 'id' | 'createdAt'>) => void;
+  /** 清空当前项目的对话历史 */
+  clearChat: () => void;
   /** 删除项目 */
   deleteProject: (id: string) => void;
   /** 从摘要列表加载项目详情 */
@@ -316,6 +318,23 @@ export const useProjectStore = create<ProjectStore>()(
           const updated: Project = {
             ...state.currentProject,
             chat: [...state.currentProject.chat, newMessage],
+            updatedAt: now(),
+          };
+          persistProjectDetail(updated);
+
+          // 异步同步到 API
+          updateProjectApi(updated).catch(() => {});
+
+          return { currentProject: updated };
+        });
+      },
+
+      clearChat: () => {
+        set((state) => {
+          if (!state.currentProject) return state;
+          const updated: Project = {
+            ...state.currentProject,
+            chat: [],
             updatedAt: now(),
           };
           persistProjectDetail(updated);

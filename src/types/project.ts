@@ -79,6 +79,8 @@ export interface ChatMessage {
   createdAt: IsoDateTime;
   /** assistant 消息可指向本次生成的代码快照 id，用于历史版本回看 */
   artifactId?: string;
+  /** 用户消息可包含图片（Base64 Data URL 数组） */
+  images?: string[] | undefined;
 }
 
 /**

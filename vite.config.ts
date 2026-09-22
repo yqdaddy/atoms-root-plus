@@ -10,6 +10,14 @@ export default defineConfig({
       '@': path.resolve(import.meta.dirname ?? '.', './src'),
     },
   },
+  // Vitest 配置
+  test: {
+    exclude: [
+      'node_modules/**',
+      'dist/**',
+      'dist-server/**',
+    ],
+  },
   build: {
     rolldownOptions: {
       // 生产构建移除 console.log / console.debug 调试日志；

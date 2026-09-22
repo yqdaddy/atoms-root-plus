@@ -169,11 +169,13 @@ describe('withRetry', () => {
 
     const resultPromise = withRetry(fn, { maxRetries: 2 });
 
-    // 推进时间以触发重试
-    await vi.runAllTimersAsync();
+    // 同时推进时间和捕获错误，避免 unhandled rejection
+    const [error] = await Promise.all([
+      resultPromise.catch(e => e),
+      vi.runAllTimersAsync(),
+    ]);
 
-    // 捕获错误
-    await expect(resultPromise).rejects.toThrow(CannotRetryError);
+    expect(error).toBeInstanceOf(CannotRetryError);
     expect(fn).toHaveBeenCalledTimes(3); // 初始 + 2 次重试
   });
 
@@ -181,9 +183,14 @@ describe('withRetry', () => {
     const fn = vi.fn().mockRejectedValue(new Error('HTTP 429: Too Many Requests'));
 
     const resultPromise = withRetry(fn, { maxRetries: 10 });
-    await vi.runAllTimersAsync();
 
-    await expect(resultPromise).rejects.toThrow(DegradationTriggeredError);
+    // 同时推进时间和捕获错误，避免 unhandled rejection
+    const [error] = await Promise.all([
+      resultPromise.catch(e => e),
+      vi.runAllTimersAsync(),
+    ]);
+
+    expect(error).toBeInstanceOf(DegradationTriggeredError);
   });
 
   it('进度回调被调用', async () => {
@@ -215,9 +222,15 @@ describe('withRetry', () => {
 
     // 立即取消
     controller.abort();
-    await vi.runAllTimersAsync();
 
-    await expect(resultPromise).rejects.toThrow('请求已取消');
+    // 同时推进时间和捕获错误，避免 unhandled rejection
+    const [error] = await Promise.all([
+      resultPromise.catch(e => e),
+      vi.runAllTimersAsync(),
+    ]);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe('请求已取消');
   });
 
   it('自定义最大延迟', async () => {
