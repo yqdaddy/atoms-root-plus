@@ -1735,9 +1735,12 @@ export default function HomePage() {
                         navigator.clipboard.writeText(shareUrl);
                         toast.success('分享链接已复制到剪贴板');
                       } catch (error) {
-                        // 401 已由 apiClient 统一提示并跳转登录，此处不重复提示
-                        if (!(error instanceof ApiError && error.status === 401)) {
-                          toast.error('分享失败，请稍后重试');
+                        // apiClient 已对 401 统一处理（提示会话过期并跳转登录）
+                        // 此处只处理非 401 错误
+                        const isAuthError = error && typeof error === 'object' && 'status' in error && (error as { status: number }).status === 401;
+                        if (!isAuthError) {
+                          const message = error instanceof Error ? error.message : '分享失败，请稍后重试';
+                          toast.error(message);
                         }
                       }
                     }}
@@ -1827,9 +1830,12 @@ export default function HomePage() {
                       navigator.clipboard.writeText(shareUrl);
                       toast.success('分享链接已复制');
                     } catch (error) {
-                      // 401 已由 apiClient 统一提示并跳转登录，此处不重复提示
-                      if (!(error instanceof ApiError && error.status === 401)) {
-                        toast.error('分享失败，请稍后重试');
+                      // apiClient 已对 401 统一处理（提示会话过期并跳转登录）
+                      // 此处只处理非 401 错误
+                      const isAuthError = error && typeof error === 'object' && 'status' in error && (error as { status: number }).status === 401;
+                      if (!isAuthError) {
+                        const message = error instanceof Error ? error.message : '分享失败，请稍后重试';
+                        toast.error(message);
                       }
                     }
                   }}
