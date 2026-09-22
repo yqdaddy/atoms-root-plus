@@ -397,9 +397,17 @@ export default function HomePage() {
   const { startGeneration, updateStage, appendDelta, finishGeneration, setError, setAwaitingApproval, updateFileStatus, setReviewChecks, setIntent } = useChatStore();
   const { apiKey, getEffectiveBaseURL } = useSettingsStore();
 
-  // 页面刷新/首次进入时清除当前项目，确保进入新建项目状态
+  // 页面刷新时清除当前项目，导航进入则保留
   useEffect(() => {
-    clearCurrentProject();
+    // 检查是否是从项目列表导航进入的
+    const isNavigated = sessionStorage.getItem('atoms_nav_to_workspace');
+    if (isNavigated) {
+      // 清除标记，下次刷新会走清除逻辑
+      sessionStorage.removeItem('atoms_nav_to_workspace');
+    } else {
+      // 刷新或直接访问，清除当前项目
+      clearCurrentProject();
+    }
   }, [clearCurrentProject]);
 
   // 提示词优化器（需求确认前置流程）
