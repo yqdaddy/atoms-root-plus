@@ -5,6 +5,7 @@ import PermissionDialog from './components/PermissionDialog';
 import { usePermissionStore } from './stores/permissionStore';
 import { useState, useEffect } from 'react';
 import { ToastProvider } from './components/Toast';
+import { VersionFooter } from './components/VersionFooter';
 
 // 路由级懒加载：只有访问时才加载对应页面的代码
 const HomePage = lazy(() => import('./pages/HomePage'));
@@ -88,6 +89,8 @@ function App() {
         open={showPermissionDialog}
         onClose={handlePermissionDialogClose}
       />
+      {/* 版本标识：右下角显示 Git SHA */}
+      <VersionFooter />
     </div>
   );
 }

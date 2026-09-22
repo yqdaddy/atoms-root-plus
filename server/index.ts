@@ -9,6 +9,7 @@ import './env.js'; // 确保最先加载 .env
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
+import { execSync } from 'child_process';
 import { healthHandler } from './routes/health.js';
 import { projectsRouter } from './routes/projects.js';
 import { llmRouter } from './routes/llm.js';
@@ -16,6 +17,25 @@ import { authRouter } from './routes/auth.js';
 import { shareRouter } from './routes/share.js';
 import { deployRouter } from './routes/deploy.js';
 import { closeDatabase } from './db.js';
+
+// 获取 Git SHA（运行时）
+function getGitSha(): string {
+  try {
+    // 优先使用环境变量（CI/CD 注入）
+    if (process.env.GIT_SHA) {
+      return process.env.GIT_SHA.substring(0, 7);
+    }
+    // 回退到 git 命令
+    return execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim();
+  } catch {
+    return 'dev';
+  }
+}
+
+const gitSha = getGitSha();
+
+// 设置全局环境变量供 health 路由使用
+process.env.GIT_SHA_SHORT = gitSha;
 
 const app = new Hono();
 
@@ -38,6 +58,12 @@ app.use(
     credentials: true,
   }),
 );
+
+// 添加 X-Git-SHA 响应头中间件
+app.use('*', (c, next) => {
+  c.header('X-Git-SHA', gitSha);
+  return next();
+});
 
 // API 路由
 app.route('/api/health', new Hono().get('/', healthHandler));

@@ -2,6 +2,23 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
+import { execSync } from 'child_process';
+
+// 构建时获取 Git SHA（短格式）
+function getGitSha(): string {
+  try {
+    // 优先使用环境变量（CI/CD 注入）
+    if (process.env.GIT_SHA) {
+      return process.env.GIT_SHA.substring(0, 7);
+    }
+    // 回退到 git 命令
+    return execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim();
+  } catch {
+    return 'dev';
+  }
+}
+
+const gitSha = getGitSha();
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -9,6 +26,10 @@ export default defineConfig({
     alias: {
       '@': path.resolve(import.meta.dirname ?? '.', './src'),
     },
+  },
+  // 注入 Git SHA 环境变量
+  define: {
+    'import.meta.env.VITE_GIT_SHA': JSON.stringify(gitSha),
   },
   // Vitest 配置
   test: {
