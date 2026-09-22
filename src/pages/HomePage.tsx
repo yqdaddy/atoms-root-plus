@@ -12,6 +12,7 @@ import type { FileGenerationStatus } from '../stores/chatStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useAuthStore } from '../stores/authStore'; // F-001: 首页登录守卫
 import { saveShare, getShareUrl } from '../utils/share';
+import { deployProject } from '../utils/deploy';
 import { ApiError } from '../services/apiClient';
 import { getAIAPI, type StreamEvent, type GenerateOptions, validateGeneratedHtml, type DemoTemplateId, type FeatureList } from '../services/ai';
 import { approveAndContinue } from '../services/ai/liveEngine';
@@ -44,6 +45,9 @@ const IMAGE_CONFIG = {
   maxCount: 4,
   allowedTypes: ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'],
 };
+
+/** 一键部署入口开关：上线时改为 true 即恢复完整部署流程 */
+const DEPLOY_ENABLED = false;
 
 const TEMPLATE_CHIPS: { id: DemoTemplateId; label: string; prompt: string; icon: string; framework: ProjectFramework }[] = [
   { id: 'todo', label: '待办清单', prompt: '做一个待办清单，可以添加、完成和删除任务', icon: 'lucide:check-square', framework: 'react-cdn' },
@@ -321,6 +325,8 @@ export default function HomePage() {
   const [showConsole, setShowConsole] = useState(false);
   // 当前正在生成的消息 ID（用于跟踪 UI 状态）
   const [pendingMessageId, setPendingMessageId] = useState<string | null>(null);
+  // 部署进行中标记（防重复点击）
+  const [isDeploying, setIsDeploying] = useState(false);
   // 当前消息的 UI 状态（步骤数、status 等）
   const [messageUIState, setMessageUIState] = useState<{ steps: number; status: MessageStatus; features?: FeatureList | { raw: string }; sessionId?: string } | null>(null);
   // 待确认的变更（diff 模式）：用户批准后应用，拒绝则丢弃
@@ -1865,16 +1871,40 @@ export default function HomePage() {
                 </button>
               )}
 
-              {/* Deploy to server（开发中占位：后端部署链路尚未上线，先提示用户） */}
+              {/* Deploy to server：功能代码保留，入口当前关闭（上线时把 DEPLOY_ENABLED 改为 true） */}
               {generatedHtml && currentProject && (
                 <button
-                  onClick={() => {
-                    toast.info('一键部署功能正在打磨中，即将上线，敬请期待');
+                  onClick={async () => {
+                    if (!DEPLOY_ENABLED) {
+                      toast.info('一键部署功能正在打磨中，即将上线，敬请期待');
+                      return;
+                    }
+                    if (isDeploying) return;
+                    setIsDeploying(true);
+                    try {
+                      const result = await deployProject(currentProject.id, currentProject.files);
+                      navigator.clipboard.writeText(result.deployUrl);
+                      toast.success(`部署成功，链接已复制：${result.deployUrl}`);
+                    } catch (error) {
+                      // 401 已由 apiClient 统一提示并跳转登录，此处不重复提示
+                      if (!(error instanceof ApiError && error.status === 401)) {
+                        const message = error instanceof ApiError ? error.message : '部署失败，请稍后重试';
+                        toast.error(message);
+                      }
+                    } finally {
+                      setIsDeploying(false);
+                    }
                   }}
-                  className="p-1.5 rounded text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-colors"
-                  title="部署到服务器（即将上线）"
+                  disabled={isDeploying}
+                  className="p-1.5 rounded text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] disabled:opacity-50 transition-colors"
+                  title={DEPLOY_ENABLED ? '部署到服务器' : '部署到服务器（即将上线）'}
                 >
-                  <Icon icon="lucide:rocket" width={16} height={16} />
+                  <Icon
+                    icon={isDeploying ? 'lucide:loader-circle' : 'lucide:rocket'}
+                    width={16}
+                    height={16}
+                    className={isDeploying ? 'animate-spin' : ''}
+                  />
                 </button>
               )}
 
