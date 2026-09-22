@@ -1719,8 +1719,11 @@ export default function HomePage() {
                         const shareUrl = getShareUrl(shareId);
                         navigator.clipboard.writeText(shareUrl);
                         toast.success('分享链接已复制到剪贴板');
-                      } catch {
-                        toast.error('分享失败，请稍后重试');
+                      } catch (error) {
+                        const message = error instanceof ApiError && error.status === 401
+                          ? '请先登录后再分享'
+                          : '分享失败，请稍后重试';
+                        toast.error(message);
                       }
                     }}
                     className="flex items-center gap-1 text-[11px] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]"
@@ -1808,8 +1811,11 @@ export default function HomePage() {
                       const shareUrl = getShareUrl(shareId);
                       navigator.clipboard.writeText(shareUrl);
                       toast.success('分享链接已复制');
-                    } catch {
-                      toast.error('分享失败，请稍后重试');
+                    } catch (error) {
+                      const message = error instanceof ApiError && error.status === 401
+                        ? '请先登录后再分享'
+                        : '分享失败，请稍后重试';
+                      toast.error(message);
                     }
                   }}
                   className="p-1.5 rounded text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-colors"
