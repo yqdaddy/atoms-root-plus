@@ -230,7 +230,11 @@ export default function ProjectsPage() {
       <header className="sticky top-0 z-10 h-14 flex items-center justify-between px-6 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
         <div className="flex items-center gap-4">
           <button
-            onClick={() => navigate('/workspace')}
+            onClick={() => {
+              // 返回工作台视为导航，保留当前项目
+              sessionStorage.setItem('atoms_nav_to_workspace', 'true');
+              navigate('/workspace');
+            }}
             className="flex items-center gap-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
           >
             <Icon icon="lucide:arrow-left" width={18} height={18} />

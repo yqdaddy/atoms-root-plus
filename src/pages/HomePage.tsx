@@ -350,6 +350,18 @@ export default function HomePage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const codeRef = useRef<HTMLDivElement>(null);
 
+  // 渲染阶段立即判断：刷新/直接访问时清除当前项目（导航进入则保留）
+  // 注意：必须在读取 currentProject 之前执行，避免先渲染旧项目再清除导致的闪烁
+  const wasNavigatedRef = useRef<boolean | null>(null);
+  if (wasNavigatedRef.current === null) {
+    // 只在首次渲染时判断一次
+    wasNavigatedRef.current = sessionStorage.getItem('atoms_nav_to_workspace') === 'true';
+    sessionStorage.removeItem('atoms_nav_to_workspace');
+    if (!wasNavigatedRef.current) {
+      useProjectStore.getState().clearCurrentProject();
+    }
+  }
+
   // 当前项目的 HTML
   const currentProject = useProjectStore((state) => state.currentProject);
   const generatedHtml = currentProject?.files[ENTRY_FILE_PATH]?.content ?? '';
@@ -393,22 +405,9 @@ export default function HomePage() {
     }
   }, [streamingText, generatedHtml, viewTab]);
 
-  const { createProject, updateEntryFile, updateFiles, updateProjectStatus, addMessage, saveVersion, clearCurrentProject } = useProjectStore();
+  const { createProject, updateEntryFile, updateFiles, updateProjectStatus, addMessage, saveVersion } = useProjectStore();
   const { startGeneration, updateStage, appendDelta, finishGeneration, setError, setAwaitingApproval, updateFileStatus, setReviewChecks, setIntent } = useChatStore();
   const { apiKey, getEffectiveBaseURL } = useSettingsStore();
-
-  // 页面刷新时清除当前项目，导航进入则保留
-  useEffect(() => {
-    // 检查是否是从项目列表导航进入的
-    const isNavigated = sessionStorage.getItem('atoms_nav_to_workspace');
-    if (isNavigated) {
-      // 清除标记，下次刷新会走清除逻辑
-      sessionStorage.removeItem('atoms_nav_to_workspace');
-    } else {
-      // 刷新或直接访问，清除当前项目
-      clearCurrentProject();
-    }
-  }, [clearCurrentProject]);
 
   // 提示词优化器（需求确认前置流程）
   const optimizerEnabled = useOptimizerStore((state) => state.enabled);

@@ -2,6 +2,7 @@
  * 分享功能工具函数
  * 使用服务器存储，生成可跨设备访问的分享链接
  */
+import { ApiError, apiFetchJson } from '../services/apiClient';
 
 /** 多文件结构 */
 export interface SharedFile {
@@ -38,17 +39,17 @@ export async function saveShare(
   projectName?: string,
   files?: Record<string, SharedFile>
 ): Promise<string> {
-  const response = await fetch('/api/share', {
+  // apiFetchJson 自带 credentials: 'include'（携带登录 cookie），
+  // 失败时抛出带 status 的 ApiError（401 可被上层识别为未登录）
+  const data = await apiFetchJson<{ id: string }>('/api/share', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ html, files, projectName }),
   });
 
-  if (!response.ok) {
-    throw new Error('保存分享失败');
+  if (!data?.id) {
+    throw new ApiError('保存分享失败', 500);
   }
 
-  const data = await response.json();
   return data.id;
 }
 
@@ -59,7 +60,8 @@ export async function saveShare(
  */
 export async function loadShare(id: string): Promise<ShareData | null> {
   try {
-    const response = await fetch(`/api/share/${id}`);
+    // 公开接口，但统一携带 credentials 保持一致
+    const response = await fetch(`/api/share/${id}`, { credentials: 'include' });
 
     if (response.status === 404 || response.status === 410) {
       return null;
