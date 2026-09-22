@@ -233,6 +233,12 @@ export default function SandboxFrame({
     return () => window.removeEventListener('message', handleMessage);
   }, [sessionId, onReady, onError, onLog]);
 
+  // 监听 previewHtml 变化，重置 loading 状态
+  // 确保每次 iframe 重新加载时都显示 loading overlay
+  useEffect(() => {
+    setIsLoading(true);
+  }, [previewHtml]);
+
   // 刷新预览
   const handleRefresh = useCallback(() => {
     setIsLoading(true);
