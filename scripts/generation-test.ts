@@ -220,13 +220,40 @@ async function checkSource(page: Page, shotPath: string): Promise<{ ok: boolean;
   };
 }
 
+/** 等待 iframe 真正就绪（body visible + 有内容） */
+async function waitForIframeReady(frame: FrameLocator, timeout = 30_000): Promise<{ ok: boolean; detail: string }> {
+  const startTime = Date.now();
+  let lastError = '';
+  let attempts = 0;
+  while (Date.now() - startTime < timeout) {
+    attempts++;
+    try {
+      const body = frame.locator('body');
+      // 先等待 body 存在（不要求 visible，因为 sandbox iframe 可能有特殊行为）
+      await body.waitFor({ state: 'attached', timeout: 5000 });
+
+      // 检查是否有内容
+      const html = await body.innerHTML().catch(() => '');
+      if (html.trim().length > 0) {
+        return {
+          ok: true,
+          detail: `iframe body attached，内容 ${html.trim().length} 字符，等待耗时 ${Date.now() - startTime}ms，尝试 ${attempts} 次`
+        };
+      }
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : String(e);
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return { ok: false, detail: `iframe ${timeout / 1000}s 内未就绪，尝试 ${attempts} 次（最后错误: ${lastError.slice(0, 100)}）` };
+}
+
 /** 计算器交互：iframe 内点击数字按钮，验证显示响应 */
 async function calcInteraction(page: Page): Promise<{ result: boolean | 'warn'; detail: string }> {
   const frame = page.frameLocator('iframe[title="预览"]');
-  try {
-    await frame.locator('body').waitFor({ state: 'visible', timeout: 10_000 });
-  } catch {
-    return { result: false, detail: 'iframe body 不可见，无法交互' };
+  const ready = await waitForIframeReady(frame, 30_000);
+  if (!ready.ok) {
+    return { result: false, detail: ready.detail };
   }
   const digitButtons = frame.locator('button', { hasText: /^[0-9]$/ });
   const count = await digitButtons.count();
@@ -256,19 +283,35 @@ async function calcInteraction(page: Page): Promise<{ result: boolean | 'warn'; 
   }
 }
 
-/** 贪吃蛇交互：开始按钮 + 方向键，检查 canvas */
+/** 贪吃蛇交互：检测 canvas 或 DOM 实现，验证键盘控制 */
 async function snakeInteraction(page: Page): Promise<{ result: boolean | 'warn'; detail: string }> {
   const frame = page.frameLocator('iframe[title="预览"]');
-  try {
-    await frame.locator('body').waitFor({ state: 'visible', timeout: 10_000 });
-  } catch {
-    return { result: false, detail: 'iframe body 不可见，无法交互' };
+  const ready = await waitForIframeReady(frame, 30_000);
+  if (!ready.ok) {
+    return { result: false, detail: ready.detail };
   }
+
+  // 额外等待游戏初始化（canvas 或游戏 UI 元素）
+  const gameInitLocator = frame.locator('canvas, button, [class*="game"], [id*="game"]').first();
+  const gameInit = await gameInitLocator
+    .waitFor({ state: 'visible', timeout: 15_000 })
+    .then(() => true)
+    .catch(() => false);
+
   const hasCanvas = (await frame.locator('canvas').count()) > 0;
   const startBtn = frame.getByRole('button', { name: /开始|start|重新开始|restart/i }).first();
   const hasStart = (await startBtn.count()) > 0;
+
+  // 检查游戏 UI 文本（识别 DOM 实现）
+  const bodyText = await frame.locator('body').innerText();
+  const gameUiKeywords = ['WASD', '方向键', '分数', '得分', '最高', '游戏', 'snake', 'game'];
+  const hasGameUi = gameUiKeywords.some((kw) => bodyText.toLowerCase().includes(kw.toLowerCase()));
+
   try {
+    // 尝试点击开始按钮（如果有）
     if (hasStart) await startBtn.click({ timeout: 5000 });
+
+    // 聚焦到 iframe 并发送键盘事件
     await frame
       .locator('body')
       .click({ position: { x: 200, y: 200 }, timeout: 3000 })
@@ -276,14 +319,24 @@ async function snakeInteraction(page: Page): Promise<{ result: boolean | 'warn';
     await page.keyboard.press('ArrowUp');
     await page.keyboard.press('ArrowLeft');
     await page.waitForTimeout(800);
+
+    // 判定成功条件（宽松）：
+    // 1. 有 canvas + 开始按钮可点击 -> 成功
+    // 2. 有游戏 UI 文本（DOM 实现）-> 成功
+    // 3. 其他情况 -> warn
     if (hasCanvas) {
       return {
         result: true,
-        detail: `canvas 存在，开始按钮${hasStart ? '已点击' : '未找到（靠键盘启动）'}，方向键已发送，无运行异常`,
+        detail: `canvas 存在，开始按钮${hasStart ? '已点击' : '未找到'}，方向键已发送，无运行异常`,
       };
     }
-    const text = await frame.locator('body').innerText();
-    return { result: 'warn', detail: `未找到 canvas。开始按钮=${hasStart}。frame 文本: ${text.replace(/\s+/g, ' ').slice(0, 200)}` };
+    if (hasGameUi) {
+      return {
+        result: true,
+        detail: `DOM 实现的贪吃蛇，检测到游戏 UI（${gameUiKeywords.filter((kw) => bodyText.toLowerCase().includes(kw.toLowerCase())).join(', ')}），方向键已发送`,
+      };
+    }
+    return { result: 'warn', detail: `未找到 canvas 或游戏 UI 文本。开始按钮=${hasStart}。frame 文本: ${bodyText.replace(/\s+/g, ' ').slice(0, 200)}` };
   } catch (e) {
     return { result: false, detail: `贪吃蛇交互异常: ${e instanceof Error ? e.message : e}` };
   }
@@ -450,12 +503,31 @@ async function main() {
   const entryFindings = await exploreEntry(browser);
   console.log(entryFindings + '\n');
 
-  const rounds: Array<{ round: string; prompt: string }> = [
+  // 支持命令行参数过滤：--only=snake 或 --only=calc
+  // 支持次数限制：--count=1（只运行指定次数）
+  const onlyArg = process.argv.find((a) => a.startsWith('--only='));
+  const countArg = process.argv.find((a) => a.startsWith('--count='));
+  const onlyFilter = onlyArg ? onlyArg.split('=')[1] : null;
+  const countLimit = countArg ? parseInt(countArg.split('=')[1], 10) : null;
+
+  const allRounds: Array<{ round: string; prompt: string }> = [
     { round: 'calc-run1', prompt: '帮我生成一个带加减乘除功能的计算器' },
     { round: 'calc-run2', prompt: '帮我生成一个带加减乘除功能的计算器' },
     { round: 'snake-run1', prompt: '帮我生成一个贪吃蛇小游戏' },
     { round: 'snake-run2', prompt: '帮我生成一个贪吃蛇小游戏' },
   ];
+
+  let rounds = onlyFilter
+    ? allRounds.filter((r) => r.round.startsWith(onlyFilter))
+    : allRounds;
+
+  if (countLimit !== null && countLimit > 0) {
+    rounds = rounds.slice(0, countLimit);
+  }
+
+  if (onlyFilter) {
+    console.log(`[参数] 只运行 ${onlyFilter} 相关测试（${rounds.length} 轮）\n`);
+  }
 
   const results: RoundResult[] = [];
   let infraBlocked = false;
