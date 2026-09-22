@@ -393,9 +393,14 @@ export default function HomePage() {
     }
   }, [streamingText, generatedHtml, viewTab]);
 
-  const { createProject, updateEntryFile, updateFiles, updateProjectStatus, addMessage, saveVersion } = useProjectStore();
+  const { createProject, updateEntryFile, updateFiles, updateProjectStatus, addMessage, saveVersion, clearCurrentProject } = useProjectStore();
   const { startGeneration, updateStage, appendDelta, finishGeneration, setError, setAwaitingApproval, updateFileStatus, setReviewChecks, setIntent } = useChatStore();
   const { apiKey, getEffectiveBaseURL } = useSettingsStore();
+
+  // 页面刷新/首次进入时清除当前项目，确保进入新建项目状态
+  useEffect(() => {
+    clearCurrentProject();
+  }, [clearCurrentProject]);
 
   // 提示词优化器（需求确认前置流程）
   const optimizerEnabled = useOptimizerStore((state) => state.enabled);

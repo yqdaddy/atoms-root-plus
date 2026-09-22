@@ -102,6 +102,8 @@ interface ProjectActions {
   addMessage: (message: Omit<ChatMessage, 'id' | 'createdAt'>) => void;
   /** 清空当前项目的对话历史 */
   clearChat: () => void;
+  /** 清除当前项目（用于刷新后重置） */
+  clearCurrentProject: () => void;
   /** 删除项目 */
   deleteProject: (id: string) => void;
   /** 从摘要列表加载项目详情 */
@@ -344,6 +346,10 @@ export const useProjectStore = create<ProjectStore>()(
 
           return { currentProject: updated };
         });
+      },
+
+      clearCurrentProject: () => {
+        set({ currentId: null, currentProject: null, versions: [], currentVersionId: null });
       },
 
       deleteProject: (id) => {
