@@ -12,7 +12,6 @@ import type { FileGenerationStatus } from '../stores/chatStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useAuthStore } from '../stores/authStore'; // F-001: 首页登录守卫
 import { saveShare, getShareUrl } from '../utils/share';
-import { deployProject } from '../utils/deploy';
 import { ApiError } from '../services/apiClient';
 import { getAIAPI, type StreamEvent, type GenerateOptions, validateGeneratedHtml, type DemoTemplateId, type FeatureList } from '../services/ai';
 import { approveAndContinue } from '../services/ai/liveEngine';
@@ -322,8 +321,6 @@ export default function HomePage() {
   const [showConsole, setShowConsole] = useState(false);
   // 当前正在生成的消息 ID（用于跟踪 UI 状态）
   const [pendingMessageId, setPendingMessageId] = useState<string | null>(null);
-  // 部署进行中标记（防重复点击）
-  const [isDeploying, setIsDeploying] = useState(false);
   // 当前消息的 UI 状态（步骤数、status 等）
   const [messageUIState, setMessageUIState] = useState<{ steps: number; status: MessageStatus; features?: FeatureList | { raw: string }; sessionId?: string } | null>(null);
   // 待确认的变更（diff 模式）：用户批准后应用，拒绝则丢弃
@@ -1732,10 +1729,10 @@ export default function HomePage() {
                         navigator.clipboard.writeText(shareUrl);
                         toast.success('分享链接已复制到剪贴板');
                       } catch (error) {
-                        const message = error instanceof ApiError && error.status === 401
-                          ? '请先登录后再分享'
-                          : '分享失败，请稍后重试';
-                        toast.error(message);
+                        // 401 已由 apiClient 统一提示并跳转登录，此处不重复提示
+                        if (!(error instanceof ApiError && error.status === 401)) {
+                          toast.error('分享失败，请稍后重试');
+                        }
                       }
                     }}
                     className="flex items-center gap-1 text-[11px] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]"
@@ -1824,10 +1821,10 @@ export default function HomePage() {
                       navigator.clipboard.writeText(shareUrl);
                       toast.success('分享链接已复制');
                     } catch (error) {
-                      const message = error instanceof ApiError && error.status === 401
-                        ? '请先登录后再分享'
-                        : '分享失败，请稍后重试';
-                      toast.error(message);
+                      // 401 已由 apiClient 统一提示并跳转登录，此处不重复提示
+                      if (!(error instanceof ApiError && error.status === 401)) {
+                        toast.error('分享失败，请稍后重试');
+                      }
                     }
                   }}
                   className="p-1.5 rounded text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-colors"
@@ -1868,36 +1865,16 @@ export default function HomePage() {
                 </button>
               )}
 
-              {/* Deploy to server */}
+              {/* Deploy to server（开发中占位：后端部署链路尚未上线，先提示用户） */}
               {generatedHtml && currentProject && (
                 <button
-                  onClick={async () => {
-                    if (isDeploying) return;
-                    setIsDeploying(true);
-                    try {
-                      const result = await deployProject(currentProject.id, currentProject.files);
-                      navigator.clipboard.writeText(result.deployUrl);
-                      toast.success(`部署成功，链接已复制：${result.deployUrl}`);
-                    } catch (error) {
-                      // 401 已由 apiClient 统一提示并跳转登录，此处不重复提示
-                      if (!(error instanceof ApiError && error.status === 401)) {
-                        const message = error instanceof ApiError ? error.message : '部署失败，请稍后重试';
-                        toast.error(message);
-                      }
-                    } finally {
-                      setIsDeploying(false);
-                    }
+                  onClick={() => {
+                    toast.info('一键部署功能正在打磨中，即将上线，敬请期待');
                   }}
-                  disabled={isDeploying}
-                  className="p-1.5 rounded text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] disabled:opacity-50 transition-colors"
-                  title="部署到服务器"
+                  className="p-1.5 rounded text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-colors"
+                  title="部署到服务器（即将上线）"
                 >
-                  <Icon
-                    icon={isDeploying ? 'lucide:loader-circle' : 'lucide:rocket'}
-                    width={16}
-                    height={16}
-                    className={isDeploying ? 'animate-spin' : ''}
-                  />
+                  <Icon icon="lucide:rocket" width={16} height={16} />
                 </button>
               )}
 
