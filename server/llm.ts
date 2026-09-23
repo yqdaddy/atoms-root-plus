@@ -1098,6 +1098,7 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
     }
 
     // 意图分发：analyze/diagnose 只跑分析师（done 只带 analysis），
+    // conversation 直接返回对话响应，不走代码生成流程，
     // modify 直通工程师（跳过分析师与批准），create 走完整四角色流水线
     if (intent.type === 'analyze') {
       await runAnalyzePipeline({ prompt, currentFiles, intent, onEvent, signal: combinedSignal });
@@ -1105,6 +1106,11 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
     }
     if (intent.type === 'diagnose') {
       await runDiagnosePipeline({ prompt, currentFiles, intent, onEvent, signal: combinedSignal });
+      return;
+    }
+    if (intent.type === 'conversation') {
+      // conversation 意图：直接返回对话响应，不走代码生成流程
+      await runConversationPipeline({ prompt, intent, onEvent, signal: combinedSignal });
       return;
     }
     if (intent.type === 'modify' && currentFiles && fileCount > 0) {
@@ -1897,6 +1903,53 @@ export async function runDiagnosePipeline({
   const result = await streamChatCompletionWithUsage(
     messages,
     (text) => onEvent({ type: 'delta', payload: { text, phase: 'diagnose' } }),
+    signal
+  );
+
+  if (signal.aborted) return;
+
+  onEvent({
+    type: 'done',
+    payload: {
+      analysis: result.content,
+      stats: result.usage ? {
+        inputTokens: result.usage.prompt_tokens,
+        outputTokens: result.usage.completion_tokens,
+      } : undefined,
+    },
+  });
+}
+
+/** 对话模式系统提示词（conversation 意图：纯对话、问候、澄清等，不生成代码） */
+const CONVERSATION_SYSTEM_PROMPT = `你是 Atoms 平台的智能助手。用户正在与你进行对话，可能是在打招呼、致谢、询问概念或澄清需求。你的任务是以友好、专业的方式回应。
+
+## 输出要求
+- 用简体中文回复（用户用英文时可用英文）
+- 友好、简洁、专业
+- 如果用户的需求不明确，温和地追问或提供引导
+- 如果用户想创建或修改应用，引导他们描述具体需求
+- 不要输出代码或 JSON，只输出对话内容`;
+
+/**
+ * 对话流水线（conversation 意图）：纯对话回复，不进入代码生成流程。
+ * 结果经 done.analysis 返回，前端作为 assistant 消息展示。
+ */
+export async function runConversationPipeline({
+  prompt,
+  intent,
+  onEvent,
+  signal,
+}: Omit<AnalystPipelineParams, 'currentFiles'>): Promise<void> {
+  onEvent({ type: 'stage', payload: { phase: 'analysis', intent } });
+
+  const messages: ChatMessage[] = [
+    { role: 'system', content: CONVERSATION_SYSTEM_PROMPT },
+    { role: 'user', content: prompt },
+  ];
+
+  const result = await streamChatCompletionWithUsage(
+    messages,
+    (text) => onEvent({ type: 'delta', payload: { text, phase: 'analysis' } }),
     signal
   );
 
