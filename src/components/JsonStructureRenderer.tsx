@@ -15,6 +15,7 @@ import type { FeatureList, FeatureItem } from '../services/ai/types';
 /** JSON 结构类型 */
 type JsonStructureType =
   | 'feature-list' // 分析结果（FeatureList）
+  | 'review-report' // 审查报告（pass + checks）
   | 'interactions' // 交互列表
   | 'generic'; // 通用 JSON
 
@@ -25,6 +26,15 @@ function detectJsonStructure(json: unknown): JsonStructureType {
   }
 
   const obj = json as Record<string, unknown>;
+
+  // 审查报告: 必须有 pass 和 checks 数组
+  if (
+    typeof obj.pass === 'boolean' &&
+    Array.isArray(obj.checks) &&
+    obj.checks.length > 0
+  ) {
+    return 'review-report';
+  }
 
   // FeatureList: 必须有 appTitle 和 features 数组
   if (
@@ -255,6 +265,115 @@ function InteractionListCard({ interactions }: { interactions: string[] }) {
   );
 }
 
+/** 审查报告项 */
+interface ReviewCheckItem {
+  item: string;
+  pass: boolean;
+  note?: string;
+}
+
+/** 审查报告数据 */
+interface ReviewReport {
+  pass: boolean;
+  checks: ReviewCheckItem[];
+  repairInstructions?: string[];
+  missingFiles?: string[];
+}
+
+/** 审查报告卡片组件 */
+function ReviewReportCard({ data }: { data: ReviewReport }) {
+  const passedCount = data.checks.filter(c => c.pass).length;
+  const totalCount = data.checks.length;
+
+  return (
+    <div className="my-4 rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] overflow-hidden">
+      {/* 头部：总体结果 */}
+      <div className={`p-4 ${data.pass ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
+        <div className="flex items-center gap-3">
+          <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${data.pass ? 'bg-emerald-500/20' : 'bg-red-500/20'}`}>
+            <Icon
+              icon={data.pass ? 'lucide:check-circle' : 'lucide:x-circle'}
+              width={20}
+              height={20}
+              className={data.pass ? 'text-emerald-600' : 'text-red-600'}
+            />
+          </div>
+          <div>
+            <h3 className={`text-[16px] font-semibold ${data.pass ? 'text-emerald-700' : 'text-red-700'}`}>
+              {data.pass ? '审查通过' : '审查未通过'}
+            </h3>
+            <p className="text-[12px] text-[var(--color-text-secondary)]">
+              {passedCount}/{totalCount} 项检查通过
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* 检查项列表 */}
+      <div className="p-4">
+        <div className="grid gap-2">
+          {data.checks.map((check, i) => (
+            <div
+              key={i}
+              className={`p-3 rounded-lg border ${
+                check.pass
+                  ? 'bg-[var(--color-bg-base)] border-[var(--color-border-default)]'
+                  : 'bg-red-500/5 border-red-500/20'
+              }`}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <Icon
+                  icon={check.pass ? 'lucide:check' : 'lucide:x'}
+                  width={14}
+                  height={14}
+                  className={check.pass ? 'text-emerald-600' : 'text-red-600'}
+                />
+                <span className="text-[13px] font-medium text-[var(--color-text-primary)]">
+                  {check.item}
+                </span>
+                <span
+                  className={`ml-auto text-[11px] px-2 py-0.5 rounded ${
+                    check.pass
+                      ? 'bg-emerald-500/10 text-emerald-600'
+                      : 'bg-red-500/10 text-red-600'
+                  }`}
+                >
+                  {check.pass ? '通过' : '未通过'}
+                </span>
+              </div>
+              {check.note && (
+                <p className="text-[12px] text-[var(--color-text-secondary)] pl-6">
+                  {check.note}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 修复指令 */}
+      {data.repairInstructions && data.repairInstructions.length > 0 && (
+        <div className="p-4 border-t border-[var(--color-border-default)] bg-amber-500/5">
+          <div className="flex items-center gap-2 mb-2">
+            <Icon icon="lucide:wrench" width={14} height={14} className="text-amber-600" />
+            <span className="text-[12px] font-medium text-amber-700">修复建议</span>
+          </div>
+          <ul className="space-y-1">
+            {data.repairInstructions.map((instruction, i) => (
+              <li
+                key={i}
+                className="text-[12px] text-[var(--color-text-secondary)] pl-4 relative before:content-['•'] before:absolute before:left-0 before:text-amber-600"
+              >
+                {instruction}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** 转义 HTML 实体 */
 function escapeHtml(code: string): string {
   return code
@@ -369,6 +488,9 @@ export function JsonStructureRenderer({ jsonString, isStreaming = false }: JsonS
 
   // 根据结构类型渲染对应组件
   switch (structureType) {
+    case 'review-report':
+      return <ReviewReportCard data={parsedJson as ReviewReport} />;
+
     case 'feature-list':
       return <AnalysisResultCard data={parsedJson as FeatureList} />;
 
