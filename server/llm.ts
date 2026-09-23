@@ -1163,23 +1163,42 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
 
     if (combinedSignal.aborted) return;
 
-    // 解析分析结果
+    // 检查分析结果是否是对话内容而非功能清单
+    const analysisText = analysisResult.content.trim();
+    const analysisParseResult = parseOutput(analysisText);
+
+    // 如果分析师返回的是纯文本对话（澄清需求、解释概念），直接返回给用户
+    if (analysisParseResult.type === 'conversation') {
+      console.log('[generateWithStages] 分析师返回对话内容，跳过工程师阶段');
+      onEvent({
+        type: 'done',
+        payload: {
+          analysis: analysisParseResult.content || analysisText,
+          stats: analysisResult.usage ? {
+            inputTokens: analysisResult.usage.prompt_tokens,
+            outputTokens: analysisResult.usage.completion_tokens,
+          } : undefined,
+        },
+      });
+      return;
+    }
+
+    // 解析分析结果（尝试提取 JSON）
     let features: unknown;
     try {
       // 括号配平提取首个完整 JSON 对象（避免贪婪匹配跨多个 JSON 块）
-      const text = analysisResult.content;
       let depth = 0;
       let start = -1;
       let jsonStr: string | null = null;
 
-      for (let i = 0; i < text.length; i++) {
-        if (text[i] === '{') {
+      for (let i = 0; i < analysisText.length; i++) {
+        if (analysisText[i] === '{') {
           if (depth === 0) start = i;
           depth++;
-        } else if (text[i] === '}') {
+        } else if (analysisText[i] === '}') {
           depth--;
           if (depth === 0 && start !== -1) {
-            jsonStr = text.slice(start, i + 1);
+            jsonStr = analysisText.slice(start, i + 1);
             break;
           }
         }
@@ -1188,10 +1207,10 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
       if (jsonStr) {
         features = JSON.parse(jsonStr);
       } else {
-        features = { raw: analysisResult.content };
+        features = { raw: analysisText };
       }
     } catch {
-      features = { raw: analysisResult.content };
+      features = { raw: analysisText };
     }
 
     // 发送批准请求事件
@@ -1376,7 +1395,30 @@ export async function continueAfterApproval(
 
     if (combinedSignal.aborted) return;
 
-    // 解析输出
+    // 第一步：先检查输出是否是对话内容（澄清需求、解释概念等）
+    // 如果 AI 认为需要先与用户沟通，会在输出中说明，而不是直接生成代码
+    const quickParseResult = parseOutput(generatedOutput);
+    if (quickParseResult.type === 'conversation') {
+      console.log('[continueAfterApproval] 检测到纯文本对话内容，跳过代码生成');
+      pendingSessions.delete(sessionId);
+
+      // 通过 done 事件返回对话内容（前端会作为 assistant 消息展示）
+      onEvent({
+        type: 'done',
+        payload: {
+          html: '',
+          files: {},
+          analysis: quickParseResult.content || generatedOutput,
+          stats: generateResult.usage ? {
+            inputTokens: generateResult.usage.prompt_tokens,
+            outputTokens: generateResult.usage.completion_tokens,
+          } : undefined,
+        },
+      });
+      return;
+    }
+
+    // 第二步：解析为代码结构
     // diff 模式：尝试解析变更清单并应用到现有文件
     // 非 diff 模式或 diff 解析失败：降级为多文件解析
     let finalFiles: Record<string, { path: string; content: string; language: FileLanguage; updatedAt: string }>;

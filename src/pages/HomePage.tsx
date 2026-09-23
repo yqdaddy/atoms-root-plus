@@ -544,9 +544,27 @@ export default function HomePage() {
             warnings?: string[];
             changes?: ChangeList;
             changeSummary?: string;
+            analysis?: string;
           };
           const hasFiles = payload.files && Object.keys(payload.files).length > 0;
           const hasChanges = !!payload.changes && payload.changes.changes.length > 0;
+          const hasAnalysis = !!payload.analysis && payload.analysis.length > 0;
+
+          // 对话模式：有 analysis 字段时，作为 assistant 消息展示
+          if (hasAnalysis && !hasFiles && !payload.html) {
+            console.log('[HomePage] 对话模式，analysis 字段长度:', payload.analysis!.length);
+            finishGeneration();
+            setIsGenerating(false);
+
+            // 将分析/诊断结果作为 assistant 消息保存
+            addMessage({ role: 'assistant', content: payload.analysis! });
+            toast.success('分析完成');
+
+            // 清除 UI 状态
+            setPendingMessageId(null);
+            setMessageUIState(null);
+            break;
+          }
 
           // diff 模式：有 changes 时先显示 DiffViewer，等待用户确认
           if (hasChanges && hasFiles) {
