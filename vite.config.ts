@@ -37,6 +37,8 @@ export default defineConfig({
       'node_modules/**',
       'dist/**',
       'dist-server/**',
+      // E2E 测试归 Playwright 运行（npm run test:e2e），不归 vitest
+      'tests/e2e/**',
     ],
   },
   build: {
