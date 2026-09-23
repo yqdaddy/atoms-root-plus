@@ -45,6 +45,8 @@ export interface StreamBuffer {
   activeFilePath: string | null;
   /** 意图识别结果（仅首个 stage 事件携带） */
   intent: IntentResult | null;
+  /** 生成开始时间戳（用于运行时钟持久化） */
+  startTime: number | null;
 }
 
 interface ChatState {
@@ -85,6 +87,8 @@ interface ChatActions {
   setReviewChecks: (checks: ReviewCheckItem[] | null) => void;
   /** 设置意图识别结果 */
   setIntent: (intent: IntentResult | null) => void;
+  /** 从 sessionStorage 恢复 startTime（刷新页面后恢复运行时钟） */
+  restoreStartTime: (runId: string) => void;
 }
 
 const initialStreamBuffer: StreamBuffer = {
@@ -99,9 +103,41 @@ const initialStreamBuffer: StreamBuffer = {
   files: [],
   activeFilePath: null,
   intent: null,
+  startTime: null,
 };
 
 export type ChatStore = ChatState & ChatActions;
+
+/** sessionStorage 键名模板 */
+const START_TIME_KEY_PREFIX = 'litpp:run:';
+
+/** 保存 startTime 到 sessionStorage */
+function saveStartTime(runId: string, startTime: number): void {
+  try {
+    sessionStorage.setItem(`${START_TIME_KEY_PREFIX}${runId}:startTime`, String(startTime));
+  } catch {
+    // sessionStorage 可能不可用（隐私模式），忽略错误
+  }
+}
+
+/** 从 sessionStorage 读取 startTime */
+function loadStartTime(runId: string): number | null {
+  try {
+    const value = sessionStorage.getItem(`${START_TIME_KEY_PREFIX}${runId}:startTime`);
+    return value ? parseInt(value, 10) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 清除 sessionStorage 中的 startTime */
+function clearStartTime(runId: string): void {
+  try {
+    sessionStorage.removeItem(`${START_TIME_KEY_PREFIX}${runId}:startTime`);
+  } catch {
+    // 忽略错误
+  }
+}
 
 export const useChatStore = create<ChatStore>()((set) => ({
   streamBuffer: initialStreamBuffer,
@@ -111,6 +147,9 @@ export const useChatStore = create<ChatStore>()((set) => ({
   reviewChecks: null,
 
   startGeneration: (runId) => {
+    const startTime = Date.now();
+    // 持久化 startTime 到 sessionStorage
+    saveStartTime(runId, startTime);
     set({
       streamBuffer: {
         ...initialStreamBuffer,
@@ -118,6 +157,7 @@ export const useChatStore = create<ChatStore>()((set) => ({
         stage: 'analyzing',
         attempt: 1,
         stageMessage: '正在分析功能...',
+        startTime,
       },
       isGenerating: true,
       error: null,
@@ -193,14 +233,20 @@ export const useChatStore = create<ChatStore>()((set) => ({
   },
 
   finishGeneration: () => {
-    set((state) => ({
-      streamBuffer: {
-        ...state.streamBuffer,
-        stage: 'done',
-        stageMessage: '生成完成',
-      },
-      isGenerating: false,
-    }));
+    set((state) => {
+      // 清除 sessionStorage 中的 startTime
+      if (state.streamBuffer.runId) {
+        clearStartTime(state.streamBuffer.runId);
+      }
+      return {
+        streamBuffer: {
+          ...state.streamBuffer,
+          stage: 'done',
+          stageMessage: '生成完成',
+        },
+        isGenerating: false,
+      };
+    });
   },
 
   setError: (message) => {
@@ -291,6 +337,21 @@ export const useChatStore = create<ChatStore>()((set) => ({
         intent,
       },
     }));
+  },
+
+  restoreStartTime: (runId) => {
+    const startTime = loadStartTime(runId);
+    if (startTime) {
+      set((state) => ({
+        streamBuffer: {
+          ...state.streamBuffer,
+          runId,
+          startTime,
+          stage: 'generating', // 恢复时默认为 generating 状态
+        },
+        isGenerating: true,
+      }));
+    }
   },
 }));
 

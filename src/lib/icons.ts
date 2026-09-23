@@ -13,25 +13,29 @@ import atom from '../../assets/icons/lucide/atom.svg?raw';
 import alertCircle from '../../assets/icons/lucide/alert-circle.svg?raw';
 import arrowUp from '../../assets/icons/lucide/arrow-up.svg?raw';
 import bot from '../../assets/icons/lucide/bot.svg?raw';
+import box from '../../assets/icons/lucide/box.svg?raw';
 import calculator from '../../assets/icons/lucide/calculator.svg?raw';
 import check from '../../assets/icons/lucide/check.svg?raw';
+import checkCircle from '../../assets/icons/lucide/check-circle.svg?raw';
 import chevronDown from '../../assets/icons/lucide/chevron-down.svg?raw';
 import chevronRight from '../../assets/icons/lucide/chevron-right.svg?raw';
 import code from '../../assets/icons/lucide/code.svg?raw';
 import code2 from '../../assets/icons/lucide/code-2.svg?raw';
 import copy from '../../assets/icons/lucide/copy.svg?raw';
 import database from '../../assets/icons/lucide/database.svg?raw';
-import download from '../../assets/icons/lucide/download.svg?raw';
+// import download from '../../assets/icons/lucide/download.svg?raw';
 import eye from '../../assets/icons/lucide/eye.svg?raw';
 import eyeOff from '../../assets/icons/lucide/eye-off.svg?raw';
 import file from '../../assets/icons/lucide/file.svg?raw';
-import fileCode from '../../assets/icons/lucide/file-code.svg?raw';
+// import fileCode from '../../assets/icons/lucide/file-code.svg?raw';
+import fileCode2 from '../../assets/icons/lucide/file-code-2.svg?raw';
 import fileText from '../../assets/icons/lucide/file-text.svg?raw';
 import folderPlus from '../../assets/icons/lucide/folder-plus.svg?raw';
 import gamepad2 from '../../assets/icons/lucide/gamepad-2.svg?raw';
 import gitCompare from '../../assets/icons/lucide/git-compare.svg?raw';
 import hammer from '../../assets/icons/lucide/hammer.svg?raw';
-import helpCircle from '../../assets/icons/lucide/help-circle.svg?raw';
+// import helpCircle from '../../assets/icons/lucide/help-circle.svg?raw';
+import info from '../../assets/icons/lucide/info.svg?raw';
 import history from '../../assets/icons/lucide/history.svg?raw';
 import home from '../../assets/icons/lucide/home.svg?raw';
 import layers from '../../assets/icons/lucide/layers.svg?raw';
@@ -85,25 +89,28 @@ const LOCAL_ICONS: Record<string, string> = {
   'alert-circle': alertCircle,
   'arrow-up': arrowUp,
   bot,
+  box,
   calculator,
   check,
+  'check-circle': checkCircle,
   'chevron-down': chevronDown,
   'chevron-right': chevronRight,
   code,
   'code-2': code2,
   copy,
   database,
-  download,
+  // download,
   eye,
   'eye-off': eyeOff,
   file,
-  'file-code': fileCode,
+  'file-code-2': fileCode2,
   'file-text': fileText,
   folderPlus,
   'gamepad-2': gamepad2,
   'git-compare': gitCompare,
   hammer,
-  'help-circle': helpCircle,
+  // 'help-circle': helpCircle,
+  info,
   history,
   home,
   layers,

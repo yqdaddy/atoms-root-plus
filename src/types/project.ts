@@ -71,6 +71,9 @@ export type ProjectFramework = 'html' | 'react-cdn' | 'vue-cdn';
 
 export type ChatRole = 'user' | 'assistant' | 'system';
 
+/** 意图类型：创建/修改/分析/诊断 */
+export type IntentType = 'create' | 'modify' | 'analyze' | 'diagnose' | 'conversation';
+
 export interface ChatMessage {
   id: string;
   role: ChatRole;
@@ -81,6 +84,10 @@ export interface ChatMessage {
   artifactId?: string;
   /** 用户消息可包含图片（Base64 Data URL 数组） */
   images?: string[] | undefined;
+  /** 生成轮次 ID：同一 runId 的消息归为一组 */
+  runId?: string | undefined;
+  /** 意图类型：用于分组标题显示 */
+  intentType?: IntentType | undefined;
 }
 
 /**
@@ -135,6 +142,34 @@ export interface ProjectSummary {
 
 /** 项目偏好类型 */
 export type PreferenceType = 'style' | 'tech' | 'correction' | 'preference';
+
+/** 单行编辑操作 */
+export interface FileEdit {
+  /** 行号（1-indexed） */
+  line: number;
+  /** 原行内容（必须精确匹配，包括缩进） */
+  old: string;
+  /** 新行内容 */
+  new: string;
+  /** 操作类型 */
+  type: 'replace' | 'insert' | 'delete';
+}
+
+/** 单个文件的变更集合 */
+export interface FileChange {
+  /** 文件路径 */
+  file: string;
+  /** 编辑操作列表 */
+  edits: FileEdit[];
+}
+
+/** 变更清单（工程师 diff 输出格式） */
+export interface ChangeList {
+  /** 变更列表 */
+  changes: FileChange[];
+  /** 变更摘要 */
+  summary: string;
+}
 
 /** 项目偏好记忆：记录用户对项目的偏好选择，用于后续生成时复用 */
 export interface ProjectPreference {

@@ -16,7 +16,13 @@ import type { FeatureList, FeatureItem } from '../services/ai/types';
 type JsonStructureType =
   | 'feature-list' // 分析结果（FeatureList）
   | 'review-report' // 审查报告（pass + checks）
+  | 'error-report' // 错误诊断报告（problem + fixSuggestions）
   | 'interactions' // 交互列表
+  | 'multi-file-output' // 文件清单概要
+  | 'change-list' // 变更清单
+  | 'intent-info' // 意图识别结果
+  | 'token-stats' // token 统计
+  | 'empty-changes' // 空变更提示
   | 'generic'; // 通用 JSON
 
 /** 检测 JSON 结构类型 */
@@ -26,6 +32,58 @@ function detectJsonStructure(json: unknown): JsonStructureType {
   }
 
   const obj = json as Record<string, unknown>;
+
+  // 空变更提示：changes 为空数组
+  if (
+    Array.isArray(obj.changes) &&
+    obj.changes.length === 0 &&
+    typeof obj.summary === 'string'
+  ) {
+    return 'empty-changes';
+  }
+
+  // Token 统计：有 inputTokens 或 outputTokens
+  if (
+    (typeof obj.inputTokens === 'number' || typeof obj.outputTokens === 'number') &&
+    Object.keys(obj).length <= 2
+  ) {
+    return 'token-stats';
+  }
+
+  // 意图识别：有 type 和 confidence
+  if (
+    typeof obj.type === 'string' &&
+    typeof obj.confidence === 'number' &&
+    ['create', 'modify', 'analyze', 'diagnose', 'conversation'].includes(obj.type)
+  ) {
+    return 'intent-info';
+  }
+
+  // 变更清单：有 changes 数组且非空
+  if (
+    Array.isArray(obj.changes) &&
+    obj.changes.length > 0 &&
+    obj.changes[0] &&
+    typeof obj.changes[0] === 'object' &&
+    'file' in (obj.changes[0] as Record<string, unknown>)
+  ) {
+    return 'change-list';
+  }
+
+  // 文件清单：有 files 数组
+  if (
+    Array.isArray(obj.files) &&
+    obj.files.length > 0 &&
+    typeof obj.files[0] === 'object' &&
+    'path' in (obj.files[0] as Record<string, unknown>)
+  ) {
+    return 'multi-file-output';
+  }
+
+  // 错误诊断报告: 有 problem 和 fixSuggestions
+  if (typeof obj.problem === 'string' && Array.isArray(obj.fixSuggestions)) {
+    return 'error-report';
+  }
 
   // 审查报告: 必须有 pass 和 checks 数组
   if (
@@ -374,6 +432,463 @@ function ReviewReportCard({ data }: { data: ReviewReport }) {
   );
 }
 
+/** 错误诊断报告数据 */
+interface ErrorReport {
+  problem: string;
+  rootCause?: string;
+  affectedFiles?: string[];
+  fixSuggestions: string[];
+}
+
+/** 错误诊断报告卡片组件 */
+function ErrorReportCard({ data }: { data: ErrorReport }) {
+  const [expandedSuggestions, setExpandedSuggestions] = useState<Set<number>>(new Set());
+
+  const toggleSuggestion = (index: number) => {
+    setExpandedSuggestions(prev => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  };
+
+  return (
+    <div className="my-4 rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] overflow-hidden">
+      {/* 问题卡片 */}
+      <div className="p-4 bg-amber-500/5 border-b border-amber-500/20">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center">
+            <Icon icon="lucide:alert-triangle" width={20} height={20} className="text-amber-600" />
+          </div>
+          <h3 className="text-[14px] font-semibold text-amber-700">发现问题</h3>
+        </div>
+        <p className="text-[13px] text-[var(--color-text-primary)] leading-relaxed pl-[52px]">
+          {data.problem}
+        </p>
+      </div>
+
+      {/* 原因分析 */}
+      {data.rootCause && (
+        <div className="p-4 border-b border-[var(--color-border-default)]">
+          <div className="flex items-center gap-2 mb-2">
+            <Icon icon="lucide:clipboard-list" width={14} height={14} className="text-[var(--color-text-secondary)]" />
+            <span className="text-[12px] font-medium text-[var(--color-text-secondary)]">原因分析</span>
+          </div>
+          <p className="text-[13px] text-[var(--color-text-primary)] leading-relaxed pl-6">
+            {data.rootCause}
+          </p>
+        </div>
+      )}
+
+      {/* 涉及文件 */}
+      {data.affectedFiles && data.affectedFiles.length > 0 && (
+        <div className="p-4 border-b border-[var(--color-border-default)] bg-[var(--color-bg-base)]">
+          <div className="flex items-center gap-2 mb-3">
+            <Icon icon="lucide:folder" width={14} height={14} className="text-[var(--color-text-secondary)]" />
+            <span className="text-[12px] font-medium text-[var(--color-text-secondary)]">涉及文件</span>
+          </div>
+          <div className="flex flex-wrap gap-2 pl-6">
+            {data.affectedFiles.map((file, i) => (
+              <span
+                key={i}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-500/10 text-slate-600 border border-slate-500/20 text-[12px] font-mono"
+              >
+                <Icon icon="lucide:file-text" width={12} height={12} />
+                {file}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 建议操作 */}
+      <div className="p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Icon icon="lucide:sparkles" width={14} height={14} className="text-[var(--color-accent)]" />
+          <span className="text-[12px] font-medium text-[var(--color-text-primary)]">建议操作</span>
+          <span className="text-[11px] text-[var(--color-text-tertiary)]">
+            ({data.fixSuggestions.length} 项)
+          </span>
+        </div>
+        <div className="space-y-2 pl-6">
+          {data.fixSuggestions.map((suggestion, i) => (
+            <div
+              key={i}
+              className="group p-2.5 rounded-lg bg-[var(--color-bg-base)] border border-[var(--color-border-default)] hover:border-[var(--color-accent)]/30 transition-colors cursor-pointer"
+              onClick={() => toggleSuggestion(i)}
+            >
+              <div className="flex items-start gap-2">
+                <span className="w-5 h-5 rounded bg-[var(--color-accent)]/10 flex items-center justify-center text-[11px] font-medium text-[var(--color-accent)] shrink-0 mt-0.5">
+                  {i + 1}
+                </span>
+                <p className="text-[12px] text-[var(--color-text-primary)] leading-relaxed flex-1">
+                  {suggestion}
+                </p>
+                <Icon
+                  icon={expandedSuggestions.has(i) ? 'lucide:chevron-up' : 'lucide:chevron-down'}
+                  width={14}
+                  height={14}
+                  className="text-[var(--color-text-tertiary)] shrink-0 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 文件项数据 */
+interface FileItem {
+  path: string;
+  language?: string;
+}
+
+/** 文件清单概要数据 */
+interface MultiFileOutput {
+  files: FileItem[];
+}
+
+/** 语言标签颜色 */
+const LANGUAGE_COLORS: Record<string, string> = {
+  html: 'bg-orange-500/10 text-orange-600 border-orange-500/20',
+  css: 'bg-blue-500/10 text-blue-600 border-blue-500/20',
+  javascript: 'bg-yellow-500/10 text-yellow-700 border-yellow-500/20',
+  js: 'bg-yellow-500/10 text-yellow-700 border-yellow-500/20',
+  typescript: 'bg-blue-500/10 text-blue-600 border-blue-500/20',
+  ts: 'bg-blue-500/10 text-blue-600 border-blue-500/20',
+  json: 'bg-green-500/10 text-green-600 border-green-500/20',
+  default: 'bg-slate-500/10 text-slate-600 border-slate-500/20',
+};
+
+/** 文件清单概要卡片 */
+function MultiFileOutputCard({ data }: { data: MultiFileOutput }) {
+  return (
+    <div className="my-4 rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] overflow-hidden">
+      {/* 头部 */}
+      <div className="p-4 border-b border-[var(--color-border-default)]">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-[var(--color-accent)]/10 flex items-center justify-center">
+            <Icon icon="lucide:box" width={20} height={20} className="text-[var(--color-accent)]" />
+          </div>
+          <div>
+            <h3 className="text-[14px] font-semibold text-[var(--color-text-primary)]">
+              生成的代码
+            </h3>
+            <p className="text-[12px] text-[var(--color-text-secondary)]">
+              共 {data.files.length} 个文件
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* 文件列表 */}
+      <div className="p-3">
+        <div className="grid gap-2">
+          {data.files.map((file, i) => {
+            const fileName = file.path.split('/').pop() || file.path;
+            const isEntry = fileName === 'index.html';
+            const langColor = LANGUAGE_COLORS[file.language || 'default'] || LANGUAGE_COLORS.default;
+
+            return (
+              <div
+                key={i}
+                className="flex items-center justify-between p-2.5 rounded-lg bg-[var(--color-bg-base)] border border-[var(--color-border-default)] hover:border-[var(--color-accent)]/30 transition-colors"
+              >
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <Icon icon="lucide:file-code-2" width={16} height={16} className="text-[var(--color-text-secondary)] shrink-0" />
+                  <span className="text-[13px] text-[var(--color-text-primary)] truncate font-mono">
+                    {file.path}
+                  </span>
+                  {isEntry && (
+                    <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[var(--color-accent)]/10 text-[var(--color-accent)] border border-[var(--color-accent)]/20">
+                      入口文件
+                    </span>
+                  )}
+                </div>
+                {file.language && (
+                  <span className={`shrink-0 px-2 py-0.5 rounded text-[11px] font-medium border ${langColor}`}>
+                    {file.language}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 变更类型 */
+type ChangeType = 'replace' | 'insert' | 'delete';
+
+/** 变更项 */
+interface ChangeEdit {
+  line: number;
+  type: ChangeType;
+}
+
+/** 文件变更 */
+interface FileChange {
+  file: string;
+  edits: ChangeEdit[];
+}
+
+/** 变更清单数据 */
+interface ChangeList {
+  changes: FileChange[];
+  summary?: string;
+}
+
+/** 变更类型样式 */
+const CHANGE_TYPE_STYLES: Record<ChangeType, { icon: string; label: string; color: string; bg: string }> = {
+  replace: {
+    icon: 'lucide:check-circle',
+    label: '修改',
+    color: 'text-emerald-600',
+    bg: 'bg-emerald-500/10',
+  },
+  insert: {
+    icon: 'lucide:plus',
+    label: '新增',
+    color: 'text-blue-600',
+    bg: 'bg-blue-500/10',
+  },
+  delete: {
+    icon: 'lucide:x',
+    label: '删除',
+    color: 'text-red-600',
+    bg: 'bg-red-500/10',
+  },
+};
+
+/** 变更清单卡片 */
+function ChangeListCard({ data }: { data: ChangeList }) {
+  const totalEdits = data.changes.reduce((sum, change) => sum + change.edits.length, 0);
+
+  return (
+    <div className="my-4 rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] overflow-hidden">
+      {/* 头部 */}
+      <div className="p-4 border-b border-[var(--color-border-default)]">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="w-10 h-10 rounded-lg bg-[var(--color-accent)]/10 flex items-center justify-center">
+            <Icon icon="lucide:hammer" width={20} height={20} className="text-[var(--color-accent)]" />
+          </div>
+          <div>
+            <h3 className="text-[14px] font-semibold text-[var(--color-text-primary)]">
+              变更详情
+            </h3>
+            <p className="text-[12px] text-[var(--color-text-secondary)]">
+              {data.changes.length} 个文件，共 {totalEdits} 处变更
+            </p>
+          </div>
+        </div>
+        {data.summary && (
+          <div className="mt-3 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20">
+            <p className="text-[13px] text-amber-700">
+              {data.summary}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* 变更列表 */}
+      <div className="p-3">
+        {data.changes.map((change, i) => {
+          const editsByType = change.edits.reduce((acc, edit) => {
+            if (!acc[edit.type]) acc[edit.type] = [];
+            acc[edit.type].push(edit);
+            return acc;
+          }, {} as Record<ChangeType, ChangeEdit[]>);
+
+          return (
+            <div key={i} className="mb-3 last:mb-0">
+              <div className="flex items-center gap-2 mb-2 px-1">
+                <Icon icon="lucide:file-text" width={14} height={14} className="text-[var(--color-text-secondary)]" />
+                <span className="text-[13px] font-medium text-[var(--color-text-primary)] font-mono">
+                  {change.file}
+                </span>
+                <span className="text-[11px] text-[var(--color-text-tertiary)]">
+                  ({change.edits.length} 处)
+                </span>
+              </div>
+              <div className="pl-6 space-y-1">
+                {Object.entries(editsByType).map(([type, edits]) => {
+                  const style = CHANGE_TYPE_STYLES[type as ChangeType];
+                  return (
+                    <div key={type} className="flex items-center gap-2">
+                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] ${style.bg} ${style.color}`}>
+                        <Icon icon={style.icon} width={12} height={12} />
+                        {style.label}
+                      </span>
+                      <span className="text-[12px] text-[var(--color-text-secondary)]">
+                        行 {edits.map(e => e.line).join(', ')}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** 意图类型映射 */
+const INTENT_TYPE_MAP: Record<string, string> = {
+  create: '创建应用',
+  modify: '修改迭代',
+  analyze: '功能分析',
+  diagnose: '问题诊断',
+  conversation: '对话交流',
+};
+
+/** 意图识别数据 */
+interface IntentInfo {
+  type: string;
+  confidence: number;
+  reasoning?: string;
+}
+
+/** 意图识别结果卡片 */
+function IntentInfoCard({ data }: { data: IntentInfo }) {
+  const intentLabel = INTENT_TYPE_MAP[data.type] || data.type;
+  const confidencePercent = Math.round(data.confidence * 100);
+
+  return (
+    <div className="my-4 p-3 rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)]">
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 rounded-lg bg-[var(--color-accent)]/10 flex items-center justify-center">
+          <Icon icon="lucide:lightbulb" width={16} height={16} className="text-[var(--color-accent)]" />
+        </div>
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[13px] font-medium text-[var(--color-text-primary)]">
+              {intentLabel}
+            </span>
+            <span className="text-[12px] text-[var(--color-text-secondary)]">
+              置信度 {confidencePercent}%
+            </span>
+          </div>
+          <div className="h-1.5 bg-[var(--color-bg-inset)] rounded-full overflow-hidden">
+            <div
+              className="h-full bg-[var(--color-accent)] rounded-full transition-all"
+              style={{ width: `${confidencePercent}%` }}
+            />
+          </div>
+        </div>
+      </div>
+      {data.reasoning && (
+        <p className="mt-2 text-[12px] text-[var(--color-text-secondary)] pl-11">
+          {data.reasoning}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Token 统计数据 */
+interface TokenStats {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/** Token 统计卡片 */
+function TokenStatsCard({ data }: { data: TokenStats }) {
+  const total = data.inputTokens + data.outputTokens;
+
+  return (
+    <div className="my-4 p-3 rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)]">
+      <div className="flex items-center gap-3 mb-3">
+        <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center">
+          <Icon icon="lucide:sparkles" width={16} height={16} className="text-amber-600" />
+        </div>
+        <span className="text-[13px] font-medium text-[var(--color-text-primary)]">
+          本次消耗
+        </span>
+      </div>
+      <div className="flex items-center gap-4 pl-11">
+        <div className="flex items-baseline gap-1">
+          <span className="text-[12px] text-[var(--color-text-secondary)]">输入</span>
+          <span className="text-[14px] font-semibold text-[var(--color-text-primary)]">
+            {data.inputTokens.toLocaleString()}
+          </span>
+        </div>
+        <div className="w-px h-4 bg-[var(--color-border-default)]" />
+        <div className="flex items-baseline gap-1">
+          <span className="text-[12px] text-[var(--color-text-secondary)]">输出</span>
+          <span className="text-[14px] font-semibold text-[var(--color-text-primary)]">
+            {data.outputTokens.toLocaleString()}
+          </span>
+        </div>
+        <div className="w-px h-4 bg-[var(--color-border-default)]" />
+        <div className="flex items-baseline gap-1">
+          <span className="text-[12px] text-[var(--color-text-secondary)]">合计</span>
+          <span className="text-[14px] font-semibold text-[var(--color-accent)]">
+            {total.toLocaleString()}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 空变更提示数据 */
+interface EmptyChanges {
+  changes: [];
+  summary: string;
+}
+
+/** 空变更提示卡片 */
+function EmptyChangesCard({ data }: { data: EmptyChanges }) {
+  return (
+    <div className="my-4 rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] overflow-hidden">
+      <div className="p-4">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-lg bg-sky-500/10 flex items-center justify-center shrink-0">
+            <Icon icon="lucide:info" width={20} height={20} className="text-sky-600" />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-[14px] font-semibold text-[var(--color-text-primary)] mb-2">
+              需要更多信息
+            </h3>
+            <p className="text-[13px] text-[var(--color-text-secondary)] leading-relaxed mb-3">
+              {data.summary}
+            </p>
+            <div className="p-3 rounded-lg bg-[var(--color-bg-base)] border border-[var(--color-border-default)]">
+              <p className="text-[12px] text-[var(--color-text-secondary)] mb-2">
+                建议：
+              </p>
+              <ul className="space-y-1 text-[12px] text-[var(--color-text-secondary)]">
+                <li className="flex items-start gap-2">
+                  <Icon icon="lucide:check" width={14} height={14} className="text-[var(--color-accent)] shrink-0 mt-0.5" />
+                  <span>提供更详细的需求描述</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Icon icon="lucide:check" width={14} height={14} className="text-[var(--color-accent)] shrink-0 mt-0.5" />
+                  <span>说明具体的修改目标或期望效果</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Icon icon="lucide:check" width={14} height={14} className="text-[var(--color-accent)] shrink-0 mt-0.5" />
+                  <span>重新描述您的需求</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** 转义 HTML 实体 */
 function escapeHtml(code: string): string {
   return code
@@ -488,6 +1003,24 @@ export function JsonStructureRenderer({ jsonString, isStreaming = false }: JsonS
 
   // 根据结构类型渲染对应组件
   switch (structureType) {
+    case 'empty-changes':
+      return <EmptyChangesCard data={parsedJson as EmptyChanges} />;
+
+    case 'token-stats':
+      return <TokenStatsCard data={parsedJson as TokenStats} />;
+
+    case 'intent-info':
+      return <IntentInfoCard data={parsedJson as IntentInfo} />;
+
+    case 'change-list':
+      return <ChangeListCard data={parsedJson as ChangeList} />;
+
+    case 'multi-file-output':
+      return <MultiFileOutputCard data={parsedJson as MultiFileOutput} />;
+
+    case 'error-report':
+      return <ErrorReportCard data={parsedJson as ErrorReport} />;
+
     case 'review-report':
       return <ReviewReportCard data={parsedJson as ReviewReport} />;
 

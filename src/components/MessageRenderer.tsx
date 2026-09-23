@@ -2,6 +2,7 @@
  * 消息渲染组件。
  * 支持 Markdown 渲染、代码块语法高亮、复制代码按钮。
  * 支持 JSON 结构化渲染：分析结果卡片、功能列表、交互列表。
+ * 支持大文本自动截断（F-004）。
  */
 import { useState, useCallback, useMemo } from 'react';
 import { Icon } from '@iconify/react';
@@ -14,12 +15,114 @@ interface MessageRendererProps {
   isStreaming?: boolean;
 }
 
+/** 截断阈值（字符数） */
+const TRUNCATE_THRESHOLD = 500;
+
 /** 转义 HTML 实体 */
 function escapeHtml(code: string): string {
   return code
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+/**
+ * 截断消息文本
+ * @param text 原始文本
+ * @returns 截断结果：预览文本、完整文本、是否截断标志
+ */
+function truncateMessage(text: string): { preview: string; full: string; truncated: boolean } {
+  // 先移除代码块，计算纯文本长度
+  const codeBlockRegex = /```[\s\S]*?```/g;
+  let textWithoutCode = text.replace(codeBlockRegex, '');
+  textWithoutCode = textWithoutCode.replace(/`[^`]+`/g, ''); // 移除行内代码
+
+  // 纯文本长度不超过阈值，不截断
+  if (textWithoutCode.length <= TRUNCATE_THRESHOLD) {
+    return { preview: text, full: text, truncated: false };
+  }
+
+  // 截断纯文本部分，保留代码块完整
+  // 找到代码块的位置
+  const codeBlocks: { start: number; end: number; content: string }[] = [];
+  let match;
+  let lastIndex = 0;
+  const regex = /```[\s\S]*?```/g;
+  while ((match = regex.exec(text)) !== null) {
+    codeBlocks.push({
+      start: match.index,
+      end: match.index + match[0].length,
+      content: match[0],
+    });
+  }
+
+  // 按代码块分割文本
+  const parts: string[] = [];
+  lastIndex = 0;
+  for (const block of codeBlocks) {
+    // 添加代码块前的文本
+    if (block.start > lastIndex) {
+      parts.push(text.slice(lastIndex, block.start));
+    }
+    // 添加代码块标记（保留完整）
+    parts.push(block.content);
+    lastIndex = block.end;
+  }
+  // 添加最后一段文本
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  // 如果没有代码块，直接截断
+  if (codeBlocks.length === 0) {
+    // 在单词边界截断（优先在句子结束处）
+    let truncateIndex = TRUNCATE_THRESHOLD;
+
+    // 向后查找句子结束符
+    const nextSentenceEnd = text.indexOf('。', TRUNCATE_THRESHOLD);
+    const nextPeriod = text.indexOf('.', TRUNCATE_THRESHOLD);
+    const nextNewline = text.indexOf('\n', TRUNCATE_THRESHOLD);
+
+    const candidates = [nextSentenceEnd, nextPeriod, nextNewline].filter(i => i > 0 && i < TRUNCATE_THRESHOLD + 100);
+    if (candidates.length > 0) {
+      truncateIndex = Math.min(...candidates) + 1;
+    }
+
+    const preview = text.slice(0, truncateIndex);
+    return { preview, full: text, truncated: true };
+  }
+
+  // 有代码块：累计预览长度，在合适位置截断
+  let previewLength = 0;
+  const previewParts: string[] = [];
+
+  for (const part of parts) {
+    // 判断是否为代码块
+    const isCodeBlock = part.startsWith('```');
+
+    if (isCodeBlock) {
+      // 代码块不计入长度，直接添加
+      previewParts.push(part);
+    } else {
+      // 纯文本部分
+      const remaining = TRUNCATE_THRESHOLD - previewLength;
+      if (remaining <= 0) break;
+
+      if (part.length <= remaining) {
+        previewParts.push(part);
+        previewLength += part.length;
+      } else {
+        // 截断这部分文本
+        const truncatedPart = part.slice(0, remaining);
+        previewParts.push(truncatedPart);
+        previewLength += truncatedPart.length;
+        break;
+      }
+    }
+  }
+
+  const preview = previewParts.join('');
+  return { preview, full: text, truncated: true };
 }
 
 /** 检测文本是否为纯 JSON（可能是 LLM 直接输出的分析结果） */
@@ -253,11 +356,33 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
 }
 
 export default function MessageRenderer({ content, isStreaming }: MessageRendererProps) {
+  const [expanded, setExpanded] = useState(false);
+
+  // 流式输出中不截断
+  const { preview, full, truncated } = useMemo(() => {
+    if (isStreaming) {
+      return { preview: content, full: content, truncated: false };
+    }
+    return truncateMessage(content);
+  }, [content, isStreaming]);
+
+  const displayContent = expanded ? full : preview;
+
   return (
     <div className="text-[14px] leading-[1.65] text-[var(--color-text-primary)]">
-      {parseMarkdown(content)}
+      {parseMarkdown(displayContent)}
       {isStreaming && (
         <span className="inline-block w-2 h-4 ml-1 bg-[var(--color-accent)] animate-pulse" />
+      )}
+      {/* 展开/收起按钮 */}
+      {truncated && !isStreaming && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="mt-2 flex items-center gap-1 px-2 py-1 rounded text-[12px] text-[var(--color-accent)] hover:bg-[var(--color-accent)]/10 transition-colors"
+        >
+          <Icon icon={expanded ? 'lucide:chevron-up' : 'lucide:chevron-down'} width={14} height={14} />
+          {expanded ? '收起' : '查看全部'}
+        </button>
       )}
     </div>
   );

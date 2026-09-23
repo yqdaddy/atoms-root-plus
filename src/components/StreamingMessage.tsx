@@ -15,6 +15,13 @@ import { Icon } from '@iconify/react';
 import ReactMarkdown from 'react-markdown';
 import type { GenerationStatus } from '../services/ai/types';
 import JsonStructureRenderer from './JsonStructureRenderer';
+import {
+  calculateProgress,
+  getEstimateByIntent,
+  formatElapsedTime,
+  formatEstimateRange,
+  type ProgressResult,
+} from '../lib/progressEstimator';
 
 interface StreamingMessageProps {
   /** 流式文本内容 */
@@ -23,6 +30,10 @@ interface StreamingMessageProps {
   stage: GenerationStatus;
   /** 当前正在生成的文件路径（可选） */
   activeFilePath?: string | null;
+  /** 生成开始时间戳（可选，用于计算进度） */
+  startTime?: number | null;
+  /** 意图类型（可选，用于预估时间） */
+  intentType?: string | undefined;
 }
 
 /** 阶段到文案和图标的映射 */
@@ -59,16 +70,6 @@ const STAGE_CONFIG: Record<GenerationStatus, { label: string; icon: string; desc
   },
 };
 
-/** 格式化已用时间 */
-function formatElapsedTime(seconds: number): string {
-  if (seconds < 60) {
-    return `${seconds}s`;
-  }
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${minutes}m ${secs}s`;
-}
-
 /** 骨架屏加载动画组件 */
 function SkeletonLoader() {
   return (
@@ -85,22 +86,27 @@ function SkeletonLoader() {
 function ProgressIndicator({
   stage,
   elapsedSeconds,
+  progress,
   isCollapsed = false,
   onToggleCollapse,
 }: {
   stage: GenerationStatus;
   elapsedSeconds: number;
+  progress?: ProgressResult | undefined;
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;
 }) {
   const config = STAGE_CONFIG[stage] ?? STAGE_CONFIG.idle;
 
-  // 定义阶段顺序
-  const stageOrder: GenerationStatus[] = ['analyzing', 'generating', 'reviewing'];
-  const currentIndex = stageOrder.indexOf(stage);
-
   // 判断是否已完成
   const isCompleted = stage === 'done';
+
+  // 判断是否正在生成（用于呼吸动画）
+  const isActive = stage !== 'done' && stage !== 'error';
+
+  // 获取进度百分比（从 progress 计算或使用默认值）
+  const progressPercent = progress?.percent ?? 0;
+  const estimateRange = progress?.estimateRange;
 
   // 收起状态：显示简要信息
   if (isCollapsed && isCompleted) {
@@ -113,7 +119,7 @@ function ProgressIndicator({
           <Icon icon="lucide:check-circle" width={14} height={14} className="text-green-500" />
         </div>
         <span className="text-[12px] text-[var(--color-text-secondary)] flex-1 text-left">
-          生成完成，耗时 {formatElapsedTime(elapsedSeconds)}
+          生成完成，耗时 {formatElapsedTime(elapsedSeconds * 1000)}
         </span>
         <Icon
           icon="lucide:chevron-down"
@@ -145,9 +151,16 @@ function ProgressIndicator({
             <span className="text-[13px] font-medium text-[var(--color-text-primary)]">
               {config.label}
             </span>
-            <span className="text-[12px] text-[var(--color-text-tertiary)] tabular-nums">
-              {formatElapsedTime(elapsedSeconds)}
-            </span>
+            <div className="flex items-center gap-2 text-[12px] text-[var(--color-text-tertiary)] tabular-nums">
+              {/* 显示运行时钟和预估时间范围 */}
+              <span>{formatElapsedTime(elapsedSeconds * 1000)}</span>
+              {estimateRange && !isCompleted && (
+                <>
+                  <span className="text-[var(--color-text-tertiary)]">/</span>
+                  <span>{formatEstimateRange(estimateRange.min, estimateRange.max)}</span>
+                </>
+              )}
+            </div>
           </div>
           <p className="text-[12px] text-[var(--color-text-tertiary)]">
             {config.description}
@@ -170,21 +183,26 @@ function ProgressIndicator({
         )}
       </div>
 
-      {/* 进度条 */}
-      <div className="flex gap-1.5">
-        {stageOrder.map((s, i) => (
-          <div
-            key={s}
-            className={`h-1 flex-1 rounded-full transition-colors ${
-              s === stage
-                ? 'bg-[var(--color-accent)]'
-                : i < currentIndex
-                  ? 'bg-green-500'
-                  : 'bg-[var(--color-border-default)]'
-            }`}
-          />
-        ))}
+      {/* 进度条：基于进度百分比 */}
+      <div className="relative h-1.5 bg-[var(--color-border-default)] rounded-full overflow-hidden">
+        <div
+          className="absolute inset-y-0 left-0 bg-[var(--color-accent)] rounded-full transition-all duration-300"
+          style={{ width: `${progressPercent}%` }}
+        >
+          {/* 进度条呼吸动画：微光流动效果 */}
+          {isActive && !isCompleted && (
+            <span aria-hidden className="tp-run-shine" />
+          )}
+        </div>
       </div>
+
+      {/* 显示进度百分比 */}
+      {!isCompleted && (
+        <div className="flex items-center justify-between text-[11px] text-[var(--color-text-tertiary)]">
+          <span>进度</span>
+          <span className="tabular-nums">{progressPercent}%</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -278,26 +296,18 @@ function StreamingCodeBlock({ language, code, isStreaming }: { language: string;
   );
 }
 
-export function StreamingMessage({ content, stage, activeFilePath }: StreamingMessageProps) {
+export function StreamingMessage({ content, stage, activeFilePath, startTime, intentType }: StreamingMessageProps) {
   const config = STAGE_CONFIG[stage] ?? STAGE_CONFIG.idle;
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // 检测是否为纯 JSON（LLM 直接输出的分析结果）
-  const isPureJson = (text: string): boolean => {
-    const trimmed = text.trim();
-    if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
-      return false;
-    }
-    try {
-      JSON.parse(trimmed);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const shouldRenderAsJson = content && isPureJson(content);
+  // 计算进度
+  const progress = useMemo((): ProgressResult | undefined => {
+    if (!startTime) return undefined;
+    const elapsedMs = Date.now() - startTime;
+    const estimateMs = getEstimateByIntent(intentType);
+    return calculateProgress(elapsedMs, estimateMs);
+  }, [startTime, intentType]);
 
   // 计时器：生成过程中持续计时
   useEffect(() => {
@@ -321,6 +331,22 @@ export function StreamingMessage({ content, stage, activeFilePath }: StreamingMe
       setIsExpanded(true);
     }
   }, [stage]);
+
+  // 检测是否为纯 JSON（LLM 直接输出的分析结果）
+  const isPureJson = (text: string): boolean => {
+    const trimmed = text.trim();
+    if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+      return false;
+    }
+    try {
+      JSON.parse(trimmed);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const shouldRenderAsJson = content && isPureJson(content);
 
   // 判断是否显示进度指示器（内容为空或刚开始生成时）
   const showProgressIndicator = !content || content.length < 50;
@@ -390,7 +416,7 @@ export function StreamingMessage({ content, stage, activeFilePath }: StreamingMe
         {/* 进度指示器：生成中或完成后都可显示 */}
         {showProgressIndicator && isActive && (
           <div className="mb-4 p-4 bg-[var(--color-bg-base)] border border-[var(--color-border-default)] rounded-xl">
-            <ProgressIndicator stage={stage} elapsedSeconds={elapsedSeconds} />
+            <ProgressIndicator stage={stage} elapsedSeconds={elapsedSeconds} progress={progress} />
           </div>
         )}
 
@@ -400,6 +426,7 @@ export function StreamingMessage({ content, stage, activeFilePath }: StreamingMe
             <ProgressIndicator
               stage={stage}
               elapsedSeconds={elapsedSeconds}
+              progress={progress}
               isCollapsed={!isExpanded}
               onToggleCollapse={() => setIsExpanded(!isExpanded)}
             />
