@@ -858,7 +858,7 @@ export async function streamChatCompletionWithUsage(
 
   const baseUrl = (process.env.LLM_BASE_URL || 'https://api.agnes-ai.cn/v1').replace(/\/+$/, '');
   const model = process.env.LLM_MODEL || 'agnes-3.0-flash';
-  const timeout = callOptions?.timeout ?? 120000; // 默认 2 分钟总超时
+  const timeout = callOptions?.timeout ?? 300000; // 默认 5 分钟总超时
 
   const requestBody: Record<string, unknown> = {
     model: callOptions?.model || model,
@@ -985,7 +985,7 @@ export async function streamChatCompletionWithUsage(
       if (error instanceof Error && error.name === 'AbortError') {
         // 检查是否是超时导致的 abort
         if (timeoutController.signal.aborted && !abortSignal?.aborted) {
-          throw new Error('LLM 调用超时（超过 120 秒），请稍后重试');
+          throw new Error('LLM 调用超时（超过 300 秒），请稍后重试');
         }
         throw error;
       }
