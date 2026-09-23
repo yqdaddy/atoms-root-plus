@@ -27,7 +27,7 @@ import eyeOff from '../../assets/icons/lucide/eye-off.svg?raw';
 import file from '../../assets/icons/lucide/file.svg?raw';
 import fileCode from '../../assets/icons/lucide/file-code.svg?raw';
 import fileText from '../../assets/icons/lucide/file-text.svg?raw';
-import folder from '../../assets/icons/lucide/folder.svg?raw';
+import folderPlus from '../../assets/icons/lucide/folder-plus.svg?raw';
 import gamepad2 from '../../assets/icons/lucide/gamepad-2.svg?raw';
 import gitCompare from '../../assets/icons/lucide/git-compare.svg?raw';
 import hammer from '../../assets/icons/lucide/hammer.svg?raw';
@@ -99,7 +99,7 @@ const LOCAL_ICONS: Record<string, string> = {
   file,
   'file-code': fileCode,
   'file-text': fileText,
-  folder,
+  folderPlus,
   'gamepad-2': gamepad2,
   'git-compare': gitCompare,
   hammer,

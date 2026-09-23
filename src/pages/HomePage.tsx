@@ -378,8 +378,8 @@ export default function HomePage() {
   const wasNavigatedRef = useRef<boolean | null>(null);
   if (wasNavigatedRef.current === null) {
     // 只在首次渲染时判断一次
-    wasNavigatedRef.current = sessionStorage.getItem('atoms_nav_to_workspace') === 'true';
-    sessionStorage.removeItem('atoms_nav_to_workspace');
+    wasNavigatedRef.current = sessionStorage.getItem('litpp_nav_to_workspace') === 'true';
+    sessionStorage.removeItem('litpp_nav_to_workspace');
     if (!wasNavigatedRef.current) {
       useProjectStore.getState().clearCurrentProject();
     }
@@ -388,6 +388,9 @@ export default function HomePage() {
   // 当前项目的 HTML
   const currentProject = useProjectStore((state) => state.currentProject);
   const generatedHtml = currentProject?.files[ENTRY_FILE_PATH]?.content ?? '';
+
+  // 项目总数（用于项目列表入口的数字徽章）
+  const projectCount = useProjectStore((state) => state.summaries.length);
 
   // 当前选中的文件路径（用于文件树高亮和代码查看）
   const [activeFilePath, setActiveFilePath] = useState<string | null>(ENTRY_FILE_PATH);
@@ -1287,16 +1290,34 @@ export default function HomePage() {
       {/* Header */}
       <header className="h-14 flex items-center justify-between px-4 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
         <div className="flex items-center gap-3">
+          {/* 品牌标识：点击回到首页 */}
+          <Link
+            to="/"
+            className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-[var(--color-bg-base)] transition-all duration-[140ms] group"
+            title="返回首页"
+          >
+            <Icon icon="lucide:home" width={18} height={18} className="text-[var(--color-text-secondary)] group-hover:text-[var(--color-text-primary)] transition-colors" />
+            <span className="text-[15px] font-semibold text-[var(--color-text-primary)] group-hover:text-[var(--color-text-primary)] transition-colors">
+              码孖造
+            </span>
+          </Link>
+          {currentProject && (
+            <span className="text-[12px] text-[var(--color-text-tertiary)]">/ {currentProject.name}</span>
+          )}
+          {/* 项目列表入口：带文字标签和数量徽章 */}
           <button
             onClick={() => navigate('/projects')}
-            className="flex items-center gap-2 px-2 py-1 rounded-lg text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-base)] transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[13px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-base)] transition-all duration-[140ms] ml-2"
+            title={`查看全部项目 (${projectCount} 个)`}
           >
-            <Icon icon="lucide:sidebar" width={18} height={18} />
+            <Icon icon="lucide:folder-search" width={20} height={20} />
+            <span className="hidden sm:inline font-medium">我的项目</span>
+            {projectCount > 0 && (
+              <span className="flex items-center justify-center min-w-[22px] h-5 px-1.5 rounded-full bg-[var(--color-accent)]/10 text-[11px] font-medium text-[var(--color-accent)] tabular-nums">
+                {projectCount}
+              </span>
+            )}
           </button>
-          <h1 className="text-lg font-semibold text-[var(--color-text-primary)] font-[var(--font-display)]">码孖造</h1>
-          {currentProject && (
-            <span className="text-[12px] text-[var(--color-text-tertiary)]">{currentProject.name}</span>
-          )}
         </div>
         <div className="flex items-center gap-2">
           {/* 返回首页（落地页）入口 */}
