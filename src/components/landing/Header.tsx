@@ -17,7 +17,7 @@ export default function Header() {
           to="/"
           className="font-display text-xl font-semibold text-[var(--color-text-primary)] hover:text-[var(--color-accent)] transition-colors duration-[var(--ease-standard)]"
         >
-          Atoms
+          码孖造
         </Link>
 
         {/* 桌面导航 */}

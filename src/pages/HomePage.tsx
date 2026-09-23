@@ -1293,7 +1293,7 @@ export default function HomePage() {
           >
             <Icon icon="lucide:sidebar" width={18} height={18} />
           </button>
-          <h1 className="text-lg font-semibold text-[var(--color-text-primary)] font-[var(--font-display)]">Atoms</h1>
+          <h1 className="text-lg font-semibold text-[var(--color-text-primary)] font-[var(--font-display)]">码孖造</h1>
           {currentProject && (
             <span className="text-[12px] text-[var(--color-text-tertiary)]">{currentProject.name}</span>
           )}
@@ -1329,7 +1329,7 @@ export default function HomePage() {
                 <div className="w-12 h-12 rounded-full bg-[var(--color-accent)]/10 flex items-center justify-center mx-auto mb-4">
                   <Icon icon="lucide:sparkles" width={24} height={24} className="text-[var(--color-accent)]" />
                 </div>
-                <h2 className="text-xl font-semibold text-[var(--color-text-primary)] mb-2">你好，我是 Atoms</h2>
+                <h2 className="text-xl font-semibold text-[var(--color-text-primary)] mb-2">你好，我是码孖造</h2>
                 <p className="text-[14px] text-[var(--color-text-secondary)] max-w-md mx-auto">
                   描述你想做的应用，我会帮你生成代码并实时预览。可以尝试下方的模板快速开始。
                 </p>

@@ -34,7 +34,7 @@ export default function Features() {
     <section id="features" className="bg-[var(--color-bg-base)] py-16 lg:py-24">
       <div className="mx-auto max-w-7xl px-6 lg:px-6">
         <h2 className="font-display text-2xl font-semibold text-[var(--color-text-primary)] lg:text-3xl">
-          为什么选择 Atoms
+          为什么选择码孖造
         </h2>
 
         {/* 一大两小非对称布局 */}

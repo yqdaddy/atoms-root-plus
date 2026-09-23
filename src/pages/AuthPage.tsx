@@ -207,7 +207,7 @@ export default function AuthPage({ mode }: AuthPageProps) {
       {/* 品牌 */}
       <div className="absolute top-6 left-6">
         <h1 className="text-[var(--text-title-lg)] font-semibold text-[var(--color-text-primary)] font-[var(--font-display)]">
-          Atoms
+          码孖造
         </h1>
       </div>
 
