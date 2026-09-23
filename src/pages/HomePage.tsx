@@ -360,6 +360,9 @@ export default function HomePage() {
   const [isDragging, setIsDragging] = useState(false);
   // 命令下拉是否可见
   const [showCommandDropdown, setShowCommandDropdown] = useState(false);
+  // 重命名模态框
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
   const navigate = useNavigate();
 
   // F-001: 首页登录守卫
@@ -387,6 +390,7 @@ export default function HomePage() {
 
   // 当前项目的 HTML
   const currentProject = useProjectStore((state) => state.currentProject);
+  const updateProjectName = useProjectStore((state) => state.updateProjectName);
   const generatedHtml = currentProject?.files[ENTRY_FILE_PATH]?.content ?? '';
 
   // 项目总数（用于项目列表入口的数字徽章）
@@ -430,6 +434,13 @@ export default function HomePage() {
       codeRef.current.scrollTop = codeRef.current.scrollHeight;
     }
   }, [streamingText, generatedHtml, viewTab]);
+
+  // 打开重命名模态框时初始化输入值
+  useEffect(() => {
+    if (showRenameModal && currentProject) {
+      setRenameValue(currentProject.name);
+    }
+  }, [showRenameModal, currentProject]);
 
   const { createProject, updateEntryFile, updateFiles, updateProjectStatus, addMessage, saveVersion } = useProjectStore();
   const { startGeneration, updateStage, appendDelta, finishGeneration, setError, setAwaitingApproval, updateFileStatus, setReviewChecks, setIntent } = useChatStore();
@@ -1301,13 +1312,10 @@ export default function HomePage() {
               码孖造
             </span>
           </Link>
-          {currentProject && (
-            <span className="text-[12px] text-[var(--color-text-tertiary)]">/ {currentProject.name}</span>
-          )}
           {/* 项目列表入口：带文字标签和数量徽章 */}
           <button
             onClick={() => navigate('/projects')}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[13px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-base)] transition-all duration-[140ms] ml-2"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[13px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-base)] transition-all duration-[140ms]"
             title={`查看全部项目 (${projectCount} 个)`}
           >
             <Icon icon="lucide:folder-search" width={20} height={20} />
@@ -1318,17 +1326,20 @@ export default function HomePage() {
               </span>
             )}
           </button>
+          {/* 当前项目名：可点击重命名 */}
+          {currentProject && (
+            <button
+              onClick={() => setShowRenameModal(true)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[13px] text-[var(--color-text-primary)] hover:bg-[var(--color-bg-base)] transition-all duration-[140ms] max-w-[200px]"
+              title="点击重命名项目"
+            >
+              <Icon icon="lucide:file-text" width={16} height={16} className="text-[var(--color-text-secondary)] shrink-0" />
+              <span className="truncate font-medium">{currentProject.name}</span>
+              <Icon icon="lucide:pencil" width={12} height={12} className="text-[var(--color-text-tertiary)] shrink-0" />
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-2">
-          {/* 返回首页（落地页）入口 */}
-          <Link
-            to="/"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-elevated)] transition-all duration-[140ms]"
-            title="返回首页"
-          >
-            <Icon icon="lucide:home" width={14} height={14} />
-            <span>首页</span>
-          </Link>
           {/* 积分显示（模拟） */}
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--color-bg-base)] text-[12px] text-[var(--color-text-secondary)]">
             <Icon icon="lucide:coins" width={14} height={14} />
@@ -2073,6 +2084,52 @@ export default function HomePage() {
           </div>
         </div>
       </div>
+
+      {/* 重命名项目模态框 */}
+      {showRenameModal && currentProject && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[var(--color-bg-elevated)] rounded-xl p-6 w-[400px] max-w-[90vw] border border-[var(--color-border-default)]">
+            <h3 className="text-[16px] font-semibold text-[var(--color-text-primary)] mb-4">重命名项目</h3>
+            <input
+              type="text"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && renameValue.trim()) {
+                  updateProjectName(renameValue.trim());
+                  setShowRenameModal(false);
+                }
+                if (e.key === 'Escape') {
+                  setShowRenameModal(false);
+                }
+              }}
+              placeholder="输入项目名称"
+              className="w-full px-3 py-2 rounded-lg bg-[var(--color-bg-base)] border border-[var(--color-border-default)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]/50"
+              autoFocus
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => setShowRenameModal(false)}
+                className="px-4 py-2 rounded-lg text-[13px] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-base)] transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  if (renameValue.trim()) {
+                    updateProjectName(renameValue.trim());
+                    setShowRenameModal(false);
+                  }
+                }}
+                disabled={!renameValue.trim()}
+                className="px-4 py-2 rounded-lg text-[13px] bg-[var(--color-accent)] text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
