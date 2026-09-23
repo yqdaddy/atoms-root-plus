@@ -9,7 +9,7 @@
  * - 确保长文本自动换行
  * - 增加已用时间计时器
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Icon } from '@iconify/react';
 import ReactMarkdown from 'react-markdown';
 import type { GenerationStatus } from '../services/ai/types';
@@ -198,6 +198,44 @@ function LoadingDots() {
   );
 }
 
+/** 代码块组件（用于流式输出） */
+function StreamingCodeBlock({ language, code }: { language: string; code: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // 复制失败
+    }
+  }, [code]);
+
+  return (
+    <div className="relative my-3 rounded-lg bg-[var(--color-bg-inset)] border border-[var(--color-border-default)] overflow-hidden">
+      {/* 头部：语言标签 + 复制按钮 */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
+        <span className="text-[12px] font-mono text-[var(--color-text-secondary)]">
+          {language || 'code'}
+        </span>
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1 px-2 py-1 rounded text-[12px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-surface)] transition-all duration-[140ms]"
+        >
+          <Icon icon={copied ? 'lucide:check' : 'lucide:copy'} width={14} height={14} />
+          {copied ? '已复制' : '复制'}
+        </button>
+      </div>
+
+      {/* 代码内容：横向滚动，不溢出容器 */}
+      <pre className="p-3 overflow-x-auto text-[13px] font-mono leading-[1.6] text-[var(--color-text-primary)]">
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+}
+
 export function StreamingMessage({ content, stage, activeFilePath }: StreamingMessageProps) {
   const config = STAGE_CONFIG[stage] ?? STAGE_CONFIG.idle;
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -234,6 +272,35 @@ export function StreamingMessage({ content, stage, activeFilePath }: StreamingMe
 
   // 判断是否已完成（需要显示可折叠的进度信息）
   const isCompleted = stage === 'done';
+
+  // ReactMarkdown 自定义组件：代码块使用自定义组件，确保横向滚动
+  const markdownComponents = {
+    // 代码块（三个反引号包裹）
+    code({ inline, className, children, ...props }: React.HTMLAttributes<HTMLElement> & { inline?: boolean }) {
+      if (inline) {
+        // 行内代码
+        return (
+          <code
+            className="px-1.5 py-0.5 rounded bg-[var(--color-bg-inset)] text-[var(--color-text-primary)] text-[13px] font-mono"
+            {...props}
+          >
+            {children}
+          </code>
+        );
+      }
+
+      // 代码块：提取语言
+      const match = /language-(\w+)/.exec(className || '');
+      const language = match ? match[1]! : 'code';
+      const codeString = String(children).replace(/\n$/, '');
+
+      return <StreamingCodeBlock language={language} code={codeString} />;
+    },
+    // 段落
+    p({ children }: React.HTMLAttributes<HTMLParagraphElement>) {
+      return <p className="mb-2 last:mb-0">{children}</p>;
+    },
+  };
 
   return (
     <div className="flex gap-3">
@@ -281,10 +348,10 @@ export function StreamingMessage({ content, stage, activeFilePath }: StreamingMe
           </div>
         )}
 
-        {/* Markdown 内容：确保正确换行 */}
+        {/* Markdown 内容：使用自定义组件确保代码块正确渲染 */}
         {content && (
-          <div className="prose prose-sm max-w-none text-[13px] text-[var(--color-text-primary)] leading-[1.6] whitespace-pre-wrap break-words">
-            <ReactMarkdown>{content}</ReactMarkdown>
+          <div className="prose prose-sm max-w-none text-[13px] text-[var(--color-text-primary)] leading-[1.6]">
+            <ReactMarkdown components={markdownComponents}>{content}</ReactMarkdown>
           </div>
         )}
 

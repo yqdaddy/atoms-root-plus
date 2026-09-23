@@ -114,6 +114,7 @@ const INTENT_CONFIG: Record<string, { label: string; color: string; bgColor: str
   modify: { label: '修改', color: 'text-green-500', bgColor: 'bg-green-500/10' },
   analyze: { label: '分析', color: 'text-yellow-500', bgColor: 'bg-yellow-500/10' },
   diagnose: { label: '诊断', color: 'text-orange-500', bgColor: 'bg-orange-500/10' },
+  conversation: { label: '对话', color: 'text-purple-500', bgColor: 'bg-purple-500/10' },
 };
 
 /**
