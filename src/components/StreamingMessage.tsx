@@ -60,11 +60,11 @@ const STAGE_CONFIG: Record<GenerationStatus, { label: string; icon: string; desc
 /** 格式化已用时间 */
 function formatElapsedTime(seconds: number): string {
   if (seconds < 60) {
-    return `${seconds} 秒`;
+    return `${seconds}s`;
   }
   const minutes = Math.floor(seconds / 60);
   const secs = seconds % 60;
-  return `${minutes} 分 ${secs} 秒`;
+  return `${minutes}m ${secs}s`;
 }
 
 /** 骨架屏加载动画组件 */
@@ -80,13 +80,50 @@ function SkeletonLoader() {
 }
 
 /** 进度指示器组件 */
-function ProgressIndicator({ stage, elapsedSeconds }: { stage: GenerationStatus; elapsedSeconds: number }) {
+function ProgressIndicator({
+  stage,
+  elapsedSeconds,
+  isCollapsed = false,
+  onToggleCollapse,
+}: {
+  stage: GenerationStatus;
+  elapsedSeconds: number;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
+}) {
   const config = STAGE_CONFIG[stage] ?? STAGE_CONFIG.idle;
 
   // 定义阶段顺序
   const stageOrder: GenerationStatus[] = ['analyzing', 'generating', 'reviewing'];
   const currentIndex = stageOrder.indexOf(stage);
 
+  // 判断是否已完成
+  const isCompleted = stage === 'done';
+
+  // 收起状态：显示简要信息
+  if (isCollapsed && isCompleted) {
+    return (
+      <button
+        onClick={onToggleCollapse}
+        className="w-full flex items-center gap-2 px-3 py-2 bg-[var(--color-bg-base)] border border-[var(--color-border-default)] rounded-lg hover:border-[var(--color-accent)] transition-colors group"
+      >
+        <div className="w-6 h-6 rounded-full bg-green-500/10 flex items-center justify-center">
+          <Icon icon="lucide:check-circle" width={14} height={14} className="text-green-500" />
+        </div>
+        <span className="text-[12px] text-[var(--color-text-secondary)] flex-1 text-left">
+          生成完成，耗时 {formatElapsedTime(elapsedSeconds)}
+        </span>
+        <Icon
+          icon="lucide:chevron-down"
+          width={14}
+          height={14}
+          className="text-[var(--color-text-tertiary)] group-hover:text-[var(--color-accent)] transition-colors"
+        />
+      </button>
+    );
+  }
+
+  // 展开状态：显示完整信息
   return (
     <div className="space-y-3">
       {/* 阶段步骤指示 */}
@@ -114,6 +151,21 @@ function ProgressIndicator({ stage, elapsedSeconds }: { stage: GenerationStatus;
             {config.description}
           </p>
         </div>
+        {/* 完成状态时显示收起按钮 */}
+        {isCompleted && onToggleCollapse && (
+          <button
+            onClick={onToggleCollapse}
+            className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-[var(--color-bg-base)] transition-colors"
+            title="收起"
+          >
+            <Icon
+              icon="lucide:chevron-up"
+              width={14}
+              height={14}
+              className="text-[var(--color-text-tertiary)]"
+            />
+          </button>
+        )}
       </div>
 
       {/* 进度条 */}
@@ -149,6 +201,7 @@ function LoadingDots() {
 export function StreamingMessage({ content, stage, activeFilePath }: StreamingMessageProps) {
   const config = STAGE_CONFIG[stage] ?? STAGE_CONFIG.idle;
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   // 计时器：生成过程中持续计时
   useEffect(() => {
@@ -163,11 +216,24 @@ export function StreamingMessage({ content, stage, activeFilePath }: StreamingMe
     return () => clearInterval(timer);
   }, [stage]);
 
+  // 生成完成时，默认收起进度信息
+  // 生成中时，默认展开
+  useEffect(() => {
+    if (stage === 'done') {
+      setIsExpanded(false);
+    } else if (stage !== 'error') {
+      setIsExpanded(true);
+    }
+  }, [stage]);
+
   // 判断是否显示进度指示器（内容为空或刚开始生成时）
   const showProgressIndicator = !content || content.length < 50;
 
   // 判断是否正在生成（非完成/错误状态）
   const isActive = stage !== 'done' && stage !== 'error';
+
+  // 判断是否已完成（需要显示可折叠的进度信息）
+  const isCompleted = stage === 'done';
 
   return (
     <div className="flex gap-3">
@@ -196,10 +262,22 @@ export function StreamingMessage({ content, stage, activeFilePath }: StreamingMe
           )}
         </div>
 
-        {/* 进度指示器：内容为空或刚开始时显示 */}
+        {/* 进度指示器：生成中或完成后都可显示 */}
         {showProgressIndicator && isActive && (
           <div className="mb-4 p-4 bg-[var(--color-bg-base)] border border-[var(--color-border-default)] rounded-xl">
             <ProgressIndicator stage={stage} elapsedSeconds={elapsedSeconds} />
+          </div>
+        )}
+
+        {/* 完成后的折叠进度信息 */}
+        {isCompleted && (
+          <div className="mb-4 overflow-hidden transition-all duration-200">
+            <ProgressIndicator
+              stage={stage}
+              elapsedSeconds={elapsedSeconds}
+              isCollapsed={!isExpanded}
+              onToggleCollapse={() => setIsExpanded(!isExpanded)}
+            />
           </div>
         )}
 
