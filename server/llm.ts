@@ -8,6 +8,7 @@
 
 import {
   parseMultiFileOutput,
+  parseOutput,
   repairTruncatedMultiFileOutput,
   toFileNodeRecord,
   generateFileTreeSummary,
@@ -15,6 +16,7 @@ import {
   type MultiFileOutput,
   type GeneratedFile,
   type FileLanguage,
+  type ParseResult,
 } from './multiFileParser.js';
 import { classifyIntent, INTENT_LABELS, type IntentResult, type IntentType } from './intentClassifier.js';
 import { buildIterationSummary, estimateSummaryTokens } from './utils/iterationSummary.js';
@@ -1419,7 +1421,31 @@ export async function continueAfterApproval(
         changeList = undefined;
 
         try {
-          multiFileOutput = parseMultiFileOutput(generatedOutput);
+          const parseResult = parseOutput(generatedOutput);
+
+          // 检测是否是对话内容
+          if (parseResult.type === 'conversation') {
+            // AI 返回了对话内容而非代码
+            pendingSessions.delete(sessionId);
+            // 通过 delta 事件发送对话内容
+            onEvent({ type: 'delta', payload: { text: parseResult.content || '', phase: 'generate' } });
+            // 通过 done 事件标记为分析结果
+            onEvent({
+              type: 'done',
+              payload: {
+                html: '',
+                files: {},
+                analysis: parseResult.content,
+                stats: generateResult.usage ? {
+                  inputTokens: generateResult.usage.prompt_tokens,
+                  outputTokens: generateResult.usage.completion_tokens,
+                } : undefined,
+              },
+            });
+            return;
+          }
+
+          multiFileOutput = { files: parseResult.files! };
         } catch (parseError) {
           const parseErrorMsg = parseError instanceof Error ? parseError.message : '输出解析失败';
           console.error('[continueAfterApproval] 多文件解析失败:', parseErrorMsg);
@@ -1445,7 +1471,31 @@ export async function continueAfterApproval(
     } else {
       // 非 diff 模式：解析多文件输出
       try {
-        multiFileOutput = parseMultiFileOutput(generatedOutput);
+        const parseResult = parseOutput(generatedOutput);
+
+        // 检测是否是对话内容
+        if (parseResult.type === 'conversation') {
+          // AI 返回了对话内容而非代码
+          pendingSessions.delete(sessionId);
+          // 通过 delta 事件发送对话内容
+          onEvent({ type: 'delta', payload: { text: parseResult.content || '', phase: 'generate' } });
+          // 通过 done 事件标记为分析结果
+          onEvent({
+            type: 'done',
+            payload: {
+              html: '',
+              files: {},
+              analysis: parseResult.content,
+              stats: generateResult.usage ? {
+                inputTokens: generateResult.usage.prompt_tokens,
+                outputTokens: generateResult.usage.completion_tokens,
+              } : undefined,
+            },
+          });
+          return;
+        }
+
+        multiFileOutput = { files: parseResult.files! };
       } catch (parseError) {
         const errorMsg = parseError instanceof Error ? parseError.message : '输出解析失败';
         console.error('[continueAfterApproval] 多文件解析失败:', errorMsg);

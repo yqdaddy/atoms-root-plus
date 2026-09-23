@@ -25,6 +25,16 @@ export interface MultiFileOutput {
   files: GeneratedFile[];
 }
 
+/** 解析结果类型：文件列表或纯文本对话 */
+export type ParseResultType = 'files' | 'conversation';
+
+/** 统一解析结果：可能是文件列表，也可能是纯文本对话 */
+export interface ParseResult {
+  type: ParseResultType;
+  files?: GeneratedFile[];
+  content?: string; // 纯文本对话内容
+}
+
 /** 合法的文件语言类型 */
 const VALID_LANGUAGES: ReadonlySet<string> = new Set(['html', 'css', 'javascript', 'json', 'text']);
 
@@ -126,13 +136,72 @@ function isValidFile(file: unknown): file is GeneratedFile {
 }
 
 /**
+ * 检测文本是否看起来像对话内容而非 JSON。
+ *
+ * 对话内容的特征：
+ * - 包含完整的句子和段落
+ * - 没有 JSON 结构特征（花括号、方括号）
+ * - 或者 JSON 不完整但文本流畅
+ * - 长度较短（通常 < 500 字符）
+ */
+function looksLikeConversation(text: string): boolean {
+  const trimmed = text.trim();
+
+  // 空文本不算对话
+  if (trimmed.length === 0) return false;
+
+  // 有明显 JSON 结构的（完整花括号配对），不算对话
+  if (trimmed.includes('{') && trimmed.includes('}')) {
+    let depth = 0;
+    let hasCompleteJson = false;
+    for (let i = 0; i < trimmed.length; i++) {
+      if (trimmed[i] === '{') depth++;
+      else if (trimmed[i] === '}') {
+        depth--;
+        if (depth === 0) {
+          hasCompleteJson = true;
+          break;
+        }
+      }
+    }
+    if (hasCompleteJson) return false;
+  }
+
+  // 检测对话特征：完整的句子、段落结构
+  const sentences = trimmed.split(/[。！？\n]/).filter(s => s.trim().length > 0);
+  if (sentences.length >= 1) {
+    // 如果每段都是完整句子，且没有明显代码结构，判定为对话
+    const hasCodeMarkers = /{.*}|[<>\/]=|function\s*\(|const\s+\w+\s*=/.test(trimmed);
+    if (!hasCodeMarkers && trimmed.length < 1000) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * 解析多文件 JSON 输出。
  *
  * @param text LLM 输出的原始文本（可能包含 markdown 围栏）
- * @returns 解析后的多文件结构
- * @throws ParseError 解析失败时抛出
+ * @returns 解析结果，可能是文件列表或纯文本对话
+ * @throws ParseError 解析失败且不是对话内容时抛出
  */
 export function parseMultiFileOutput(text: string): MultiFileOutput {
+  const result = parseOutput(text);
+  if (result.type === 'conversation') {
+    throw new Error('AI 返回了对话内容而非代码：' + (result.content || ''));
+  }
+  return { files: result.files! };
+}
+
+/**
+ * 解析 LLM 输出，支持文件列表和纯文本对话两种类型。
+ *
+ * @param text LLM 输出的原始文本
+ * @returns 统一解析结果
+ */
+export function parseOutput(text: string): ParseResult {
   // 剥离 markdown 围栏
   const cleanText = stripMarkdownFence(text);
 
@@ -161,9 +230,19 @@ export function parseMultiFileOutput(text: string): MultiFileOutput {
   }
 
   if (!jsonStr) {
-    // 增强错误日志：记录完整输出的前 1000 字符，便于排查
+    // 没有 JSON，检查是否是对话内容
+    if (looksLikeConversation(cleanText)) {
+      console.log('[parseOutput] 检测到纯文本对话内容');
+      return {
+        type: 'conversation',
+        content: cleanText,
+        files: undefined,
+      };
+    }
+
+    // 既没有 JSON，也不是对话，记录详细错误
     const preview = cleanText.length > 1000 ? cleanText.slice(0, 1000) + '...(truncated)' : cleanText;
-    console.error('[parseMultiFileOutput] 无法提取 JSON 对象，原始输出（前 1000 字符）:', preview);
+    console.error('[parseOutput] 无法提取 JSON 对象，原始输出（前 1000 字符）:', preview);
     throw new Error('无法从输出中提取 JSON 对象');
   }
 
@@ -172,20 +251,49 @@ export function parseMultiFileOutput(text: string): MultiFileOutput {
     parsed = JSON.parse(jsonStr);
   } catch (e) {
     const errorMessage = e instanceof Error ? e.message : String(e);
-    // 增强错误日志：记录提取到的 JSON 片段（前 500 字符）
+    // JSON 解析失败，尝试检测是否是对话内容
+    if (looksLikeConversation(cleanText)) {
+      console.log('[parseOutput] JSON 解析失败但检测到对话内容');
+      return {
+        type: 'conversation',
+        content: cleanText,
+        files: undefined,
+      };
+    }
+    // 记录详细错误
     const jsonPreview = jsonStr.length > 500 ? jsonStr.slice(0, 500) + '...(truncated)' : jsonStr;
-    console.error('[parseMultiFileOutput] JSON 解析失败:', errorMessage, '\nJSON 片段（前 500 字符）:', jsonPreview);
+    console.error('[parseOutput] JSON 解析失败:', errorMessage, '\nJSON 片段（前 500 字符）:', jsonPreview);
     throw new Error(`JSON 解析失败: ${errorMessage}`);
   }
 
   // 校验顶层结构
   if (typeof parsed !== 'object' || parsed === null) {
+    // 可能是对话内容被误识别为 JSON
+    if (looksLikeConversation(cleanText)) {
+      console.log('[parseOutput] 解析结果不是对象但检测到对话内容');
+      return {
+        type: 'conversation',
+        content: cleanText,
+        files: undefined,
+      };
+    }
     throw new Error('解析结果不是对象');
   }
 
   const obj = parsed as Record<string, unknown>;
   if (!Array.isArray(obj.files)) {
-    throw new Error('files 字段不是数组');
+    // 可能是对话内容被误识别为 JSON
+    if (looksLikeConversation(cleanText)) {
+      console.log('[parseOutput] files 字段不是数组但检测到对话内容');
+      return {
+        type: 'conversation',
+        content: cleanText,
+        files: undefined,
+      };
+    }
+    // 提供更友好的错误信息
+    const preview = JSON.stringify(obj).slice(0, 200);
+    throw new Error(`输出格式错误：期望包含 files 数组的对象，但得到：${preview}...`);
   }
 
   // 校验并补全每个文件
@@ -193,7 +301,9 @@ export function parseMultiFileOutput(text: string): MultiFileOutput {
   for (let i = 0; i < obj.files.length; i++) {
     const file = normalizeFile(obj.files[i]);
     if (!file) {
-      throw new Error(`files[${i}] 结构不合法：需要 { path: "/...", content: "..." }（language 可选）`);
+      // 提供详细的错误信息
+      const filePreview = JSON.stringify(obj.files[i]).slice(0, 100);
+      throw new Error(`文件 ${i} 格式错误：需要 { path: "/...", content: "..." }，但得到：${filePreview}...`);
     }
     files.push(file);
   }
@@ -201,10 +311,25 @@ export function parseMultiFileOutput(text: string): MultiFileOutput {
   // 校验必须有入口文件
   const hasIndexHtml = files.some(f => f.path === '/index.html');
   if (!hasIndexHtml) {
-    throw new Error('缺少入口文件 /index.html');
+    // 如果有其他文件，尝试降级处理
+    if (files.length > 0) {
+      console.warn('[parseOutput] 缺少入口文件 /index.html，但返回其他文件');
+      // 添加一个简单的入口文件
+      files.unshift({
+        path: '/index.html',
+        content: '<!DOCTYPE html><html><body>缺少入口文件</body></html>',
+        language: 'html',
+      });
+    } else {
+      throw new Error('生成失败：没有有效的文件');
+    }
   }
 
-  return { files };
+  return {
+    type: 'files',
+    files,
+    content: undefined,
+  };
 }
 
 /**
