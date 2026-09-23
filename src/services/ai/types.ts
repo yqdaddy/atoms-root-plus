@@ -147,7 +147,8 @@ export interface GenerateResult {
   stats: GenerateStats;
   /**
    * 分析/诊断结果文本（可选）。
-   * 意图为 analyze 或 diagnose 时，done 不携带代码，只携带本字段；
+   * analyze/diagnose 意图、分析师澄清、diff 模式空变更（changes: []，
+   * summary 是 AI 的沟通内容而非变更摘要）时，done 不携带代码，只携带本字段；
    * 消费方应将其作为 assistant 消息展示，而不是视为空产物报错。
    */
   analysis?: string;

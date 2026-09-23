@@ -551,10 +551,13 @@ export default function HomePage() {
           const hasAnalysis = !!payload.analysis && payload.analysis.length > 0;
 
           // 对话模式：有 analysis 字段时，作为 assistant 消息展示
+          // （analyze/diagnose 意图、分析师澄清、diff 模式空变更均走此分支）
           if (hasAnalysis && !hasFiles && !payload.html) {
             console.log('[HomePage] 对话模式，analysis 字段长度:', payload.analysis!.length);
             finishGeneration();
             setIsGenerating(false);
+            // 对话模式不改动项目文件，恢复生成前状态（runGeneration 已置为 generating）
+            revertProjectStatusAfterFailure();
 
             // 将分析/诊断结果作为 assistant 消息保存
             addMessage({ role: 'assistant', content: payload.analysis! });

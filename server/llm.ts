@@ -524,6 +524,7 @@ const ENGINEER_DIFF_PROMPT = `你是 Atoms 平台的前端工程师，负责根�
 6. 插入多行时，new 中用 \\n 分隔（JSON 转义），一次 insert 可插入多行内容
 7. 只修改用户要求的部分，不要顺手改动其他代码
 8. 保持现有代码的风格、命名、缩进一致
+9. 如果修改请求不明确、无法在现有文件中定位要修改的位置，或确认无需任何修改，不要猜测或编造变更：输出 { "changes": [], "summary": "说明原因，或向用户提出需要澄清的问题" }
 
 【示例】
 用户请求："把按钮改成蓝色"
@@ -634,7 +635,7 @@ export interface LLMEvent {
   payload: {
     phase?: 'analysis' | 'generate' | 'review' | 'diagnose';
     text?: string;
-    analysis?: string; // 分析/诊断结果文本（analyze 与 diagnose 意图的 done 载荷）
+    analysis?: string; // 分析/诊断结果文本（analyze 与 diagnose 意图、diff 模式空变更的 done 载荷；存在时前端作为对话内容展示，不进入应用流程）
     features?: unknown; // 功能清单
     html?: string; // 单文件 HTML（向后兼容）
     files?: Record<string, { path: string; content: string; language: FileLanguage; updatedAt: string }>; // 多文件结构
@@ -1163,24 +1164,32 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
 
     if (combinedSignal.aborted) return;
 
-    // 检查分析结果是否是对话内容而非功能清单
+    // 检查分析结果是否是对话内容而非功能清单。
+    // parseOutput 只认 files 结构，对功能清单 JSON（{appTitle, features, ...}，无
+    // files 数组）必然抛错，不能裸调作为"是否对话"的判定器（a2d9eae 回归）：
+    // 仅当它成功且判定为 conversation 时走对话路径，其余情况（含抛错）回落到
+    // 下方括号配平的 JSON 提取。
     const analysisText = analysisResult.content.trim();
-    const analysisParseResult = parseOutput(analysisText);
+    try {
+      const analysisParseResult = parseOutput(analysisText);
 
-    // 如果分析师返回的是纯文本对话（澄清需求、解释概念），直接返回给用户
-    if (analysisParseResult.type === 'conversation') {
-      console.log('[generateWithStages] 分析师返回对话内容，跳过工程师阶段');
-      onEvent({
-        type: 'done',
-        payload: {
-          analysis: analysisParseResult.content || analysisText,
-          stats: analysisResult.usage ? {
-            inputTokens: analysisResult.usage.prompt_tokens,
-            outputTokens: analysisResult.usage.completion_tokens,
-          } : undefined,
-        },
-      });
-      return;
+      // 如果分析师返回的是纯文本对话（澄清需求、解释概念），直接返回给用户
+      if (analysisParseResult.type === 'conversation') {
+        console.log('[generateWithStages] 分析师返回对话内容，跳过工程师阶段');
+        onEvent({
+          type: 'done',
+          payload: {
+            analysis: analysisParseResult.content || analysisText,
+            stats: analysisResult.usage ? {
+              inputTokens: analysisResult.usage.prompt_tokens,
+              outputTokens: analysisResult.usage.completion_tokens,
+            } : undefined,
+          },
+        });
+        return;
+      }
+    } catch {
+      // 功能清单 JSON 或畸形输出：交给下方括号配平提取（解析失败时 features 记为 raw）
     }
 
     // 解析分析结果（尝试提取 JSON）
@@ -1395,27 +1404,37 @@ export async function continueAfterApproval(
 
     if (combinedSignal.aborted) return;
 
-    // 第一步：先检查输出是否是对话内容（澄清需求、解释概念等）
-    // 如果 AI 认为需要先与用户沟通，会在输出中说明，而不是直接生成代码
-    const quickParseResult = parseOutput(generatedOutput);
-    if (quickParseResult.type === 'conversation') {
-      console.log('[continueAfterApproval] 检测到纯文本对话内容，跳过代码生成');
-      pendingSessions.delete(sessionId);
+    // 第一步：先检查输出是否是对话内容（澄清需求、解释概念等）。
+    // 仅非 diff 模式执行：diff 模式的输出是 { changes, summary }，没有 files 数组，
+    // parseOutput 对其必然抛错（a2d9eae 引入的回归），未捕获会误杀整个 diff 流程；
+    // diff 模式的对话信号（空变更清单 / 纯文本输出）分别由 diff 分支内的
+    // 空变更检查与降级路径处理。
+    // parseOutput 可能对畸形输出抛错，此处捕获后交给下方解析路径统一报错或抢救。
+    if (!useDiffMode) {
+      try {
+        const quickParseResult = parseOutput(generatedOutput);
+        if (quickParseResult.type === 'conversation') {
+          console.log('[continueAfterApproval] 检测到纯文本对话内容，跳过代码生成');
+          pendingSessions.delete(sessionId);
 
-      // 通过 done 事件返回对话内容（前端会作为 assistant 消息展示）
-      onEvent({
-        type: 'done',
-        payload: {
-          html: '',
-          files: {},
-          analysis: quickParseResult.content || generatedOutput,
-          stats: generateResult.usage ? {
-            inputTokens: generateResult.usage.prompt_tokens,
-            outputTokens: generateResult.usage.completion_tokens,
-          } : undefined,
-        },
-      });
-      return;
+          // 通过 done 事件返回对话内容（前端会作为 assistant 消息展示）
+          onEvent({
+            type: 'done',
+            payload: {
+              html: '',
+              files: {},
+              analysis: quickParseResult.content || generatedOutput,
+              stats: generateResult.usage ? {
+                inputTokens: generateResult.usage.prompt_tokens,
+                outputTokens: generateResult.usage.completion_tokens,
+              } : undefined,
+            },
+          });
+          return;
+        }
+      } catch {
+        // 预检解析失败不定论，交给下方多文件解析路径统一处理
+      }
     }
 
     // 第二步：解析为代码结构
@@ -1431,6 +1450,30 @@ export async function continueAfterApproval(
       // diff 模式：解析变更清单
       try {
         changeList = parseChangeList(generatedOutput);
+
+        // 空变更检查：AI 认为无需修改或需求不明确（如 { "changes": [], "summary": "需求不明确" }）。
+        // 参考 Claude Code FileEditTool 的诚实反馈原则（old_string 未命中时报
+        // "String to replace not found"，绝不假装写入了文件）：没做事就说没做。
+        // summary 此时是对话内容而非变更摘要，经 analysis 字段走对话模式，
+        // 由前端作为 assistant 消息展示；绝不发"变更已应用"。
+        if (changeList.changes.length === 0) {
+          console.info('[continueAfterApproval] diff 输出为空变更，转对话模式:', changeList.summary);
+          pendingSessions.delete(sessionId);
+          onEvent({
+            type: 'done',
+            payload: {
+              html: '',
+              files: {},
+              analysis: changeList.summary || '本次未对代码做任何修改：未能确定需要变更的内容，请补充更具体的需求。',
+              stats: generateResult.usage ? {
+                inputTokens: generateResult.usage.prompt_tokens,
+                outputTokens: generateResult.usage.completion_tokens,
+              } : undefined,
+            },
+          });
+          return;
+        }
+
         console.info(
           `[continueAfterApproval] diff 解析成功: ${changeList.changes.length} 个文件, ${changeList.changes.reduce((sum, c) => sum + c.edits.length, 0)} 处编辑`
         );
