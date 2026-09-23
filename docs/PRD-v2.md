@@ -1,10 +1,10 @@
-# Atoms Demo 产品需求文档（PRD v2）
+# Litpp Demo 产品需求文档（PRD v2）
 
 | 项 | 内容 |
 |---|---|
 | 版本 | v2（工程化多文件生成升级） |
 | 日期 | 2026-09-20 |
-| 作者 | dev-atoms-product-manager |
+| 作者 | dev-litpp-product-manager |
 | 状态 | 待评审 |
 | 下游 | frontend-developer、backend-architect、ai-engineer、data-engineer、ux-designer |
 | 变更说明 | 从单文件 HTML 升级为工程化多文件项目结构，新增提示词工程优化阶段 |

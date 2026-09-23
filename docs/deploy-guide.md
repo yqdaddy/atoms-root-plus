@@ -69,7 +69,7 @@ server {
     listen 80;
     server_name your-domain.com;
 
-    # Atoms 平台本身
+    # Litpp 平台本身
     location / {
         proxy_pass http://localhost:3000;
     }

@@ -1,6 +1,6 @@
-# Atoms Demo 落地页设计规范
+# Litpp Demo 落地页设计规范
 
-> 作者：dev-atoms-ux-designer
+> 作者：dev-litpp-ux-designer
 > 版本：v1
 > 适用范围：未登录用户首页（Landing Page）
 > 本规范继承 `docs/design-system.md` 全部 token 与禁则，落地页专属规则在此补充。
@@ -135,7 +135,7 @@
 
 - 高度：56px
 - 背景：bg-base，底部 1px border-default
-- Logo：品牌字标 "Atoms"（font-display，text-xl，600）
+- Logo：品牌字标 "Litpp"（font-display，text-xl，600）
 - 导航链接：ghost 样式，text-secondary，hover text-primary
 - 登录按钮：ghost 样式
 - 免费试用按钮：主按钮样式（accent 底）
@@ -198,7 +198,7 @@
 ```
 ┌────────────────────────────────────────────────────────┐
 │                                                        │
-│   为什么选择 Atoms                                     │
+│   为什么选择 Litpp                                     │
 │                                                        │
 │   ┌─────────────────────────────────┐  ┌───────────┐  │
 │   │                                 │  │           │  │
@@ -265,12 +265,12 @@
 ```
 ┌────────────────────────────────────────────────────────┐
 │                                                        │
-│   Atoms Demo          产品       资源        关于     │
+│   Litpp Demo          产品       资源        关于     │
 │                       功能       文档        GitHub   │
 │                       定价       API         反馈     │
 │                                                        │
 │   ────────────────────────────────────────────────────│
-│   © 2024 Atoms Demo. 本项目为 ROOT AI Native 笔试作品  │
+│   © 2024 Litpp Demo. 本项目为 ROOT AI Native 笔试作品  │
 │                                                        │
 └────────────────────────────────────────────────────────┘
 ```
@@ -394,7 +394,7 @@
 
 ### 9.1 Header
 
-- Logo：Atoms
+- Logo：Litpp
 - 导航：功能 / 定价 / 文档
 - 按钮：登录 / 免费试用
 
@@ -406,7 +406,7 @@
 
 ### 9.3 功能特性区
 
-- 区块标题：为什么选择 Atoms
+- 区块标题：为什么选择 Litpp
 
 **特性 1（主特性）**
 - 标题：生成即预览
@@ -428,7 +428,7 @@
 ### 9.5 Footer
 
 - 链接组：产品（功能 / 定价） / 资源（文档 / API） / 关于（GitHub / 反馈）
-- 版权：© 2024 Atoms Demo. 本项目为 ROOT AI Native 笔试作品。
+- 版权：© 2024 Litpp Demo. 本项目为 ROOT AI Native 笔试作品。
 
 ---
 

@@ -1,9 +1,9 @@
 ---
 name: taste-skill
-description: Atoms Demo 项目级反 AI 味设计规范。任何视觉设计或前端实现开始之前必须调用，作为反 AI 味评审基线；实现完成后用于逐条自检。提炼自全局 taste-skill，结合本项目 docs/design-system.md 定稿 token 与禁则。
+description: Litpp Demo 项目级反 AI 味设计规范。任何视觉设计或前端实现开始之前必须调用，作为反 AI 味评审基线；实现完成后用于逐条自检。提炼自全局 taste-skill，结合本项目 docs/design-system.md 定稿 token 与禁则。
 ---
 
-# taste-skill：Atoms Demo 反 AI 味基线
+# taste-skill：Litpp Demo 反 AI 味基线
 
 > 本文件是项目定制版。全局规范见 `~/.claude/skills/taste-skill/skills/taste-skill/SKILL.md`。
 > 本项目设计系统已在 `docs/design-system.md` 定稿，其 token 与禁则优先级高于本文，本文与其冲突时按 design-system.md 修改。

@@ -1,6 +1,6 @@
-# Atoms Demo：后端 LLM 代理模式架构设计
+# Litpp Demo：后端 LLM 代理模式架构设计
 
-> Owner：dev-atoms-ai-engineer
+> Owner：dev-litpp-ai-engineer
 > 版本：v2（后端代理模式）
 > 关联：`docs/tech-ai-pipeline.md`、`server/index.ts`、`src/services/ai/liveEngine.ts`
 

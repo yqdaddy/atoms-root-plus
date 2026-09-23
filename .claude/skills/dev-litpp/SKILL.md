@@ -1,9 +1,9 @@
 ---
-name: dev-atoms
-description: Atoms Demo 项目协调 skill。调度 7 角色专业 Agent 团队完成 AI Agent 平台开发。触发：用 dev-atoms 协调/开发/修复任务，或 /dev-atoms 命令。
+name: dev-litpp
+description: Litpp Demo 项目协调 skill。调度 7 角色专业 Agent 团队完成 AI Agent 平台开发。触发：用 dev-litpp 协调/开发/修复任务，或 /dev-litpp 命令。
 ---
 
-# dev-atoms：Atoms Demo 项目协调 Skill
+# dev-litpp：Litpp Demo 项目协调 Skill
 
 本项目是 ROOT AI Native 全栈工程师笔试项目：构建一个类似 Atoms（atoms.dev）的 AI Agent 平台 Demo。核心形态：左侧 AI 对话 + 右侧实时预览，多 Agent 流水线驱动代码生成，生成的应用以可视化网页展示。
 
@@ -14,23 +14,23 @@ description: Atoms Demo 项目协调 skill。调度 7 角色专业 Agent 团队�
 **专业的事情交给专业的 agent。主 agent 只做协调，不亲自写代码、不亲自生成配置。**
 
 - 主 agent（协调者）职责链：判断任务类型 → 委派专业 agent → 独立验证 → 汇报用户。四步缺一不可。
-- 执行者 ≠ 验证者：绝不能让执行者验证自己的工作。凡是"完成/修复成功"的宣称，验证一律由 `dev-atoms-reality-checker` 独立执行。
+- 执行者 ≠ 验证者：绝不能让执行者验证自己的工作。凡是"完成/修复成功"的宣称，验证一律由 `dev-litpp-reality-checker` 独立执行。
 - 遇到没有对应 agent 的任务时，按以下优先级处理：
   1. **从模板创建**：参照本 skill 的 agent 名册格式，在 `.claude/agents/` 下创建新 agent 定义；
   2. **在线搜索**：先搜索该领域的最佳实践与成熟方案，作为新 agent 的人设依据；
-  3. **动态创建**：按 `dev-{prefix}-{role}` 命名规范创建（如 `dev-atoms-test-runner`），并同步更新本名册。
+  3. **动态创建**：按 `dev-{prefix}-{role}` 命名规范创建（如 `dev-litpp-test-runner`），并同步更新本名册。
 
 ## 2. Agent 团队名册
 
 | Agent 名 | 角色 | 什么时候委派 |
 |---|---|---|
-| `dev-atoms-product-manager` | 产品经理 | 需求分析、用户故事拆解、PRD 撰写、功能规划与优先级 |
-| `dev-atoms-frontend-developer` | 前端开发 | UI/交互实现：对话面板、预览面板、组件开发、状态接线 |
-| `dev-atoms-backend-architect` | 后端架构师 | 数据持久化方案（localStorage/Supabase）、iframe sandbox 沙箱方案 |
-| `dev-atoms-ai-engineer` | AI 工程师 | LLM 集成、多 Agent 流水线编排、代码生成策略 |
-| `dev-atoms-ux-designer` | UX 设计师 | 交互体验设计、视觉规范输出（先于前端实现） |
-| `dev-atoms-reality-checker` | 现实检验者 | 独立验证、PRD 覆盖率检查、完成宣称前的强制验收 |
-| `dev-atoms-data-engineer` | 数据工程师 | 图表模板、数据导入导出功能 |
+| `dev-litpp-product-manager` | 产品经理 | 需求分析、用户故事拆解、PRD 撰写、功能规划与优先级 |
+| `dev-litpp-frontend-developer` | 前端开发 | UI/交互实现：对话面板、预览面板、组件开发、状态接线 |
+| `dev-litpp-backend-architect` | 后端架构师 | 数据持久化方案（localStorage/Supabase）、iframe sandbox 沙箱方案 |
+| `dev-litpp-ai-engineer` | AI 工程师 | LLM 集成、多 Agent 流水线编排、代码生成策略 |
+| `dev-litpp-ux-designer` | UX 设计师 | 交互体验设计、视觉规范输出（先于前端实现） |
+| `dev-litpp-reality-checker` | 现实检验者 | 独立验证、PRD 覆盖率检查、完成宣称前的强制验收 |
+| `dev-litpp-data-engineer` | 数据工程师 | 图表模板、数据导入导出功能 |
 
 ## 3. 任务路由表
 
@@ -54,7 +54,7 @@ description: Atoms Demo 项目协调 skill。调度 7 角色专业 Agent 团队�
 1. **拆解**：主 agent 将用户任务拆为可委派的最小工作单元，标注依赖关系（并行可做的并行派，有依赖的串行派）。
 2. **委派**：按任务路由表分派给执行 agent，委派 prompt 必须包含：目标、输入、产出物定义、验收标准。
 3. **Handoff 契约核对**：执行 agent 返回后，主 agent 核对产出是否满足契约（文件路径存在、接口签名一致、产出物齐全），不满足则退回重做。
-4. **独立验证**：委派 `dev-atoms-reality-checker`，其与执行者必须是不同 agent 实例。
+4. **独立验证**：委派 `dev-litpp-reality-checker`，其与执行者必须是不同 agent 实例。
 5. **证据收集**：验证产生的截图、日志、覆盖率清单全部留存并附路径。
 6. **汇报**：向用户汇报结论 + 证据。证据缺失时如实说明"未验证"，禁止美化。
 
@@ -63,7 +63,7 @@ description: Atoms Demo 项目协调 skill。调度 7 角色专业 Agent 团队�
 ### 铁律
 
 1. **没有新鲜的验证证据，禁止宣称完成/修复成功。** 证据必须是本次任务刚产生的（构建输出、实际交互测试结果），上次会话或执行者自述不算证据。
-2. 执行者不能验证自己的工作，验证必须由 `dev-atoms-reality-checker` 独立执行。
+2. 执行者不能验证自己的工作，验证必须由 `dev-litpp-reality-checker` 独立执行。
 3. 前端必须遵守设计铁律：
    - 禁 Inter 字体（换用有性格的替代字体，如 Space Grotesk / Geist 等）；
    - 禁 AI 紫渐变（`linear-gradient(purple, ...)` 类陈词滥调配色）；
@@ -99,7 +99,7 @@ description: Atoms Demo 项目协调 skill。调度 7 角色专业 Agent 团队�
 
 ## 7. 验证门禁
 
-宣称完成前的强制检查清单，由主 agent 发起、`dev-atoms-reality-checker` 执行，全部通过才允许向用户汇报"完成"：
+宣称完成前的强制检查清单，由主 agent 发起、`dev-litpp-reality-checker` 执行，全部通过才允许向用户汇报"完成"：
 
 1. **PRD 用户故事覆盖率逐条核对**：对照 PRD 中每一条用户故事，逐条标注"已实现并验证 / 部分实现 / 未实现"，不允许跳条。
 2. **代码存在性检查**：对照功能清单，逐一确认对应代码文件真实存在且被引用（不是死代码、不是空壳组件）。

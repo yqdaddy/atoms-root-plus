@@ -86,7 +86,7 @@ export function buildReadme(project: Project): string {
   const name = project.name || '未命名项目';
   const description = project.description.trim().length > 0
     ? project.description.trim()
-    : `${name}：由 Atoms（AI 应用生成平台）生成的 Web 应用。`;
+    : `${name}：由 Litpp（AI 应用生成平台）生成的 Web 应用。`;
 
   const deps = detectDependencies(project.files);
   const framework = detectFramework(project.files);
@@ -101,7 +101,7 @@ export function buildReadme(project: Project): string {
 
 > ${description}
 
-本项目由 [Atoms](https://atoms.dev)（AI 应用生成平台）生成，导出时间：${exportedAt}。
+本项目由 [Litpp](https://litpp.dev)（AI 应用生成平台）生成，导出时间：${exportedAt}。
 
 ## 运行方式
 

@@ -1,6 +1,6 @@
 # 服务器部署指南
 
-本文档详细说明如何将 Atoms Demo 部署到生产服务器。
+本文档详细说明如何将 Litpp Demo 部署到生产服务器。
 
 ## 目录
 
@@ -114,7 +114,7 @@ sudo nano /etc/nginx/sites-available/atoms.conf
 配置内容：
 
 ```nginx
-# Atoms Demo Nginx 配置
+# Litpp Demo Nginx 配置
 # 路径：/etc/nginx/sites-available/atoms.conf
 
 # ========================================
@@ -307,7 +307,7 @@ scp -r dist-server/* user@your-server:/var/www/atoms-backend/
 
 **为什么必须跨源？**
 
-用户通过 Atoms 生成的应用代码会部署到 `DEPLOY_BASE_URL` 指向的路径。如果该路径与主应用同源：
+用户通过 Litpp 生成的应用代码会部署到 `DEPLOY_BASE_URL` 指向的路径。如果该路径与主应用同源：
 - 部署的用户生成代码可以在主应用 origin 下执行 JavaScript
 - 可能窃取用户 Cookie、localStorage 数据
 - 可能发起 CSRF 攻击

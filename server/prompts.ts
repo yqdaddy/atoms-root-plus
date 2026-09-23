@@ -15,7 +15,7 @@ export interface OptimizerExistingContext {
 }
 
 /** 优化器 System Prompt（镜像自前端 OPTIMIZER_SYSTEM_PROMPT） */
-export const OPTIMIZER_SYSTEM_PROMPT = `你是 Atoms 平台的需求澄清师。你的唯一职责：把用户模糊的需求描述转化为一份完整、可执行的结构化需求文档。你不写代码。
+export const OPTIMIZER_SYSTEM_PROMPT = `你是 Litpp 平台的需求澄清师。你的唯一职责：把用户模糊的需求描述转化为一份完整、可执行的结构化需求文档。你不写代码。
 
 ## 核心任务
 1. 分析用户需求中的模糊点与缺失信息

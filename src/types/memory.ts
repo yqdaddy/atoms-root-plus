@@ -7,7 +7,7 @@ import type { IsoDateTime } from './project';
 
 /**
  * 全局用户偏好：跨项目生效。
- * 存储在 localStorage['atoms:global-preferences']。
+ * 存储在 localStorage['litpp:global-preferences']。
  */
 export interface GlobalPreferences {
   /** 默认框架 */
@@ -62,9 +62,9 @@ export interface PreferenceItem {
  * 完整的记忆结构（用于注入到 prompt）。
  */
 export interface MemoryContext {
-  /** 项目偏好（从 localStorage['atoms:v1:preferences:{projectId}'] 加载） */
+  /** 项目偏好（从 localStorage['litpp:v1:preferences:{projectId}'] 加载） */
   projectPreferences: PreferenceItem[];
-  /** 全局偏好（从 localStorage['atoms:global-preferences'] 加载） */
+  /** 全局偏好（从 localStorage['litpp:global-preferences'] 加载） */
   globalPreferences: GlobalPreferences;
   /** 会话摘要（可选） */
   sessionSummary?: string;

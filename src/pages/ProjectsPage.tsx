@@ -188,7 +188,7 @@ export default function ProjectsPage() {
   const handleOpenProject = (id: string) => {
     switchProject(id);
     // 设置标记，告诉 workspace 这是导航进入而非刷新
-    sessionStorage.setItem('atoms_nav_to_workspace', 'true');
+    sessionStorage.setItem('litpp_nav_to_workspace', 'true');
     navigate('/workspace');
   };
 
@@ -232,7 +232,7 @@ export default function ProjectsPage() {
           <button
             onClick={() => {
               // 返回工作台视为导航，保留当前项目
-              sessionStorage.setItem('atoms_nav_to_workspace', 'true');
+              sessionStorage.setItem('litpp_nav_to_workspace', 'true');
               navigate('/workspace');
             }}
             className="flex items-center gap-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"

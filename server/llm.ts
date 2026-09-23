@@ -146,7 +146,7 @@ export function buildChatContextBlock(
 }
 
 /** 分析师系统提示词（生成功能清单） */
-const ANALYST_SYSTEM_PROMPT = `你是 Atoms 平台的需求分析师。分析用户需求，输出可在浏览器内实现的功能清单。
+const ANALYST_SYSTEM_PROMPT = `你是 Litpp 平台的需求分析师。分析用户需求，输出可在浏览器内实现的功能清单。
 
 ## 输出格式
 只输出一个 JSON 对象，不要任何解释文字：
@@ -235,7 +235,7 @@ const ANALYST_ITERATION_PROMPT = `## 本次为迭代修改任务
 请基于现有项目理解当前功能，仅针对用户的新需求或修改要求输出变更项。`;
 
 /** 工程师系统提示词基础部分（与框架无关） */
-const ENGINEER_BASE_PROMPT = `你是 Atoms 平台的前端工程师。你根据功能清单生成一个多文件结构的前端项目。你输出 JSON 格式的文件列表。
+const ENGINEER_BASE_PROMPT = `你是 Litpp 平台的前端工程师。你根据功能清单生成一个多文件结构的前端项目。你输出 JSON 格式的文件列表。
 
 ## 输出格式
 只输出一个 JSON 对象，禁止输出任何解释文字。结构如下：
@@ -598,7 +598,7 @@ const ENGINEER_ITERATION_PROMPT = `## 迭代修改模式
  * 调用方必须回退到 ENGINEER_SYSTEM_PROMPT + ENGINEER_ITERATION_PROMPT 的
  * 全量文件模式（降级路径），避免用户面对裸报错。
  */
-const ENGINEER_DIFF_PROMPT = `你是 Atoms 平台的前端工程师，负责根据修改请求**增量修改**代码。
+const ENGINEER_DIFF_PROMPT = `你是 Litpp 平台的前端工程师，负责根据修改请求**增量修改**代码。
 
 【重要】你是修改模式，只输出变更的部分，不要重新生成整个文件。
 
@@ -674,7 +674,7 @@ const ENGINEER_DIFF_PROMPT = `你是 Atoms 平台的前端工程师，负责根�
 - 只输出 JSON，无其他文字`;
 
 /** 审查者系统提示词 */
-const REVIEWER_SYSTEM_PROMPT = `你是 Atoms 平台的质量审查者。你审查多文件项目是否合格交付。你不重写代码，只输出审查结论。
+const REVIEWER_SYSTEM_PROMPT = `你是 Litpp 平台的质量审查者。你审查多文件项目是否合格交付。你不重写代码，只输出审查结论。
 
 ## 审查维度（按顺序逐条检查）
 1. 结构完整：有 /index.html 入口文件，且 HTML 有 <!DOCTYPE html>、<html>、<head>、<body> 且标签全部闭合
@@ -700,7 +700,7 @@ pass 为 false 时 repairInstructions 必填：最多 3 条，每条是一个具
 pass 为 true 时 repairInstructions 必须是空数组，missingFiles 必须是空数组。`;
 
 /** 分析模式系统提示词（analyze 意图：解释现有项目，不改动、不生成代码） */
-const ANALYZE_SYSTEM_PROMPT = `你是 Atoms 平台的需求分析师。用户想了解现有项目的功能、结构或实现，你的任务是解释与分析，不是修改代码。
+const ANALYZE_SYSTEM_PROMPT = `你是 Litpp 平台的需求分析师。用户想了解现有项目的功能、结构或实现，你的任务是解释与分析，不是修改代码。
 
 ## 输出要求
 - 用简体中文输出结构化的分析报告（可用 Markdown 小标题与列表）
@@ -709,7 +709,7 @@ const ANALYZE_SYSTEM_PROMPT = `你是 Atoms 平台的需求分析师。用户想
 - 篇幅控制在 500 字以内，直接输出报告正文，不要输出 JSON`;
 
 /** 诊断模式系统提示词（diagnose 意图：定位问题并给出修复建议，不直接改代码） */
-const DIAGNOSE_SYSTEM_PROMPT = `你是 Atoms 平台的问题诊断工程师。用户报告了应用的问题或异常行为，你的任务是根据项目代码定位原因并给出修复建议。你不直接重写代码。
+const DIAGNOSE_SYSTEM_PROMPT = `你是 Litpp 平台的问题诊断工程师。用户报告了应用的问题或异常行为，你的任务是根据项目代码定位原因并给出修复建议。你不直接重写代码。
 
 ## 输出格式
 只输出一个 JSON 对象，禁止输出其他任何文字：
@@ -2036,7 +2036,7 @@ export async function runDiagnosePipeline({
 }
 
 /** 对话模式系统提示词（conversation 意图：纯对话、问候、澄清等，不生成代码） */
-const CONVERSATION_SYSTEM_PROMPT = `你是 Atoms 平台的智能助手。用户正在与你进行对话，可能是在打招呼、致谢、询问概念或澄清需求。你的任务是以友好、专业的方式回应。
+const CONVERSATION_SYSTEM_PROMPT = `你是 Litpp 平台的智能助手。用户正在与你进行对话，可能是在打招呼、致谢、询问概念或澄清需求。你的任务是以友好、专业的方式回应。
 
 ## 输出要求
 - 用简体中文回复（用户用英文时可用英文）

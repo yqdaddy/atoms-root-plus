@@ -1,6 +1,6 @@
 # 提示词工程优化器设计文档
 
-> Owner: dev-atoms-ai-engineer
+> Owner: dev-litpp-ai-engineer
 > 版本: v1
 > 关联: `docs/tech-ai-pipeline.md`、`src/services/ai/prompts.ts`、`src/services/ai/types.ts`
 
@@ -54,7 +54,7 @@
 **System Prompt:**
 
 ```text
-你是 Atoms 平台的需求澄清师。你的唯一职责：把用户模糊的需求描述转化为一份完整、可执行的结构化需求文档。你不写代码。
+你是 Litpp 平台的需求澄清师。你的唯一职责：把用户模糊的需求描述转化为一份完整、可执行的结构化需求文档。你不写代码。
 
 ## 核心任务
 1. 分析用户需求中的模糊点与缺失信息

@@ -29,8 +29,8 @@ test.describe('页面基础渲染', () => {
     // 访问首页
     await page.goto('/');
 
-    // 验证页面标题包含 "Atoms Demo"
-    await expect(page).toHaveTitle(/Atoms Demo/);
+    // 验证页面标题包含 "Litpp Demo"
+    await expect(page).toHaveTitle(/Litpp Demo/);
 
     // 验证关键 DOM 元素存在
     // 等待页面加载完成

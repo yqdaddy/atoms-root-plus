@@ -1,8 +1,8 @@
-# Atoms Demo 设计规范 v1
+# Litpp Demo 设计规范 v1
 
-> 作者：dev-atoms-ux-designer
+> 作者：dev-litpp-ux-designer
 > 版本：v1（Iteration 1）
-> 适用范围：Atoms Demo 全部界面（首屏、工作台、对话面板、预览面板、侧栏历史）
+> 适用范围：Litpp Demo 全部界面（首屏、工作台、对话面板、预览面板、侧栏历史）
 > 本规范是前端实现的唯一视觉与交互依据。与本文冲突的实现一律按本文修改。
 
 ## 0. 设计基调
@@ -126,7 +126,7 @@ taste-skill 面向落地页/作品集，本项目是工具型产品，属于其�
 
 | Token | 字体栈 | 用途 |
 |---|---|---|
-| font-display | "Space Grotesk", font-sans 回退 | 品牌字标 Atoms、首屏大标题 |
+| font-display | "Space Grotesk", font-sans 回退 | 品牌字标 Litpp、首屏大标题 |
 | font-sans | "Space Grotesk", "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Microsoft YaHei", "Noto Sans SC", system-ui, "Segoe UI", sans-serif | 全部 UI 文字 |
 | font-mono | "JetBrains Mono", "SF Mono", "Cascadia Code", "Menlo", "Consolas", monospace | 代码、已耗时计时器、文件计数、版本号、字数计数 |
 

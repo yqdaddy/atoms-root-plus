@@ -1,6 +1,6 @@
 # 轻量化服务端部署指南
 
-本文档说明如何本地运行和 Docker 部署 Atoms Demo 服务端。
+本文档说明如何本地运行和 Docker 部署 Litpp Demo 服务端。
 
 ## 前置要求
 

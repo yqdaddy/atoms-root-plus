@@ -1,10 +1,10 @@
 # CLAUDE.md
 
-本文件为 Atoms Demo 项目的项目级开发指引。在此仓库中工作时，请遵循以下规范。
+本文件为 Litpp Demo 项目的项目级开发指引。在此仓库中工作时，请遵循以下规范。
 
 ## 1. 项目概述
 
-**Atoms Demo**：AI Agent 驱动的代码生成平台（ROOT AI Native 全栈工程师笔试项目），对标 atoms.dev。
+**Litpp Demo**：AI Agent 驱动的代码生成平台（ROOT AI Native 全栈工程师笔试项目），对标 atoms.dev。
 
 核心流程：
 
@@ -37,19 +37,19 @@
 
 | Agent | 角色 | 职责 |
 |-------|------|------|
-| dev-atoms-product-manager | 产品经理 | PRD、用户故事、优先级 |
-| dev-atoms-frontend-developer | 前端开发者 | UI/交互实现 |
-| dev-atoms-backend-architect | 后端架构师 | 持久化、沙箱方案 |
-| dev-atoms-ai-engineer | AI 工程师 | LLM 集成、智能体编排 |
-| dev-atoms-ux-designer | UX 设计师 | 交互体验、视觉规范 |
-| dev-atoms-reality-checker | 现实检验者 | 独立验证、PRD 覆盖率 |
-| dev-atoms-data-engineer | 数据工程师 | 图表模板、数据导入导出 |
+| dev-litpp-product-manager | 产品经理 | PRD、用户故事、优先级 |
+| dev-litpp-frontend-developer | 前端开发者 | UI/交互实现 |
+| dev-litpp-backend-architect | 后端架构师 | 持久化、沙箱方案 |
+| dev-litpp-ai-engineer | AI 工程师 | LLM 集成、智能体编排 |
+| dev-litpp-ux-designer | UX 设计师 | 交互体验、视觉规范 |
+| dev-litpp-reality-checker | 现实检验者 | 独立验证、PRD 覆盖率 |
+| dev-litpp-data-engineer | 数据工程师 | 图表模板、数据导入导出 |
 
 ## 4. 协调方式
 
-- 触发方式：使用 `/dev-atoms` 或对主 agent 说"用 dev-atoms 协调 XXX"
+- 触发方式：使用 `/dev-litpp` 或对主 agent 说"用 dev-litpp 协调 XXX"
 - 主 agent 只做协调，不亲自写实现代码；专业的事情交给专业的 agent
-- 执行者与验证者分离：实现 agent 完成工作后，由 dev-atoms-reality-checker 独立验证，不允许自己验证自己的产出
+- 执行者与验证者分离：实现 agent 完成工作后，由 dev-litpp-reality-checker 独立验证，不允许自己验证自己的产出
 - 任务分派时给 agent 明确的目标、边界与验收标准，避免职责重叠
 
 ## 5. 开发规范

@@ -3,7 +3,7 @@ name: ui-ux-pro-max
 description: "UI/UX 设计规范输出与组件实现指南。当涉及页面布局、视觉层级、交互模式、响应式策略、可用性检查、四态完备时自动调用。不覆盖后端逻辑、API 设计或非视觉性能工作。本项目 token 唯一来源为 docs/design-system.md，本 skill 只定结构与模式。"
 ---
 
-# UI/UX Pro Max - Atoms Demo 项目版
+# UI/UX Pro Max - Litpp Demo 项目版
 
 ## 1. 布局体系
 

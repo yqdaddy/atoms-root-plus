@@ -1,6 +1,6 @@
-# Atoms Demo 集成测试报告
+# Litpp Demo 集成测试报告
 
-> 由 dev-atoms-reality-checker 独立执行，报告日期 2026-09-20 08:41-09:05。
+> 由 dev-litpp-reality-checker 独立执行，报告日期 2026-09-20 08:41-09:05。
 > 本轮发现的所有缺陷（D1-D5）随后已修复并通过二次独立验证。
 
 ## Phase A：集成测试（浏览器自动化）

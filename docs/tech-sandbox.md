@@ -1,11 +1,11 @@
-# Atoms Demo 沙箱与持久化技术方案 v1
+# Litpp Demo 沙箱与持久化技术方案 v1
 
 | 项 | 内容 |
 |---|---|
 | 版本 | v1（Iteration 1 地基轮） |
-| 作者 | dev-atoms-backend-architect |
+| 作者 | dev-litpp-backend-architect |
 | 日期 | 2026-09-18 |
-| 状态 | 待 dev-atoms-reality-checker 独立验证 |
+| 状态 | 待 dev-litpp-reality-checker 独立验证 |
 | 配套代码落点 | `src/types/project.ts`、`src/types/sandbox.ts`、`src/types/storage.ts`、`src/sandbox/`、`src/services/storage/` |
 
 ## 0. 方案概述与范围
@@ -1008,10 +1008,10 @@ function simpleHash(input: string): string {
 
 | 接收方 | 需要遵守的约定 |
 |---|---|
-| dev-atoms-frontend-developer | iframe 一律经 `SandboxFrame`；消息一律过 `parseSandboxMessage`；控制台/对话渲染走文本节点；quota L4 提示 UI |
-| dev-atoms-ai-engineer | 生成 HTML 的外部资源只准引用 `DEFAULT_CDN_HOSTS`；推荐生成代码用 click/input 事件做交互，避免依赖原生表单提交；流式结束后才触发持久化 |
-| dev-atoms-data-engineer | 导入导出格式以 `StorageEnvelope<Project>` 为准，导入复用 readProject 的校验与隔离逻辑 |
-| dev-atoms-reality-checker | 验证清单见 6.4 与 5.5 |
+| dev-litpp-frontend-developer | iframe 一律经 `SandboxFrame`；消息一律过 `parseSandboxMessage`；控制台/对话渲染走文本节点；quota L4 提示 UI |
+| dev-litpp-ai-engineer | 生成 HTML 的外部资源只准引用 `DEFAULT_CDN_HOSTS`；推荐生成代码用 click/input 事件做交互，避免依赖原生表单提交；流式结束后才触发持久化 |
+| dev-litpp-data-engineer | 导入导出格式以 `StorageEnvelope<Project>` 为准，导入复用 readProject 的校验与隔离逻辑 |
+| dev-litpp-reality-checker | 验证清单见 6.4 与 5.5 |
 
 ### 7.2 Supabase 云同步预留（不在本期实现）
 

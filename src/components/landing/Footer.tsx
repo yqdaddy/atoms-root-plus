@@ -39,7 +39,7 @@ export default function Footer() {
               to="/"
               className="font-display text-xl font-semibold text-[var(--color-text-primary)]"
             >
-              Atoms Demo
+              Litpp Demo
             </Link>
             <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
               AI 驱动的应用生成平台
@@ -71,7 +71,7 @@ export default function Footer() {
         {/* 版权 */}
         <div className="mt-12 border-t border-[var(--color-border-default)] pt-8">
           <p className="text-center text-xs text-[var(--color-text-tertiary)]">
-            © 2024 Atoms Demo. 本项目为 ROOT AI Native 笔试作品。
+            © 2024 Litpp Demo. 本项目为 ROOT AI Native 笔试作品。
           </p>
         </div>
       </div>

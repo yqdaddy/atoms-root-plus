@@ -76,7 +76,7 @@ h1{font-size:22px;margin-bottom:16px}
 <script>
 (function(){
   'use strict';
-  var THEME_KEY='atoms.chart-bar.theme';
+  var THEME_KEY='litpp.chart-bar.theme';
   var state={theme:'light'};
   function load(){try{var r=localStorage.getItem(THEME_KEY);if(r==='dark'||r==='light')state.theme=r;}catch(e){}}
   function save(){try{localStorage.setItem(THEME_KEY,state.theme);}catch(e){}}

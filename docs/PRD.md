@@ -1,10 +1,10 @@
-# Atoms Demo 产品需求文档（PRD v1）
+# Litpp Demo 产品需求文档（PRD v1）
 
 | 项 | 内容 |
 |---|---|
 | 版本 | v1（Iteration 1 基线） |
 | 日期 | 2026-09-18 |
-| 作者 | dev-atoms-product-manager |
+| 作者 | dev-litpp-product-manager |
 | 状态 | 待主 agent 核对，交 reality-checker 做 PRD 覆盖率基线 |
 | 下游 | frontend-developer、backend-architect、ai-engineer、data-engineer、ux-designer 按此开工 |
 
@@ -16,7 +16,7 @@
 
 ### 1.1 竞品参照（atoms.dev，一手调研结论）
 
-已通过官网与第三方评测确认 atoms.dev 的关键形态：8 个角色化 Agent（Mike 队长、Iris 研究员、Emma 产品经理、Bob 架构师、Alex 工程师、Sarah SEO、Adrian 广告、David 数据分析）、对话式构建、Visual Editor、Race Mode 多模型对比、Atoms Cloud 后端、积分计费。本 Demo 采纳其"多 Agent 角色团队 + 对话驱动 + 即时预览"的核心体验；明确砍掉的部分见第 5 章非目标。
+已通过官网与第三方评测确认 atoms.dev 的关键形态：8 个角色化 Agent（Mike 队长、Iris 研究员、Emma 产品经理、Bob 架构师、Alex 工程师、Sarah SEO、Adrian 广告、David 数据分析）、对话式构建、Visual Editor、Race Mode 多模型对比、Litpp Cloud 后端、积分计费。本 Demo 采纳其"多 Agent 角色团队 + 对话驱动 + 即时预览"的核心体验；明确砍掉的部分见第 5 章非目标。
 
 ---
 
@@ -168,7 +168,7 @@
 以下内容明确不做，防止范围蔓延。reality-checker 不应将下列项计为缺失：
 
 1. **真实注册/登录与账号体系**：以游客模式（localStorage）满足笔试的"初始化"要求，不做邮箱注册、OAuth、密码找回。
-2. **服务端与云后端**：不部署任何自建后端；不承诺 atoms.dev 的 Atoms Cloud 类能力（用户系统、数据库、托管）。Supabase 云同步仅作架构预留，不在本次交付承诺内。
+2. **服务端与云后端**：不部署任何自建后端；不承诺 atoms.dev 的 Litpp Cloud 类能力（用户系统、数据库、托管）。Supabase 云同步仅作架构预留，不在本次交付承诺内。
 3. **生成应用的后端能力**：生成物限定为纯前端单文件 HTML 应用，不含真实数据库、支付、鉴权等服务端功能。
 4. **SEO/广告投放类 Agent**：对标 atoms.dev 的 Sarah（SEO）与 Adrian（Ads）不进 Demo，Agent 流水线聚焦规划、编码、审查。
 5. **可视化拖拽编辑器**：atoms.dev 的 Visual Editor 不做，迭代一律走对话。

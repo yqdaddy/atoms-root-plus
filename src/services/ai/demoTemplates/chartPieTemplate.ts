@@ -83,8 +83,8 @@ h1{font-size:22px;margin-bottom:16px}
 <script>
 (function(){
   'use strict';
-  var THEME_KEY='atoms.chart-pie.theme';
-  var TYPE_KEY='atoms.chart-pie.type';
+  var THEME_KEY='litpp.chart-pie.theme';
+  var TYPE_KEY='litpp.chart-pie.type';
   var state={theme:'light',type:'pie'};
   function load(){try{var t=localStorage.getItem(THEME_KEY);if(t==='dark'||t==='light')state.theme=t;var tp=localStorage.getItem(TYPE_KEY);if(tp==='pie'||tp==='doughnut')state.type=tp;}catch(e){}}
   function save(){try{localStorage.setItem(THEME_KEY,state.theme);localStorage.setItem(TYPE_KEY,state.type);}catch(e){}}

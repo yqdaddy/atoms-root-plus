@@ -1,5 +1,5 @@
 # D-8 缺陷修复验证报告
-**验证者**: dev-atoms-reality-checker
+**验证者**: dev-litpp-reality-checker
 **时间**: 2026-09-18T16:05:00Z
 **模式**: 独立验证，未参与修复
 

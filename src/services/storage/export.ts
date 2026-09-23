@@ -21,7 +21,7 @@ export function exportAllProjects(): string {
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (!key || !key.startsWith('atoms:v1:projects:') || key === 'atoms:v1:projects') {
+      if (!key || !key.startsWith('litpp:v1:projects:') || key === 'litpp:v1:projects') {
         continue;
       }
 
@@ -73,7 +73,7 @@ export function exportProject(projectId: string): string | null {
 function loadProjectFromStorage(keyOrId: string): Project | null {
   try {
     // 判断是完整 key 还是项目 ID
-    const key = keyOrId.startsWith('atoms:')
+    const key = keyOrId.startsWith('litpp:')
       ? keyOrId
       : storageKey('projects', keyOrId);
 
@@ -97,9 +97,9 @@ function loadProjectFromStorage(keyOrId: string): Project | null {
  * 触发浏览器下载 JSON 文件。
  *
  * @param json JSON 字符串
- * @param filename 文件名（默认 atoms-projects.json）
+ * @param filename 文件名（默认 litpp-projects.json）
  */
-export function downloadExport(json: string, filename: string = 'atoms-projects.json'): void {
+export function downloadExport(json: string, filename: string = 'litpp-projects.json'): void {
   const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
 

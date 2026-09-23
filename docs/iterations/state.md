@@ -1,4 +1,4 @@
-# Atoms Demo 自升级迭代状态
+# Litpp Demo 自升级迭代状态
 
 > 本文件是自升级迭代的核心载体。每轮迭代结束后由主 agent 更新「next-iteration 指令」。
 > 唤醒指令固定：「继续 atoms-root-plus 自升级迭代：读取本文件，执行 next-iteration 指令」
@@ -420,7 +420,7 @@ Iteration 16 待完成：
 ## 迭代历史
 
 ### Iteration 0（团队搭建，已完成）
-- 产出：7 角色 agent 团队 + dev-atoms 协调 skill + 项目 CLAUDE.md，5 门禁验证通过
+- 产出：7 角色 agent 团队 + dev-litpp 协调 skill + 项目 CLAUDE.md，5 门禁验证通过
 - 经验：Skill 必须目录结构；执行者与验证者分离；门禁需要命令证据
 
 ### Iteration 1（地基轮：文档与方案，已完成）

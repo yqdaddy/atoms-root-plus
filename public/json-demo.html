@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JSON 显示效果演示</title>
+  <style>
+    :root {
+      --color-bg-inset: #1e1e1e;
+      --color-bg-elevated: #2d2d2d;
+      --color-bg-surface: #363636;
+      --color-text-primary: #e5e5e5;
+      --color-text-secondary: #a3a3a3;
+      --color-text-tertiary: #737373;
+      --color-border-default: #404040;
+      --color-accent: #3b82f6;
+    }
+
+    body {
+      margin: 0;
+      padding: 40px;
+      background: #0a0a0a;
+      color: var(--color-text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    h1 {
+      margin-bottom: 40px;
+      font-size: 24px;
+    }
+
+    .demo-section {
+      margin-bottom: 60px;
+    }
+
+    .demo-section h2 {
+      font-size: 16px;
+      color: var(--color-text-secondary);
+      margin-bottom: 16px;
+    }
+
+    /* 代码块样式 */
+    .code-block {
+      position: relative;
+      margin: 12px 0;
+      border-radius: 8px;
+      background: var(--color-bg-inset);
+      border: 1px solid var(--color-border-default);
+      overflow: hidden;
+    }
+
+    .code-block-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--color-border-default);
+      background: var(--color-bg-elevated);
+    }
+
+    .code-block-header-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .code-block-label {
+      font-size: 12px;
+      font-family: monospace;
+      color: var(--color-text-secondary);
+    }
+
+    .code-block-toggle {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border: none;
+      border-radius: 4px;
+      font-size: 11px;
+      color: var(--color-text-tertiary);
+      background: transparent;
+      cursor: pointer;
+      transition: all 0.14s;
+    }
+
+    .code-block-toggle:hover {
+      color: var(--color-text-secondary);
+      background: var(--color-bg-surface);
+    }
+
+    .code-block-copy {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      border: none;
+      border-radius: 4px;
+      font-size: 12px;
+      color: var(--color-text-secondary);
+      background: transparent;
+      cursor: pointer;
+      transition: all 0.14s;
+    }
+
+    .code-block-copy:hover {
+      color: var(--color-text-primary);
+      background: var(--color-bg-surface);
+    }
+
+    .code-block-content {
+      max-height: 300px;
+      overflow-x: auto;
+      position: relative;
+    }
+
+    .code-block-content.expanded {
+      max-height: none;
+    }
+
+    .code-block-content pre {
+      margin: 0;
+      padding: 12px;
+      font-size: 13px;
+      font-family: 'JetBrains Mono', monospace;
+      line-height: 1.6;
+      color: var(--color-text-primary);
+    }
+
+    .code-block-fade {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 80px;
+      background: linear-gradient(to top, var(--color-bg-inset), transparent);
+      pointer-events: none;
+    }
+
+    /* JSON 语法高亮 */
+    .json-key { color: #e06c75; }
+    .json-string { color: #98c379; }
+    .json-number { color: #d19a66; }
+    .json-boolean { color: #c678dd; }
+    .json-null { color: #c678dd; }
+
+    .icon {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      vertical-align: middle;
+    }
+
+    .icon-down::before { content: "▼"; font-size: 10px; }
+    .icon-up::before { content: "▲"; font-size: 10px; }
+    .icon-copy::before { content: "⧉"; font-size: 12px; }
+    .icon-check::before { content: "✓"; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>JSON 显示效果演示</h1>
+
+  <div class="demo-section">
+    <h2>1. 短 JSON（少于 10 行，无折叠）</h2>
+    <div class="code-block">
+      <div class="code-block-header">
+        <div class="code-block-header-left">
+          <span class="code-block-label">json</span>
+        </div>
+        <button class="code-block-copy" onclick="copyCode(this)">
+          <span class="icon icon-copy"></span>
+          复制
+        </button>
+      </div>
+      <div class="code-block-content expanded">
+        <pre><code>{
+  "<span class="json-key">name</span>": <span class="json-string">"Atoms Demo"</span>,
+  "<span class="json-key">version</span>": <span class="json-string">"1.0.0"</span>,
+  "<span class="json-key">active</span>": <span class="json-boolean">true</span>,
+  "<span class="json-key">count</span>": <span class="json-number">42</span>
+}</code></pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="demo-section">
+    <h2>2. 中等长度 JSON（默认折叠，可展开）</h2>
+    <div class="code-block">
+      <div class="code-block-header">
+        <div class="code-block-header-left">
+          <span class="code-block-label">json</span>
+          <button class="code-block-toggle" onclick="toggleCollapse(this)">
+            <span class="icon icon-down"></span>
+            展开 (15 行)
+          </button>
+        </div>
+        <button class="code-block-copy" onclick="copyCode(this)">
+          <span class="icon icon-copy"></span>
+          复制
+        </button>
+      </div>
+      <div class="code-block-content">
+        <pre><code>{
+  "<span class="json-key">project</span>": {
+    "<span class="json-key">id</span>": <span class="json-string">"proj-123"</span>,
+    "<span class="json-key">name</span>": <span class="json-string">"示例项目"</span>,
+    "<span class="json-key">framework</span>": <span class="json-string">"react"</span>,
+    "<span class="json-key">files</span>": [
+      {
+        "<span class="json-key">path</span>": <span class="json-string">"/index.html"</span>,
+        "<span class="json-key">type</span>": <span class="json-string">"html"</span>,
+        "<span class="json-key">size</span>": <span class="json-number">2048</span>
+      },
+      {
+        "<span class="json-key">path</span>": <span class="json-string">"/style.css"</span>,
+        "<span class="json-key">type</span>": <span class="json-string">"css"</span>,
+        "<span class="json-key">size</span>": <span class="json-number">1024</span>
+      },
+      {
+        "<span class="json-key">path</span>": <span class="json-string">"/app.js"</span>,
+        "<span class="json-key">type</span>": <span class="json-string">"javascript"</span>,
+        "<span class="json-key">size</span>": <span class="json-number">4096</span>
+      }
+    ]
+  }
+}</code></pre>
+        <div class="code-block-fade"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="demo-section">
+    <h2>3. 复杂 JSON（多种数据类型）</h2>
+    <div class="code-block">
+      <div class="code-block-header">
+        <div class="code-block-header-left">
+          <span class="code-block-label">json</span>
+        </div>
+        <button class="code-block-copy" onclick="copyCode(this)">
+          <span class="icon icon-copy"></span>
+          复制
+        </button>
+      </div>
+      <div class="code-block-content expanded">
+        <pre><code>{
+  "<span class="json-key">response</span>": {
+    "<span class="json-key">status</span>": <span class="json-string">"success"</span>,
+    "<span class="json-key">code</span>": <span class="json-number">200</span>,
+    "<span class="json-key">data</span>": {
+      "<span class="json-key">user</span>": {
+        "<span class="json-key">id</span>": <span class="json-number">12345</span>,
+        "<span class="json-key">name</span>": <span class="json-string">"张三"</span>,
+        "<span class="json-key">email</span>": <span class="json-string">"zhang@example.com"</span>,
+        "<span class="json-key">verified</span>": <span class="json-boolean">true</span>
+      },
+      "<span class="json-key">permissions</span>": [
+        <span class="json-string">"read"</span>,
+        <span class="json-string">"write"</span>,
+        <span class="json-string">"delete"</span>
+      ],
+      "<span class="json-key">metadata</span>": {
+        "<span class="json-key">created_at</span>": <span class="json-string">"2024-01-01T00:00:00Z"</span>,
+        "<span class="json-key">updated_at</span>": <span class="json-null">null</span>,
+        "<span class="json-key">version</span>": <span class="json-number">2.5</span>
+      }
+    }
+  }
+}</code></pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function toggleCollapse(button) {
+      const content = button.closest('.code-block').querySelector('.code-block-content');
+      const icon = button.querySelector('.icon');
+      const isCollapsed = content.classList.contains('expanded');
+
+      if (isCollapsed) {
+        content.classList.remove('expanded');
+        button.innerHTML = '<span class="icon icon-down"></span> 展开 (15 行)';
+      } else {
+        content.classList.add('expanded');
+        button.innerHTML = '<span class="icon icon-up"></span> 收起';
+      }
+    }
+
+    function copyCode(button) {
+      const code = button.closest('.code-block').querySelector('code').textContent;
+      navigator.clipboard.writeText(code).then(() => {
+        const originalHTML = button.innerHTML;
+        button.innerHTML = '<span class="icon icon-check"></span> 已复制';
+        button.style.color = '#10b981';
+
+        setTimeout(() => {
+          button.innerHTML = originalHTML;
+          button.style.color = '';
+        }, 2000);
+      });
+    }
+  </script>
+</body>
+</html>

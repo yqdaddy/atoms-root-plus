@@ -1,6 +1,6 @@
-# Atoms Demo 持久化方案文档
+# Litpp Demo 持久化方案文档
 
-本文档描述 Atoms Demo 的数据持久化架构，包括 localStorage 持久化、沙箱安全、导出/导入功能与数据迁移。
+本文档描述 Litpp Demo 的数据持久化架构，包括 localStorage 持久化、沙箱安全、导出/导入功能与数据迁移。
 
 ## 1. localStorage 持久化架构
 

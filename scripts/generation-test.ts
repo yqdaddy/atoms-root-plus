@@ -493,7 +493,7 @@ async function exploreEntry(browser: Awaited<ReturnType<typeof chromium.launch>>
 async function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   console.log('==================================================');
-  console.log(' Atoms Demo 生成流程真实验证（阶段二）');
+  console.log(' Litpp Demo 生成流程真实验证（阶段二）');
   console.log(` 目标: ${BASE_URL}`);
   console.log('==================================================\n');
 

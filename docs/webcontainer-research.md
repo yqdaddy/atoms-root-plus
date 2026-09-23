@@ -71,7 +71,7 @@ WebContainer 是 StackBlitz 开发的浏览器内 Node.js 运行时，通过 Ser
 - 长时间运行的后端服务（内存限制）
 - 需要数据库持久化（仅支持内存数据库）
 
-**Atoms Demo 的需求匹配度**：
+**Litpp Demo 的需求匹配度**：
 
 | 需求 | 匹配度 | 说明 |
 |------|--------|------|
@@ -1008,4 +1008,4 @@ export const previewManager = new PreviewManager();
 
 **文档版本**: v1.0
 **最后更新**: 2024-09
-**维护者**: Atoms Demo 后端架构师
+**维护者**: Litpp Demo 后端架构师

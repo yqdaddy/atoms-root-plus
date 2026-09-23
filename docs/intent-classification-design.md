@@ -52,7 +52,7 @@ interface AgentDefinition {
 
 ---
 
-## 2. Atoms Demo 设计
+## 2. Litpp Demo 设计
 
 ### 2.1 意图分类体系
 

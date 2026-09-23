@@ -105,7 +105,7 @@ function getAllProjectIds(): string[] {
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (!key || !key.startsWith('atoms:v1:projects:') || key === 'atoms:v1:projects') {
+      if (!key || !key.startsWith('litpp:v1:projects:') || key === 'litpp:v1:projects') {
         continue;
       }
 

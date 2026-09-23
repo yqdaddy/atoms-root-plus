@@ -1,6 +1,6 @@
 # 多文件项目生成技术设计文档
 
-> Owner：dev-atoms-ai-engineer
+> Owner：dev-litpp-ai-engineer
 > 版本：v1
 > 日期：2026-09-20
 > 状态：设计草案
@@ -9,7 +9,7 @@
 
 ### 1.1 当前限制
 
-当前 Atoms Demo 只生成单文件 HTML 应用，存在以下限制：
+当前 Litpp Demo 只生成单文件 HTML 应用，存在以下限制：
 
 1. **代码组织困难**：复杂应用的 HTML/CSS/JS 全部混在一个文件，难以维护
 2. **无法体现工程化**：用户看不到真实项目的文件结构
@@ -157,7 +157,7 @@ export const ANALYST_ITERATION_CONTEXT_BLOCK = `## 现有项目文件结构
 #### 3.2.1 首次生成 Prompt
 
 ```typescript
-export const ENGINEER_MULTI_FILE_SYSTEM_PROMPT = `你是 Atoms 平台的前端工程师。你根据功能清单生成一个多文件结构的前端项目。你输出 JSON 格式的文件列表。
+export const ENGINEER_MULTI_FILE_SYSTEM_PROMPT = `你是 Litpp 平台的前端工程师。你根据功能清单生成一个多文件结构的前端项目。你输出 JSON 格式的文件列表。
 
 ## 输出格式
 只输出一个 JSON 对象，禁止输出任何解释文字。结构如下：
@@ -228,7 +228,7 @@ export function Header() { ... }
 ### 3.3 审查者 Prompt 扩展
 
 ```typescript
-export const REVIEWER_MULTI_FILE_SYSTEM_PROMPT = `你是 Atoms 平台的质量审查者。你审查多文件项目是否合格交付。
+export const REVIEWER_MULTI_FILE_SYSTEM_PROMPT = `你是 Litpp 平台的质量审查者。你审查多文件项目是否合格交付。
 
 ## 审查维度
 1. 结构完整：index.html 存在且有效，所有引用的文件都存在

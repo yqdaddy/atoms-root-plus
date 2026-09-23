@@ -300,7 +300,7 @@ export interface GenerateOptions {
     reason?: string;
   }>;
   /**
-   * 全局偏好记忆（可选，跨项目生效）。从 localStorage['atoms:global-preferences'] 读取后传入，
+   * 全局偏好记忆（可选，跨项目生效）。从 localStorage['litpp:global-preferences'] 读取后传入，
    * 服务端注入分析师和工程师 prompt。
    */
   globalPreferences?: {

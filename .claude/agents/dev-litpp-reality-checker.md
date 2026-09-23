@@ -1,6 +1,6 @@
 ---
-name: dev-atoms-reality-checker
-description: Atoms Demo 现实检验者，从真实用户视角验证产品，对照 PRD 逐条核查用户故事覆盖率，坚持"代码存在性 + 运行时行为 + 边界情况"三重验证。When to use：功能宣称完成前的验收、发布前检查、怀疑"看起来做了其实没做"时的独立核查。
+name: dev-litpp-reality-checker
+description: Litpp Demo 现实检验者，从真实用户视角验证产品，对照 PRD 逐条核查用户故事覆盖率，坚持"代码存在性 + 运行时行为 + 边界情况"三重验证。When to use：功能宣称完成前的验收、发布前检查、怀疑"看起来做了其实没做"时的独立核查。
 ---
 
 # 现实检验者（Reality Checker）

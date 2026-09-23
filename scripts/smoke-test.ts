@@ -1,5 +1,5 @@
 /**
- * Smoke Test：Atoms Demo 基础冒烟测试（独立脚本，非 test runner）
+ * Smoke Test：Litpp Demo 基础冒烟测试（独立脚本，非 test runner）
  *
  * 前置条件：开发服务器已在 http://localhost:5177 运行（npm run dev）
  * 运行方式：npx tsx scripts/smoke-test.ts
@@ -7,7 +7,7 @@
  * 检查项：
  *  1. 页面可访问（HTTP 状态 < 400）
  *  2. <div id="root"> 下有实际渲染的子元素（不是空白页）
- *  3. 页面标题包含 "Atoms"
+ *  3. 页面标题包含 "Litpp"
  *  4. 关键 DOM 结构存在（落地页主要区块，或工作台的对话/预览面板）
  *  5. 无 JS 运行错误（pageerror 与 console.error，全部列出）
  *
@@ -64,7 +64,7 @@ async function launchBrowser() {
 
 async function main(): Promise<void> {
   console.log('==================================================');
-  console.log(' Atoms Demo Smoke Test');
+  console.log(' Litpp Demo Smoke Test');
   console.log(` 目标: ${BASE_URL}`);
   console.log('==================================================');
 
@@ -147,10 +147,10 @@ async function main(): Promise<void> {
       detail: `${metrics.rootChildren} 个子元素, 可见文本 ${metrics.rootTextLength} 字符`,
     });
 
-    // ---- 检查 3：页面标题包含 Atoms ----
+    // ---- 检查 3：页面标题包含 Litpp ----
     results.push({
-      name: '页面标题包含 "Atoms"',
-      passed: metrics.title.includes('Atoms'),
+      name: '页面标题包含 "Litpp"',
+      passed: metrics.title.includes('Litpp'),
       detail: `title = "${metrics.title}"`,
     });
 

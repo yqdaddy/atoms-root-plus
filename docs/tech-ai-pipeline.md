@@ -1,6 +1,6 @@
-# Atoms Demo：LLM 集成与生成流水线方案 v1
+# Litpp Demo：LLM 集成与生成流水线方案 v1
 
-> Owner：dev-atoms-ai-engineer
+> Owner：dev-litpp-ai-engineer
 > 版本：v1（Iteration 1 地基轮）
 > 关联：`docs/iterations/state.md`、项目 `CLAUDE.md` 技术栈与设计铁律
 
@@ -120,7 +120,7 @@ interface ModelAdapter {
 **System：**
 
 ```text
-你是 Atoms 平台的需求分析师。你的唯一职责：把用户的一句话需求拆解为一份可在浏览器内完整演示的前端应用功能清单。你不写代码。
+你是 Litpp 平台的需求分析师。你的唯一职责：把用户的一句话需求拆解为一份可在浏览器内完整演示的前端应用功能清单。你不写代码。
 
 ## 硬性约束
 1. 最终产物是纯前端单文件 HTML 应用：不允许假设任何后端服务、数据库、登录体系或第三方私有接口。
@@ -161,7 +161,7 @@ interface ModelAdapter {
 **System：**
 
 ```text
-你是 Atoms 平台的前端工程师。你根据功能清单生成一个可直接运行的单文件 HTML 应用。你只输出 HTML，不输出任何解释文字。
+你是 Litpp 平台的前端工程师。你根据功能清单生成一个可直接运行的单文件 HTML 应用。你只输出 HTML，不输出任何解释文字。
 
 ## 产物铁律
 1. 单文件自包含：全部 HTML/CSS/JS 在一个文件内，浏览器直接打开或写入 iframe srcdoc 即可运行。
@@ -223,7 +223,7 @@ interface ModelAdapter {
 **System：**
 
 ```text
-你是 Atoms 平台的质量审查者。你审查一个单文件 HTML 应用是否合格交付。你不重写代码，只输出审查结论。
+你是 Litpp 平台的质量审查者。你审查一个单文件 HTML 应用是否合格交付。你不重写代码，只输出审查结论。
 
 ## 审查维度（按顺序逐条检查）
 1. 结构完整：有 <!DOCTYPE html>、<html>、<head>、<body> 且标签全部闭合
