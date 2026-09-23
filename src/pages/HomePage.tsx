@@ -8,7 +8,6 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Icon } from '@iconify/react';
 import { useProjectStore } from '../stores/projectStore';
 import { useChatStore, getCurrentPhaseText } from '../stores/chatStore';
-import type { FileGenerationStatus } from '../stores/chatStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useAuthStore } from '../stores/authStore'; // F-001: 首页登录守卫
 import { saveShare, getShareUrl } from '../utils/share';
@@ -17,7 +16,7 @@ import { ApiError } from '../services/apiClient';
 import { getAIAPI, type StreamEvent, type GenerateOptions, validateGeneratedHtml, type DemoTemplateId, type FeatureList } from '../services/ai';
 import { approveAndContinue } from '../services/ai/liveEngine';
 import { cancelActiveRun } from '../services/ai/activeRun';
-import { ENTRY_FILE_PATH, type ProjectFramework, type ChatMessage as ProjectChatMessage, type FileNode as ProjectFileNode } from '../types/project';
+import { ENTRY_FILE_PATH, type ProjectFramework, type ChatMessage as ProjectChatMessage, type FileNode as ProjectFileNode, type ChangeList } from '../types/project';
 import { loadMemoryForGeneration, isRecallQuery, generateRecallResponse, extractAndUpdateGlobalPreferences } from '../services/memory';
 import { toast } from '../components/Toast';
 import { HomeAuthControls } from '../components/AuthControls';
@@ -30,14 +29,15 @@ import type { ConfirmedRequirement, OptimizedRequirement } from '../services/ai/
 import { extractProgressInfo, parseReviewChecks } from '../utils/streamParser';
 import { ReviewSummary } from '../components/ReviewSummary';
 import { extractPreferences } from '../services/ai/preferenceExtractor';
-import type { ChangeList } from '../services/ai/types';
-import { DiffViewer } from '../components/DiffViewer';
 import { StreamingMessage } from '../components/StreamingMessage';
-import ReactMarkdown from 'react-markdown';
+import MessageRenderer from '../components/MessageRenderer';
 import { ImagePreview } from '../components/ImagePreview';
 import { CommandDropdown } from '../commands/CommandDropdown';
 import { parseCommandInput, executeCommand, type CommandContext } from '../commands/index';
 import { useKeybinding } from '../hooks/useKeybinding';
+import { MessageGroupContainer, groupMessages } from '../components/MessageGroup';
+import { looksStuck } from '../lib/progressEstimator';
+import { BuildGroup } from '../components/BuildGroup';
 
 /** 图片限制配置 */
 const IMAGE_CONFIG = {
@@ -45,6 +45,20 @@ const IMAGE_CONFIG = {
   maxCount: 4,
   allowedTypes: ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'],
 };
+
+/**
+ * 格式化运行时长（用于运行时钟显示）
+ * @param ms 毫秒数
+ * @returns 格式化后的时长字符串
+ */
+function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return '< 1分钟';
+  const minutes = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  if (minutes < 5) return `${minutes}分${secs}秒`;
+  return `${minutes}分钟`;
+}
 
 /** 一键部署入口开关：上线时改为 true 即恢复完整部署流程 */
 const DEPLOY_ENABLED = false;
@@ -101,11 +115,6 @@ function formatTime(date: Date): string {
   const hours = String(date.getHours()).padStart(2, '0');
   const minutes = String(date.getMinutes()).padStart(2, '0');
   return `${month}/${day} ${hours}:${minutes}`;
-}
-
-/** 判断是否为 FeatureList 类型 */
-function isFeatureList(features: unknown): features is FeatureList {
-  return typeof features === 'object' && features !== null && 'appTitle' in features && 'features' in features;
 }
 
 /** 意图类型到标签文案和颜色的映射 */
@@ -180,60 +189,13 @@ function highlightHtml(code: string): React.ReactNode {
   return <span dangerouslySetInnerHTML={{ __html: highlighted }} />;
 }
 
-/** 文件树项组件 */
-function FileTreeItem({ file, isActive }: { file: FileGenerationStatus; isActive: boolean }) {
-  const statusIcon = useMemo(() => {
-    switch (file.status) {
-      case 'pending':
-        return <span className="w-4 h-4 flex items-center justify-center text-[var(--color-text-tertiary)]">○</span>;
-      case 'generating':
-        // 状态点：生成中闪烁
-        return (
-          <div className="w-4 h-4 flex items-center justify-center">
-            <div className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-pulse" />
-          </div>
-        );
-      case 'completed':
-        // 状态点：完成绿色
-        return <Icon icon="lucide:check" width={14} height={14} className="text-green-500" />;
-      case 'failed':
-        // 状态点：失败红色
-        return <Icon icon="lucide:x" width={14} height={14} className="text-red-500" />;
-    }
-  }, [file.status]);
-
-  return (
-    <div className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-[13px] transition-colors ${
-      isActive ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]' : 'text-[var(--color-text-secondary)]'
-    }`}>
-      {statusIcon}
-      <Icon icon="lucide:file-code" width={14} height={14} />
-      <span className="flex-1 truncate">{file.name}</span>
-      {file.status === 'generating' && file.charCount > 0 && (
-        <span className="text-[11px] text-[var(--color-text-tertiary)] tabular-nums">
-          {file.lineCount} 行
-        </span>
-      )}
-      {file.status === 'completed' && file.charCount > 0 && (
-        <span className="text-[11px] text-[var(--color-text-tertiary)] tabular-nums">
-          {(file.charCount / 1024).toFixed(1)}KB
-        </span>
-      )}
-    </div>
-  );
-}
-
 /** 消息气泡组件（类 atoms.dev 风格） */
 function MessageBubble({
   message,
-  onApprove,
 }: {
   message: UIMessage;
-  onApprove?: (sessionId: string) => void;
 }) {
   const isUser = message.role === 'user';
-  const isWaitingApproval = message.status === 'waiting_approval';
-  const features = message.features;
 
   return (
     <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
@@ -273,59 +235,22 @@ function MessageBubble({
           // 用户消息：纯文本显示
           <p className="text-[13px] leading-[1.6] whitespace-pre-wrap">{message.content}</p>
         ) : (
-          // AI 消息：Markdown 渲染
-          <div className="prose prose-sm max-w-none text-[13px] text-[var(--color-text-primary)] leading-[1.6]">
-            <ReactMarkdown>{message.content}</ReactMarkdown>
-          </div>
+          // AI 消息：使用 MessageRenderer（支持 JSON 结构化渲染 + Markdown）
+          <MessageRenderer content={message.content} />
         )}
 
-        {/* 功能清单展示 */}
-        {!isUser && isWaitingApproval && features && isFeatureList(features) && (
-          <div className="mt-3 pt-3 border-t border-[var(--color-border-default)]">
-            <h4 className="text-[12px] font-medium text-[var(--color-text-primary)] mb-2">功能清单</h4>
-            <div className="space-y-1.5">
-              {features.features.map((f) => (
-                <div key={f.id} className="flex items-start gap-2">
-                  <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${
-                    f.priority === 'must'
-                      ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
-                      : 'bg-[var(--color-text-tertiary)]/10 text-[var(--color-text-secondary)]'
-                  }`}>
-                    {f.priority === 'must' ? '必须' : '可选'}
-                  </span>
-                  <span className="text-[12px] text-[var(--color-text-secondary)]">{f.name}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* 状态标签或批准按钮 */}
+        {/* 状态标签 */}
         {!isUser && message.status && (
           <div className="flex items-center gap-2 mt-2 pt-2 border-t border-[var(--color-border-default)]">
-            {isWaitingApproval ? (
-              <>
-                <span className="text-[11px] text-amber-500">等待批准</span>
-                {message.sessionId && onApprove && (
-                  <button
-                    onClick={() => onApprove(message.sessionId!)}
-                    className="ml-auto px-3 py-1 rounded-lg bg-[var(--color-accent)] text-white text-[12px] font-medium hover:bg-[var(--color-accent-hover)] transition-colors"
-                  >
-                    批准
-                  </button>
-                )}
-              </>
-            ) : (
-              <span className={`text-[11px] ${
-                message.status === 'done' ? 'text-green-500' :
-                message.status === 'error' ? 'text-red-500' :
-                'text-[var(--color-accent)]'
-              }`}>
-                {message.status === 'done' ? '已处理' :
-                 message.status === 'error' ? '处理失败' :
-                 '处理中...'}
-              </span>
-            )}
+            <span className={`text-[11px] ${
+              message.status === 'done' ? 'text-green-500' :
+              message.status === 'error' ? 'text-red-500' :
+              'text-[var(--color-accent)]'
+            }`}>
+              {message.status === 'done' ? '已处理' :
+               message.status === 'error' ? '处理失败' :
+               '处理中...'}
+            </span>
           </div>
         )}
       </div>
@@ -349,20 +274,20 @@ export default function HomePage() {
   const [isDeploying, setIsDeploying] = useState(false);
   // 当前消息的 UI 状态（步骤数、status 等）
   const [messageUIState, setMessageUIState] = useState<{ steps: number; status: MessageStatus; features?: FeatureList | { raw: string }; sessionId?: string } | null>(null);
-  // 待确认的变更（diff 模式）：用户批准后应用，拒绝则丢弃
-  const [pendingDiff, setPendingDiff] = useState<{
-    changes: ChangeList;
-    files: Record<string, ProjectFileNode>;
-  } | null>(null);
   // 已粘贴/拖拽的图片列表（Base64 Data URL）
   const [pastedImages, setPastedImages] = useState<string[]>([]);
-  // 是否正在拖拽图片
+  // 是否正在拖拽图片（使用计数器避免子元素触发 dragLeave）
   const [isDragging, setIsDragging] = useState(false);
+  const dragCounterRef = useRef(0);
   // 命令下拉是否可见
   const [showCommandDropdown, setShowCommandDropdown] = useState(false);
   // 重命名模态框
   const [showRenameModal, setShowRenameModal] = useState(false);
   const [renameValue, setRenameValue] = useState('');
+  // 长对话滚动加载：初始显示 12 组，每次加载 12 组
+  const INITIAL_VISIBLE_GROUPS = 12;
+  const LOAD_STEP = 12;
+  const [visibleGroupCount, setVisibleGroupCount] = useState(INITIAL_VISIBLE_GROUPS);
   const navigate = useNavigate();
 
   // F-001: 首页登录守卫
@@ -372,9 +297,80 @@ export default function HomePage() {
   // 流式输出状态
   const streamBuffer = useChatStore((state) => state.streamBuffer);
   const reviewChecks = useChatStore((state) => state.reviewChecks);
+  const restoreStartTime = useChatStore((state) => state.restoreStartTime);
   const streamingText = getCurrentPhaseText(streamBuffer);
   const scrollRef = useRef<HTMLDivElement>(null);
   const codeRef = useRef<HTMLDivElement>(null);
+
+  // 运行时钟：每秒更新显示
+  const [elapsedTime, setElapsedTime] = useState<number>(0);
+
+  // F-005: 步骤计数（用于卡住检测）
+  const [stepCount, setStepCount] = useState<number>(0);
+
+  // F-005: 上一次的 stage，用于检测 stage 变化
+  const prevStageRef = useRef<string | null>(null);
+
+  // F-002: 页面刷新时恢复运行时钟
+  useEffect(() => {
+    // 检查是否正在生成中（从 projectStore 获取当前 runId）
+    const currentProjectState = useProjectStore.getState().currentProject;
+    if (currentProjectState?.status === 'generating') {
+      // 尝试从 sessionStorage 恢复 startTime
+      const runId = streamBuffer.runId;
+      if (runId) {
+        restoreStartTime(runId);
+      }
+    }
+  }, []); // 仅在首次渲染时执行
+
+  // 运行时钟更新：生成中时每秒刷新
+  useEffect(() => {
+    if (isGenerating && streamBuffer.startTime) {
+      const updateTimer = () => {
+        setElapsedTime(Date.now() - streamBuffer.startTime!);
+      };
+
+      // 立即更新一次
+      updateTimer();
+
+      // 每秒更新
+      const interval = setInterval(updateTimer, 1000);
+
+      return () => clearInterval(interval);
+    }
+    // 非 generating 状态时重置
+    setElapsedTime(0);
+    return undefined;
+  }, [isGenerating, streamBuffer.startTime]);
+
+  // F-005: 步骤计数（监听 stage 变化）
+  useEffect(() => {
+    const currentStage = streamBuffer.stage;
+    const prevStage = prevStageRef.current;
+
+    // 如果 stage 变化且不是首次渲染，则增加步骤计数
+    if (prevStage !== null && prevStage !== currentStage) {
+      setStepCount((count) => count + 1);
+    }
+
+    // 更新 prevStage
+    prevStageRef.current = currentStage;
+  }, [streamBuffer.stage]);
+
+  // F-005: 生成完成时重置步骤计数
+  useEffect(() => {
+    if (!isGenerating) {
+      setStepCount(0);
+      prevStageRef.current = null;
+    }
+  }, [isGenerating]);
+
+  // F-005: 卡住检测
+  const isStuck = useMemo(() => {
+    if (!isGenerating || !streamBuffer.startTime) return false;
+    return looksStuck(elapsedTime, stepCount, isGenerating);
+  }, [isGenerating, streamBuffer.startTime, elapsedTime, stepCount]);
 
   // 渲染阶段立即判断：刷新/直接访问时清除当前项目（导航进入则保留）
   // 注意：必须在读取 currentProject 之前执行，避免先渲染旧项目再清除导致的闪烁
@@ -443,7 +439,7 @@ export default function HomePage() {
   }, [showRenameModal, currentProject]);
 
   const { createProject, updateEntryFile, updateFiles, updateProjectStatus, addMessage, saveVersion } = useProjectStore();
-  const { startGeneration, updateStage, appendDelta, finishGeneration, setError, setAwaitingApproval, updateFileStatus, setReviewChecks, setIntent } = useChatStore();
+  const { startGeneration, updateStage, appendDelta, finishGeneration, setError, updateFileStatus, setReviewChecks, setIntent } = useChatStore();
   const { apiKey, getEffectiveBaseURL } = useSettingsStore();
 
   // 提示词优化器（需求确认前置流程）
@@ -488,12 +484,29 @@ export default function HomePage() {
     return uiMessages;
   }, [currentProject?.chat, pendingMessageId, messageUIState]);
 
+  // F-003: 获取原始的 ChatMessage 数组用于分组
+  const chatMessages = useMemo(() => {
+    return currentProject?.chat ?? [];
+  }, [currentProject?.chat]);
+
+  // 发送新消息后自动平滑滚动到底部（仅消息数增加时触发，不影响"加载更多"的滚动补偿）
+  const prevMessageCountRef = useRef(0);
+  useEffect(() => {
+    const count = chatMessages.length;
+    if (count > prevMessageCountRef.current && scrollRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    }
+    prevMessageCountRef.current = count;
+  }, [chatMessages.length]);
+
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
-    if (value.length <= 2000) {
+    if (value.length <= 5000) {
       setInputValue(value);
       // 检测命令：以 / 开头时显示下拉
       setShowCommandDropdown(value.trim().startsWith('/'));
+    } else {
+      toast.info('内容过长，最多支持 5000 字符');
     }
   };
 
@@ -512,7 +525,6 @@ export default function HomePage() {
   // 处理生成事件
   const handleStreamEvent = useCallback(
     (event: StreamEvent) => {
-      console.log('[HomePage] 收到事件:', event.type, event.payload);
       switch (event.type) {
         case 'stage':
           updateStage(event.payload.stage, event.payload.attempt, event.payload.message, event.payload.intent);
@@ -534,7 +546,7 @@ export default function HomePage() {
           break;
         }
         case 'done': {
-          console.log('[HomePage] done 事件:', {
+          console.debug('[HomePage] done 事件:', {
             htmlLength: event.payload.html?.length || 0,
             htmlPreview: event.payload.html?.slice(0, 200) || '(empty)',
             hasFiles: !!(event.payload as { files?: Record<string, ProjectFileNode> }).files,
@@ -568,14 +580,15 @@ export default function HomePage() {
           // 对话模式：有 analysis 字段时，作为 assistant 消息展示
           // （analyze/diagnose 意图、分析师澄清、diff 模式空变更均走此分支）
           if (hasAnalysis && !hasFiles && !payload.html) {
-            console.log('[HomePage] 对话模式，analysis 字段长度:', payload.analysis!.length);
+            console.debug('[HomePage] 对话模式，analysis 字段长度:', payload.analysis!.length);
             finishGeneration();
             setIsGenerating(false);
             // 对话模式不改动项目文件，恢复生成前状态（runGeneration 已置为 generating）
             revertProjectStatusAfterFailure();
 
-            // 将分析/诊断结果作为 assistant 消息保存
-            addMessage({ role: 'assistant', content: payload.analysis! });
+            // 将分析/诊断结果作为 assistant 消息保存（带上 runId 和 intentType）
+            // 注意：使用 streamBuffer.runId 而不是 currentRunId state，确保获取最新值
+            addMessage({ role: 'assistant', content: payload.analysis!, runId: useChatStore.getState().streamBuffer.runId ?? undefined, intentType: streamBuffer.intent?.type });
             toast.success('分析完成');
 
             // 清除 UI 状态
@@ -584,17 +597,52 @@ export default function HomePage() {
             break;
           }
 
-          // diff 模式：有 changes 时先显示 DiffViewer，等待用户确认
+          // diff 模式：直接应用变更，无需用户确认
           if (hasChanges && hasFiles) {
-            console.log('[HomePage] diff 模式，等待用户确认变更');
+            console.debug('[HomePage] diff 模式，直接应用变更');
+            const files = payload.files!;
+
+            // 获取入口文件内容用于验证
+            const entryPath = (event.payload as { entryFile?: string }).entryFile ?? ENTRY_FILE_PATH;
+            const entryContent = files[entryPath]?.content ?? files[ENTRY_FILE_PATH]?.content ?? '';
+            const validation = validateGeneratedHtml(entryContent);
+
+            // 保存多文件
+            updateFiles(files, entryPath);
+            updateProjectStatus(validation.ok ? 'ready' : 'draft');
             finishGeneration();
             setIsGenerating(false);
-            setPendingDiff({
-              changes: payload.changes!,
-              files: payload.files!,
-            });
-            // 添加提示消息
-            addMessage({ role: 'assistant', content: `代码修改完成，${payload.changes!.summary}。请确认后应用变更。` });
+
+            // 组合完整的 LLM 输出（分析 + 生成内容）
+            const filesBuffer = useChatStore.getState().streamBuffer;
+            const fullContent = [
+              filesBuffer.analyzeText,
+              filesBuffer.generateText,
+            ].filter(Boolean).join('\n\n').trim();
+
+            if (validation.ok) {
+              // 保存版本快照
+              const summary = `应用变更：${payload.changes!.summary}`;
+              saveVersion(summary, 'iteration');
+              addMessage({
+                role: 'assistant',
+                content: fullContent || `变更已应用：${payload.changes!.summary}`,
+                runId: useChatStore.getState().streamBuffer.runId ?? undefined,
+                intentType: streamBuffer.intent?.type,
+              });
+              toast.success('变更已应用');
+            } else {
+              const warningMsg = `变更已应用，但代码存在 ${validation.issues.length} 个问题`;
+              addMessage({
+                role: 'assistant',
+                content: fullContent || warningMsg,
+                runId: useChatStore.getState().streamBuffer.runId ?? undefined,
+                intentType: streamBuffer.intent?.type,
+              });
+              toast.info(warningMsg);
+              console.warn('[HomePage] 验证问题:', validation.issues);
+            }
+
             // 清除 UI 状态
             setPendingMessageId(null);
             setMessageUIState(null);
@@ -604,7 +652,7 @@ export default function HomePage() {
           if (hasFiles) {
             // 多文件模式（非 diff 模式或 diff 解析失败后的降级）
             const files = payload.files!;
-            console.log('[HomePage] 多文件模式，文件数:', Object.keys(files).length);
+            console.debug('[HomePage] 多文件模式，文件数:', Object.keys(files).length);
 
             // 获取入口文件内容用于验证
             const entryPath = (event.payload as { entryFile?: string }).entryFile ?? ENTRY_FILE_PATH;
@@ -630,17 +678,21 @@ export default function HomePage() {
                 const isFirstVersion = useProjectStore.getState().versions.length === 0;
                 saveVersion(summary, isFirstVersion ? 'initial' : 'iteration');
 
-                // 添加完整消息：优先使用 LLM 输出，fallback 到简短提示
+                // 添加完整消息：优先使用 LLM 输出，fallback 到简短提示（带上 runId 和 intentType）
                 addMessage({
                   role: 'assistant',
-                  content: fullContent || `应用已生成完成！共 ${Object.keys(files).length} 个文件。你可以继续描述需求来修改它。`
+                  content: fullContent || `应用已生成完成！共 ${Object.keys(files).length} 个文件。你可以继续描述需求来修改它。`,
+                  runId: useChatStore.getState().streamBuffer.runId ?? undefined,
+                  intentType: streamBuffer.intent?.type,
                 });
                 toast.success('生成完成');
               } else {
                 const warningMsg = `生成完成，但代码存在 ${validation.issues.length} 个问题，可能影响功能`;
                 addMessage({
                   role: 'assistant',
-                  content: fullContent || warningMsg
+                  content: fullContent || warningMsg,
+                  runId: useChatStore.getState().streamBuffer.runId ?? undefined,
+                  intentType: streamBuffer.intent?.type,
                 });
                 toast.info(warningMsg);
                 console.warn('[HomePage] 验证问题:', validation.issues);
@@ -651,13 +703,13 @@ export default function HomePage() {
             setMessageUIState(null);
           } else if (event.payload.html && event.payload.html.length > 0) {
             // 单文件模式（向后兼容）
-            console.log('[HomePage] 单文件模式');
+            console.debug('[HomePage] 单文件模式');
             const validation = validateGeneratedHtml(event.payload.html);
-            console.log('[HomePage] 验证结果:', validation);
+            console.debug('[HomePage] 验证结果:', validation);
 
-            console.log('[HomePage] 调用 updateEntryFile');
+            console.debug('[HomePage] 调用 updateEntryFile');
             updateEntryFile(event.payload.html);
-            console.log('[HomePage] updateEntryFile 完成');
+            console.debug('[HomePage] updateEntryFile 完成');
             updateProjectStatus(validation.ok ? 'ready' : 'draft');
             finishGeneration();
             setIsGenerating(false);
@@ -675,17 +727,21 @@ export default function HomePage() {
               const isFirstVersion = useProjectStore.getState().versions.length === 0;
               saveVersion(summary, isFirstVersion ? 'initial' : 'iteration');
 
-              // 添加完整消息：优先使用 LLM 输出，fallback 到简短提示
+              // 添加完整消息：优先使用 LLM 输出，fallback 到简短提示（带上 runId 和 intentType）
               addMessage({
                 role: 'assistant',
-                content: fullContent || '应用已生成完成！你可以继续描述需求来修改它。'
+                content: fullContent || '应用已生成完成！你可以继续描述需求来修改它。',
+                runId: useChatStore.getState().streamBuffer.runId ?? undefined,
+                intentType: streamBuffer.intent?.type,
               });
               toast.success('生成完成');
             } else {
               const warningMsg = `生成完成，但代码存在 ${validation.issues.length} 个问题，可能影响功能`;
               addMessage({
                 role: 'assistant',
-                content: fullContent || warningMsg
+                content: fullContent || warningMsg,
+                runId: useChatStore.getState().streamBuffer.runId ?? undefined,
+                intentType: streamBuffer.intent?.type,
               });
               toast.info(warningMsg);
               console.warn('[HomePage] 验证问题:', validation.issues);
@@ -704,7 +760,7 @@ export default function HomePage() {
             setIsGenerating(false);
             toast.error(errorMsg);
             setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
-            addMessage({ role: 'assistant', content: errorMsg });
+            addMessage({ role: 'assistant', content: errorMsg, runId: useChatStore.getState().streamBuffer.runId ?? undefined, intentType: streamBuffer.intent?.type });
             setPendingMessageId(null);
           }
           break;
@@ -717,61 +773,36 @@ export default function HomePage() {
           toast.error(event.payload.message, 6000);
           // 更新 UI 状态为错误
           setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
-          // 添加错误消息到持久化
-          addMessage({ role: 'assistant', content: event.payload.message });
+          // 添加错误消息到持久化（带上 runId 和 intentType）
+          addMessage({ role: 'assistant', content: event.payload.message, runId: useChatStore.getState().streamBuffer.runId ?? undefined, intentType: streamBuffer.intent?.type });
           setPendingMessageId(null);
           break;
         case 'approval_required': {
-          // 分析完成，等待批准。不调用 finishGeneration，避免 stage 变成 done
-          setAwaitingApproval(true);
-          setIsGenerating(false);
-          // 更新消息状态，显示分析结果和批准按钮
-          const features = event.payload.features;
+          // 分析完成，直接继续生成，无需等待批准
           const sessionId = event.payload.sessionId;
-          setMessageUIState(prev => {
-            const base = prev ? {
-              ...prev,
-              steps: (prev.steps || 0) + 1,
-            } : {
-              steps: 1,
-            };
-            return {
-              ...base,
-              status: 'waiting_approval',
-              ...(features ? { features } : {}),
-              ...(sessionId ? { sessionId } : {}),
-            };
-          });
+          if (sessionId) {
+            console.debug('[HomePage] 分析完成，自动继续生成');
+            // 保持生成状态
+            setIsGenerating(true);
+            // 异步继续生成
+            approveAndContinue(sessionId, handleStreamEvent).catch((error) => {
+              console.error('[HomePage] 自动继续生成失败:', error);
+              const errorMsg = '生成过程发生异常，请重试';
+              setError(errorMsg);
+              revertProjectStatusAfterFailure();
+              setIsGenerating(false);
+              toast.error(errorMsg);
+              setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
+              addMessage({ role: 'assistant', content: errorMsg, runId: useChatStore.getState().streamBuffer.runId ?? undefined });
+              setPendingMessageId(null);
+            });
+          }
           break;
         }
       }
     },
-    [updateStage, appendDelta, updateEntryFile, updateFiles, updateProjectStatus, setError, addMessage, setAwaitingApproval]
+    [updateStage, appendDelta, updateEntryFile, updateFiles, updateProjectStatus, setError, addMessage]
   );
-
-  // 批准后继续生成
-  const handleApprove = useCallback(async (sessionId: string) => {
-    setAwaitingApproval(false); // 清除等待批准状态
-    setIsGenerating(true);
-    updateProjectStatus('generating');
-    startGeneration(`approve-${Date.now()}`);
-
-    // 更新消息状态为处理中
-    setMessageUIState(prev => prev ? { ...prev, status: 'processing' } : { steps: 0, status: 'processing' });
-
-    try {
-      await approveAndContinue(sessionId, handleStreamEvent);
-    } catch (error) {
-      const errorMsg = '生成过程发生异常，请重试';
-      setError(errorMsg);
-      revertProjectStatusAfterFailure();
-      setIsGenerating(false);
-      toast.error(errorMsg);
-      setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
-      addMessage({ role: 'assistant', content: errorMsg });
-      setPendingMessageId(null);
-    }
-  }, [handleStreamEvent, updateProjectStatus, startGeneration, setError, addMessage, setAwaitingApproval]);
 
   /**
    * 执行一次三阶段流水线生成。
@@ -784,6 +815,9 @@ export default function HomePage() {
 
     setIsGenerating(true);
 
+    // 生成唯一 runId（用于消息分组）
+    const runId = `run-${Date.now()}`;
+
     // 确保项目存在（首条用户消息才能入库）
     const project = currentProject ?? createProject('未命名项目', selectedFramework);
 
@@ -794,8 +828,11 @@ export default function HomePage() {
     const hasSubstantialContent = entryContent.length > 300 || Object.keys(project.files).some(p => p !== ENTRY_FILE_PATH);
     const isIteration = priorChat.length > 0 || hasSubstantialContent;
 
+    // 推断意图类型（如果没有指定）
+    const intentType: 'create' | 'modify' | 'analyze' | 'diagnose' = opts?.intentOverride ?? (isIteration ? 'modify' : 'create');
+
     // 调试日志：追踪 framework 参数传递
-    console.log('[HomePage] runGeneration 参数追踪:', {
+    console.debug('[HomePage] runGeneration 参数追踪:', {
       selectedFramework,
       projectFramework: project.framework,
       isIteration,
@@ -803,24 +840,25 @@ export default function HomePage() {
       entryContentLength: entryContent.length,
       hasSubstantialContent,
       willUseFramework: isIteration ? (project.framework ?? 'html') : selectedFramework,
+      runId,
+      intentType,
     });
 
-    // 添加用户消息到持久化层（包含图片）
-    addMessage({ role: 'user', content: userMessage, images: opts?.images });
+    // 添加用户消息到持久化层（包含图片、runId、意图类型）
+    addMessage({ role: 'user', content: userMessage, images: opts?.images, runId, intentType });
     updateProjectStatus('generating');
 
     // 后台提取项目偏好：从用户消息中识别纠正（如"不要渐变"）与风格偏好（如"深色模式"）
     const extractedPrefs = extractPreferences(project.id, userMessage);
     if (extractedPrefs.length > 0) {
-      console.log('[HomePage] 已提取项目偏好:', extractedPrefs.map(p => `${p.key}=${p.value}`));
+      console.debug('[HomePage] 已提取项目偏好:', extractedPrefs.map(p => `${p.key}=${p.value}`));
     }
 
     // 获取 AI API
     const baseURL = getEffectiveBaseURL();
     const api = getAIAPI(apiKey, baseURL);
 
-    // 开始生成
-    const runId = `run-${Date.now()}`;
+    // 开始生成（使用前面声明的 runId）
     startGeneration(runId);
 
     // 设置当前正在生成的消息 UI 状态
@@ -873,7 +911,7 @@ export default function HomePage() {
       };
 
       // 调试日志：最终发送的 generateOpts
-      console.log('[HomePage] 最终 generateOpts:', {
+      console.debug('[HomePage] 最终 generateOpts:', {
         framework: generateOpts.framework,
         hasCurrentFiles: !!generateOpts.currentFiles,
         hasChatTurns: !!generateOpts.chatTurns,
@@ -979,10 +1017,11 @@ export default function HomePage() {
     if (isRecallQuery(prompt)) {
       const memory = loadMemoryForGeneration(currentProject?.id);
       const response = generateRecallResponse(memory);
-      // 添加用户消息（包含图片）
-      addMessage({ role: 'user', content: prompt, images: pastedImages.length > 0 ? pastedImages : undefined });
+      // 添加用户消息（包含图片）- Recall 查询使用 conversation 意图
+      const recallRunId = `recall-${Date.now()}`;
+      addMessage({ role: 'user', content: prompt, images: pastedImages.length > 0 ? pastedImages : undefined, runId: recallRunId, intentType: 'conversation' });
       // 添加 AI 响应
-      addMessage({ role: 'assistant', content: response });
+      addMessage({ role: 'assistant', content: response, runId: recallRunId, intentType: 'conversation' });
       // 清空图片
       handleClearImages();
       return;
@@ -1204,12 +1243,15 @@ export default function HomePage() {
   }, [handleFiles]);
 
   /**
-   * 处理拖拽进入
+   * 处理拖拽进入（使用计数器避免子元素触发 dragLeave）
    */
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDragging(true);
+    dragCounterRef.current++;
+    if (dragCounterRef.current === 1) {
+      setIsDragging(true);
+    }
   }, []);
 
   /**
@@ -1218,7 +1260,10 @@ export default function HomePage() {
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDragging(false);
+    dragCounterRef.current--;
+    if (dragCounterRef.current === 0) {
+      setIsDragging(false);
+    }
   }, []);
 
   /**
@@ -1235,6 +1280,7 @@ export default function HomePage() {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    dragCounterRef.current = 0; // 重置计数器
     setIsDragging(false);
 
     const files = e.dataTransfer?.files;
@@ -1385,10 +1431,62 @@ export default function HomePage() {
               </div>
             )}
 
-            {/* 消息列表 */}
-            {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} onApprove={handleApprove} />
-            ))}
+            {/* 消息列表（F-003: 分组展示 + 长对话滚动加载） */}
+            {(() => {
+              // 过滤掉 system 消息
+              const visibleMessages = chatMessages.filter((m) => m.role !== 'system');
+              if (visibleMessages.length === 0) return null;
+
+              // 按 runId 分组（升序：最旧在前、最新在后）
+              const groups = groupMessages(visibleMessages);
+
+              // 长对话滚动加载：升序数组上切掉头部（最旧的组），保留最近 visibleGroupCount 组
+              const hiddenCount = Math.max(0, groups.length - visibleGroupCount);
+              const visibleGroups = groups
+                .map((group, gi) => ({ group, gi }))
+                .slice(hiddenCount);
+
+              return (
+                <>
+                  {/* 加载更多按钮：有隐藏分组时显示 */}
+                  {hiddenCount > 0 && (
+                    <button
+                      onClick={() => {
+                        const el = scrollRef.current;
+                        const prevHeight = el ? el.scrollHeight : 0;
+                        setVisibleGroupCount((c) => c + LOAD_STEP);
+                        // 保持滚动位置
+                        requestAnimationFrame(() => {
+                          if (el) {
+                            el.scrollTop += el.scrollHeight - prevHeight;
+                          }
+                        });
+                      }}
+                      className="w-full flex items-center justify-center gap-2 py-2 text-[13px] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-colors"
+                    >
+                      <Icon icon="lucide:chevron-up" width={14} height={14} />
+                      加载更多（还有 {hiddenCount} 组）
+                    </button>
+                  )}
+
+                  {/* 分组消息列表 */}
+                  {visibleGroups.map(({ group, gi }) => {
+                    const isLatest = gi === groups.length - 1; // 列表最后一组是最新组
+
+                    return (
+                      <MessageGroupContainer key={group.runId} group={group} isLatest={isLatest}>
+                        {group.messages.map((msg) => (
+                          <MessageBubble
+                            key={msg.id}
+                            message={toUIMessage(msg) ?? { id: msg.id, role: msg.role as 'user' | 'assistant', content: msg.content, timestamp: new Date(msg.createdAt) }}
+                          />
+                        ))}
+                      </MessageGroupContainer>
+                    );
+                  })}
+                </>
+              );
+            })()}
 
             {/* 流式生成中的消息：在消息列表末尾显示 LLM 的实时输出 */}
             {isGenerating && streamingText && (
@@ -1396,70 +1494,9 @@ export default function HomePage() {
                 content={streamingText}
                 stage={streamBuffer.stage}
                 activeFilePath={streamBuffer.activeFilePath}
+                startTime={streamBuffer.startTime}
+                intentType={streamBuffer.intent?.type}
               />
-            )}
-
-            {/* 独立的批准面板：不依赖 chat 数组中的消息 */}
-            {streamBuffer.awaitingApproval && messageUIState?.status === 'waiting_approval' && messageUIState?.features && (
-              <div className="bg-[var(--color-bg-base)] border border-[var(--color-border-default)] rounded-xl p-4">
-                {/* 标题栏 */}
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center">
-                    <Icon icon="lucide:clipboard-check" width={20} height={20} className="text-amber-500" />
-                  </div>
-                  <div>
-                    <h3 className="text-[14px] font-medium text-[var(--color-text-primary)]">分析完成</h3>
-                    <p className="text-[12px] text-[var(--color-text-tertiary)]">请确认功能清单后批准生成</p>
-                  </div>
-                </div>
-
-                {/* 功能清单 */}
-                {isFeatureList(messageUIState.features) && (
-                  <div className="mb-4">
-                    <h4 className="text-[12px] font-medium text-[var(--color-text-secondary)] mb-2">
-                      {messageUIState.features.appTitle}
-                    </h4>
-                    <div className="space-y-1.5">
-                      {messageUIState.features.features.map((f) => (
-                        <div key={f.id} className="flex items-start gap-2">
-                          <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${
-                            f.priority === 'must'
-                              ? 'bg-[var(--color-accent)]/10 text-[var(--color-accent)]'
-                              : 'bg-[var(--color-text-tertiary)]/10 text-[var(--color-text-secondary)]'
-                          }`}>
-                            {f.priority === 'must' ? '必须' : '可选'}
-                          </span>
-                          <span className="text-[13px] text-[var(--color-text-primary)]">{f.name}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* 操作按钮 */}
-                <div className="flex items-center gap-3 pt-3 border-t border-[var(--color-border-default)]">
-                  <button
-                    onClick={() => {
-                      // 取消批准，重置状态
-                      setAwaitingApproval(false);
-                      setMessageUIState(null);
-                      finishGeneration();
-                      toast.info('已取消生成');
-                    }}
-                    className="px-4 py-2 rounded-lg text-[13px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-base)] transition-colors"
-                  >
-                    取消
-                  </button>
-                  {messageUIState.sessionId && (
-                    <button
-                      onClick={() => handleApprove(messageUIState.sessionId!)}
-                      className="flex-1 px-4 py-2 rounded-lg bg-[var(--color-accent)] text-white text-[13px] font-medium hover:bg-[var(--color-accent-hover)] transition-colors"
-                    >
-                      批准并生成
-                    </button>
-                  )}
-                </div>
-              </div>
             )}
 
             {/* 需求确认面板：优化器流式分析中 / 待确认 / 优化失败 */}
@@ -1475,6 +1512,41 @@ export default function HomePage() {
                 onCancel={handleOptimizerCancel}
                 onRetry={handleOptimizerRetry}
               />
+            )}
+
+            {/* F-005: 卡住警告条 */}
+            {isStuck && (
+              <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center shrink-0">
+                    <Icon icon="lucide:alert-triangle" width={16} height={16} className="text-amber-500" />
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="text-[14px] font-medium text-amber-500 mb-1">生成时间较长</h4>
+                    <p className="text-[13px] text-[var(--color-text-secondary)] mb-3">
+                      生成已耗时超过 15 分钟，建议检查需求是否过于复杂或重新描述需求
+                    </p>
+                    <button
+                      onClick={() => {
+                        // 取消当前生成
+                        cancelActiveRun();
+                        finishGeneration();
+                        setIsGenerating(false);
+                        setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
+                        toast.info('已停止生成，请重新描述需求');
+                        // 输入框获得焦点
+                        const textarea = document.querySelector('textarea');
+                        if (textarea) {
+                          textarea.focus();
+                        }
+                      }}
+                      className="px-4 py-2 rounded-lg bg-amber-500 text-white text-[13px] font-medium hover:bg-amber-600 transition-colors"
+                    >
+                      重新描述需求
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
 
             {/* 生成状态面板 */}
@@ -1498,9 +1570,17 @@ export default function HomePage() {
                         <span className="text-[14px] font-medium text-[var(--color-text-primary)]">
                           {stageTitle}
                         </span>
-                        <span className="text-[12px] text-[var(--color-text-tertiary)]">
-                          {streamBuffer.stageMessage}
-                        </span>
+                        <div className="flex items-center gap-3">
+                          {/* F-002: 运行时钟 */}
+                          {elapsedTime > 0 && (
+                            <span className="text-[12px] text-[var(--color-text-tertiary)] tabular-nums">
+                              {formatDuration(elapsedTime)}
+                            </span>
+                          )}
+                          <span className="text-[12px] text-[var(--color-text-tertiary)]">
+                            {streamBuffer.stageMessage}
+                          </span>
+                        </div>
                       </div>
                       {/* 进度条 */}
                       <div className="flex gap-1.5 mt-2">
@@ -1574,7 +1654,7 @@ export default function HomePage() {
                   )}
                 </div>
 
-                {/* 文件面板：实时生成进度（文件名 + 状态点） */}
+                {/* 文件面板：构建步骤实时显示 */}
                 {streamBuffer.files.length > 0 && (
                   <div className="bg-[var(--color-bg-base)] rounded-xl p-3">
                     <div className="flex items-center gap-2 mb-2 text-[12px] text-[var(--color-text-tertiary)]">
@@ -1584,15 +1664,11 @@ export default function HomePage() {
                         {streamBuffer.files.filter((f) => f.status === 'completed').length}/{streamBuffer.files.length}
                       </span>
                     </div>
-                    <div className="space-y-1">
-                      {streamBuffer.files.map((file) => (
-                        <FileTreeItem
-                          key={file.path}
-                          file={file}
-                          isActive={file.status === 'generating'}
-                        />
-                      ))}
-                    </div>
+                    <BuildGroup
+                      files={streamBuffer.files}
+                      isGenerating={isGenerating}
+                      activeFilePath={streamBuffer.activeFilePath}
+                    />
                   </div>
                 )}
               </div>
@@ -1609,52 +1685,6 @@ export default function HomePage() {
                   应用已生成，你可以在右侧预览查看效果。继续描述需求可以修改应用。
                 </p>
               </div>
-            )}
-
-            {/* 变更确认面板：diff 模式下等待用户批准 */}
-            {pendingDiff && (
-              <DiffViewer
-                diff={{
-                  changes: pendingDiff.changes.changes.map((c) => ({
-                    path: c.file,
-                    edits: c.edits.map((e) => ({
-                      line: e.line,
-                      old: e.old,
-                      new: e.new,
-                      type: e.type,
-                    })),
-                  })),
-                  summary: pendingDiff.changes.summary,
-                }}
-                onAccept={() => {
-                  // 应用变更
-                  const entryPath = ENTRY_FILE_PATH;
-                  const entryContent = pendingDiff.files[entryPath]?.content ?? '';
-                  const validation = validateGeneratedHtml(entryContent);
-
-                  updateFiles(pendingDiff.files, entryPath);
-                  updateProjectStatus(validation.ok ? 'ready' : 'draft');
-
-                  if (validation.ok) {
-                    const summary = `应用变更：${pendingDiff.changes.summary}`;
-                    saveVersion(summary, 'iteration');
-                    addMessage({ role: 'assistant', content: '变更已应用。' });
-                    toast.success('变更已应用');
-                  } else {
-                    const warningMsg = `变更已应用，但代码存在 ${validation.issues.length} 个问题`;
-                    addMessage({ role: 'assistant', content: warningMsg });
-                    toast.info(warningMsg);
-                  }
-
-                  setPendingDiff(null);
-                }}
-                onReject={() => {
-                  // 拒绝变更
-                  addMessage({ role: 'assistant', content: '变更已取消，代码保持原样。' });
-                  toast.info('变更已取消');
-                  setPendingDiff(null);
-                }}
-              />
             )}
 
             {/* 审查摘要：确定性校验/构建日志折叠为单行，点击展开详情 */}
@@ -1757,21 +1787,22 @@ export default function HomePage() {
                 <Icon icon={isGenerating ? 'lucide:loader-circle' : 'lucide:send'} width={16} height={16} className={isGenerating ? 'animate-spin' : ''} />
               </button>
             </div>
-            <div className="flex items-center justify-between mt-2 gap-2">
-              <div className="flex items-center gap-3">
-                <p className="text-[11px] text-[var(--color-text-tertiary)] shrink-0">
-                  按 Enter 发送 · Shift+Enter 换行
+            <div className="flex items-center justify-between mt-2 gap-3">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <p className="text-[11px] text-[var(--color-text-tertiary)] shrink-0 whitespace-nowrap">
+                  Enter发送
                 </p>
-                <div className="w-px h-3 bg-[var(--color-border-default)]" />
-                <p className="text-[11px] text-[var(--color-text-tertiary)] shrink-0">
-                  支持粘贴或拖拽图片
+                <p className="text-[11px] text-[var(--color-text-tertiary)] shrink-0 whitespace-nowrap">
+                  支持图片
                 </p>
-                <div className="w-px h-3 bg-[var(--color-border-default)]" />
-                <p className="text-[11px] text-[var(--color-text-tertiary)] shrink-0">
-                  输入 / 使用命令
+                <p className="text-[11px] text-[var(--color-text-tertiary)] shrink-0 whitespace-nowrap">
+                  /命令
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[11px] text-[var(--color-text-tertiary)] tabular-nums">
+                  {inputValue.length}/5000
+                </span>
                 {optimizerEnabled && (
                   <button
                     onClick={handleStartOptimize}
