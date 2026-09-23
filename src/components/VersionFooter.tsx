@@ -12,7 +12,7 @@ declare global {
 }
 
 // GitHub 仓库 URL（不含 .git 后缀）
-const GITHUB_REPO_URL = 'https://github.com/yqdaddy/litpp-root-plus';
+const GITHUB_REPO_URL = 'https://github.com/yqdaddy/atoms-root-plus';
 
 export function VersionFooter() {
   const gitSha = import.meta.env.VITE_GIT_SHA || 'dev';
