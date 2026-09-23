@@ -239,9 +239,9 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
         </button>
       </div>
 
-      {/* 代码内容 */}
-      <div className={`overflow-x-auto ${isCollapsed ? 'max-h-[300px]' : ''} ${isCollapsed && canCollapse ? 'relative' : ''}`}>
-        <pre className="p-3 text-[13px] font-mono leading-[1.6] text-[var(--color-text-primary)]">
+      {/* 代码内容：自动换行 */}
+      <div className={`${isCollapsed ? 'max-h-[300px]' : ''} ${isCollapsed && canCollapse ? 'relative' : ''}`}>
+        <pre className="p-3 text-[13px] font-mono leading-[1.6] text-[var(--color-text-primary)] whitespace-pre-wrap break-words">
           <code dangerouslySetInnerHTML={{ __html: highlightedCode }} />
         </pre>
         {isCollapsed && canCollapse && (
