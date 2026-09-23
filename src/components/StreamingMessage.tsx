@@ -8,12 +8,13 @@
  * - 显示更丰富的阶段信息
  * - 确保长文本自动换行
  * - 增加已用时间计时器
- * - JSON 语法高亮与折叠功能
+ * - JSON 结构化渲染：分析结果卡片、功能列表
  */
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Icon } from '@iconify/react';
 import ReactMarkdown from 'react-markdown';
 import type { GenerationStatus } from '../services/ai/types';
+import JsonStructureRenderer from './JsonStructureRenderer';
 
 interface StreamingMessageProps {
   /** 流式文本内容 */
@@ -207,26 +208,17 @@ function escapeHtml(code: string): string {
     .replace(/>/g, '&gt;');
 }
 
-/** JSON 语法高亮 */
-function highlightJson(code: string): string {
-  const escaped = escapeHtml(code);
-
-  return escaped
-    // 字符串 key
-    .replace(/"([\w-]+)"(\s*:)/g, '<span class="text-[#e06c75]">"$1"</span>$2')
-    // 字符串值
-    .replace(/:\s*"([^"]*)"/g, ': <span class="text-[#98c379]">"$1"</span>')
-    // 数字
-    .replace(/:\s*(\d+\.?\d*)/g, ': <span class="text-[#d19a66]">$1</span>')
-    // 布尔和 null
-    .replace(/:\s*(true|false|null)/g, ': <span class="text-[#c678dd]">$1</span>');
-}
-
 /** 代码块组件（用于流式输出） */
-function StreamingCodeBlock({ language, code }: { language: string; code: string }) {
+function StreamingCodeBlock({ language, code, isStreaming }: { language: string; code: string; isStreaming?: boolean }) {
+  const isJson = language === 'json';
+
+  // JSON 使用结构化渲染器
+  if (isJson) {
+    return <JsonStructureRenderer jsonString={code} {...(isStreaming ? { isStreaming } : {})} />;
+  }
+
   const [copied, setCopied] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(code.split('\n').length > 20);
-  const isJson = language === 'json';
 
   const handleCopy = useCallback(async () => {
     try {
@@ -240,11 +232,8 @@ function StreamingCodeBlock({ language, code }: { language: string; code: string
 
   // 语法高亮
   const highlightedCode = useMemo(() => {
-    if (isJson) {
-      return highlightJson(code);
-    }
     return escapeHtml(code);
-  }, [code, isJson]);
+  }, [code]);
 
   const lineCount = code.split('\n').length;
   const canCollapse = lineCount > 10;
@@ -293,6 +282,22 @@ export function StreamingMessage({ content, stage, activeFilePath }: StreamingMe
   const config = STAGE_CONFIG[stage] ?? STAGE_CONFIG.idle;
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // 检测是否为纯 JSON（LLM 直接输出的分析结果）
+  const isPureJson = (text: string): boolean => {
+    const trimmed = text.trim();
+    if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+      return false;
+    }
+    try {
+      JSON.parse(trimmed);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const shouldRenderAsJson = content && isPureJson(content);
 
   // 计时器：生成过程中持续计时
   useEffect(() => {
@@ -347,7 +352,7 @@ export function StreamingMessage({ content, stage, activeFilePath }: StreamingMe
       const language = match ? match[1]! : 'code';
       const codeString = String(children).replace(/\n$/, '');
 
-      return <StreamingCodeBlock language={language} code={codeString} />;
+      return <StreamingCodeBlock language={language} code={codeString} isStreaming={isActive} />;
     },
     // 段落
     p({ children }: React.HTMLAttributes<HTMLParagraphElement>) {
@@ -404,7 +409,11 @@ export function StreamingMessage({ content, stage, activeFilePath }: StreamingMe
         {/* Markdown 内容：使用自定义组件确保代码块正确渲染 */}
         {content && (
           <div className="prose prose-sm max-w-none text-[13px] text-[var(--color-text-primary)] leading-[1.6]">
-            <ReactMarkdown components={markdownComponents}>{content}</ReactMarkdown>
+            {shouldRenderAsJson ? (
+              <JsonStructureRenderer jsonString={content} isStreaming={isActive} />
+            ) : (
+              <ReactMarkdown components={markdownComponents}>{content}</ReactMarkdown>
+            )}
           </div>
         )}
 

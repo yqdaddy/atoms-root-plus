@@ -1,9 +1,11 @@
 /**
  * 消息渲染组件。
  * 支持 Markdown 渲染、代码块语法高亮、复制代码按钮。
+ * 支持 JSON 结构化渲染：分析结果卡片、功能列表、交互列表。
  */
 import { useState, useCallback, useMemo } from 'react';
 import { Icon } from '@iconify/react';
+import JsonStructureRenderer from './JsonStructureRenderer';
 
 interface MessageRendererProps {
   /** 消息内容（支持 Markdown） */
@@ -20,21 +22,30 @@ function escapeHtml(code: string): string {
     .replace(/>/g, '&gt;');
 }
 
-/** JSON 语法高亮 */
-function highlightJson(code: string): string {
-  const escaped = escapeHtml(code);
-
-  return escaped
-    // 字符串 key
-    .replace(/"([\w-]+)"(\s*:)/g, '<span class="text-[#e06c75]">"$1"</span>$2')
-    // 字符串值
-    .replace(/:\s*"([^"]*)"/g, ': <span class="text-[#98c379]">"$1"</span>')
-    // 数字
-    .replace(/:\s*(\d+\.?\d*)/g, ': <span class="text-[#d19a66]">$1</span>')
-    // 布尔和 null
-    .replace(/:\s*(true|false|null)/g, ': <span class="text-[#c678dd]">$1</span>');
+/** 检测文本是否为纯 JSON（可能是 LLM 直接输出的分析结果） */
+function isPureJson(text: string): { isJson: boolean; parsed?: unknown } {
+  const trimmed = text.trim();
+  // 必须以 { 开头且以 } 结尾
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+    return { isJson: false };
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    return { isJson: true, parsed };
+  } catch {
+    return { isJson: false };
+  }
 }
+
+/** 解析 Markdown 为 React 元素 */
 function parseMarkdown(text: string): React.ReactNode[] {
+  // 先检查是否是纯 JSON（LLM 直接输出的分析结果）
+  const jsonCheck = isPureJson(text);
+  if (jsonCheck.isJson) {
+    // 直接使用结构化渲染器
+    return [<JsonStructureRenderer key="json-0" jsonString={text} />];
+  }
+
   const lines = text.split('\n');
   const elements: React.ReactNode[] = [];
   let inCodeBlock = false;
@@ -153,9 +164,15 @@ function parseInlineMarkdown(text: string): React.ReactNode {
 
 /** 代码块组件 */
 function CodeBlock({ language, code }: { language: string; code: string }) {
+  const isJson = language === 'json';
+
+  // JSON 使用结构化渲染器
+  if (isJson) {
+    return <JsonStructureRenderer jsonString={code} />;
+  }
+
   const [copied, setCopied] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(code.split('\n').length > 20);
-  const isJson = language === 'json';
 
   const handleCopy = useCallback(async () => {
     try {
@@ -171,10 +188,6 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
   const highlightedCode = useMemo(() => {
     // 先转义 HTML 实体
     const escaped = escapeHtml(code);
-
-    if (isJson) {
-      return highlightJson(code);
-    }
 
     if (!language || language === 'plaintext') {
       return escaped;
@@ -194,7 +207,7 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
       .replace(/(&lt;\/?)([\w-]+)/g, '$1<span class="text-[#e06c75]">$2</span>');
 
     return result;
-  }, [code, language, isJson]);
+  }, [code, language]);
 
   const lineCount = code.split('\n').length;
   const canCollapse = lineCount > 10;

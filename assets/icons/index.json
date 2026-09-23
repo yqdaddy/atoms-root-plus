@@ -1,3 +1,12 @@
 {
-  "lucide:calculator":"icons/lucide/calculator.svg","lucide:gamepad-2":"icons/lucide/gamepad-2.svg","lucide:share":"icons/lucide/share.svg"
+  "lucide:calculator": "icons/lucide/calculator.svg",
+  "lucide:gamepad-2": "icons/lucide/gamepad-2.svg",
+  "lucide:share": "icons/lucide/share.svg",
+  "lucide:box": "icons/lucide/box.svg",
+  "lucide:tag": "icons/lucide/tag.svg",
+  "lucide:star": "icons/lucide/star.svg",
+  "lucide:list": "icons/lucide/list.svg",
+  "lucide:mouse-pointer-click": "icons/lucide/mouse-pointer-click.svg",
+  "lucide:info": "icons/lucide/info.svg",
+  "lucide:circle-dot": "icons/lucide/circle-dot.svg"
 }
