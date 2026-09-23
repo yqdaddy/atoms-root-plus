@@ -8,8 +8,9 @@
  * - 显示更丰富的阶段信息
  * - 确保长文本自动换行
  * - 增加已用时间计时器
+ * - JSON 语法高亮与折叠功能
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Icon } from '@iconify/react';
 import ReactMarkdown from 'react-markdown';
 import type { GenerationStatus } from '../services/ai/types';
@@ -198,9 +199,34 @@ function LoadingDots() {
   );
 }
 
+/** 转义 HTML 实体 */
+function escapeHtml(code: string): string {
+  return code
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/** JSON 语法高亮 */
+function highlightJson(code: string): string {
+  const escaped = escapeHtml(code);
+
+  return escaped
+    // 字符串 key
+    .replace(/"([\w-]+)"(\s*:)/g, '<span class="text-[#e06c75]">"$1"</span>$2')
+    // 字符串值
+    .replace(/:\s*"([^"]*)"/g, ': <span class="text-[#98c379]">"$1"</span>')
+    // 数字
+    .replace(/:\s*(\d+\.?\d*)/g, ': <span class="text-[#d19a66]">$1</span>')
+    // 布尔和 null
+    .replace(/:\s*(true|false|null)/g, ': <span class="text-[#c678dd]">$1</span>');
+}
+
 /** 代码块组件（用于流式输出） */
 function StreamingCodeBlock({ language, code }: { language: string; code: string }) {
   const [copied, setCopied] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(code.split('\n').length > 20);
+  const isJson = language === 'json';
 
   const handleCopy = useCallback(async () => {
     try {
@@ -212,13 +238,35 @@ function StreamingCodeBlock({ language, code }: { language: string; code: string
     }
   }, [code]);
 
+  // 语法高亮
+  const highlightedCode = useMemo(() => {
+    if (isJson) {
+      return highlightJson(code);
+    }
+    return escapeHtml(code);
+  }, [code, isJson]);
+
+  const lineCount = code.split('\n').length;
+  const canCollapse = lineCount > 10;
+
   return (
     <div className="relative my-3 rounded-lg bg-[var(--color-bg-inset)] border border-[var(--color-border-default)] overflow-hidden">
-      {/* 头部：语言标签 + 复制按钮 */}
+      {/* 头部：语言标签 + 折叠按钮 + 复制按钮 */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
-        <span className="text-[12px] font-mono text-[var(--color-text-secondary)]">
-          {language || 'code'}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-[12px] font-mono text-[var(--color-text-secondary)]">
+            {language || 'code'}
+          </span>
+          {canCollapse && (
+            <button
+              onClick={() => setIsCollapsed(!isCollapsed)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-surface)] transition-all duration-[140ms]"
+            >
+              <Icon icon={isCollapsed ? 'lucide:chevron-down' : 'lucide:chevron-up'} width={12} height={12} />
+              {isCollapsed ? `展开 (${lineCount} 行)` : '收起'}
+            </button>
+          )}
+        </div>
         <button
           onClick={handleCopy}
           className="flex items-center gap-1 px-2 py-1 rounded text-[12px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-surface)] transition-all duration-[140ms]"
@@ -229,9 +277,14 @@ function StreamingCodeBlock({ language, code }: { language: string; code: string
       </div>
 
       {/* 代码内容：横向滚动，不溢出容器 */}
-      <pre className="p-3 overflow-x-auto text-[13px] font-mono leading-[1.6] text-[var(--color-text-primary)]">
-        <code>{code}</code>
-      </pre>
+      <div className={`overflow-x-auto ${isCollapsed ? 'max-h-[300px]' : ''} ${isCollapsed && canCollapse ? 'relative' : ''}`}>
+        <pre className="p-3 text-[13px] font-mono leading-[1.6] text-[var(--color-text-primary)]">
+          <code dangerouslySetInnerHTML={{ __html: highlightedCode }} />
+        </pre>
+        {isCollapsed && canCollapse && (
+          <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-[var(--color-bg-inset)] to-transparent pointer-events-none" />
+        )}
+      </div>
     </div>
   );
 }
