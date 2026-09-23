@@ -13,7 +13,7 @@
  */
 
 /** 意图类型 */
-export type IntentType = 'create' | 'modify' | 'analyze' | 'diagnose';
+export type IntentType = 'create' | 'modify' | 'analyze' | 'diagnose' | 'conversation';
 
 /** 意图识别结果 */
 export interface IntentResult {
@@ -44,9 +44,11 @@ export const INTENT_CONFIG = {
   /** 修改关键词：配合已有项目状态命中 */
   MODIFY_KEYWORDS: ['修改', '改一下', '改成', '调整', '优化', '增加', '添加', '删除', '去掉', '换个', 'modify', 'change', 'update', 'edit', 'add', 'remove'],
   /** 分析关键词：只想了解项目，不改动 */
-  ANALYZE_KEYWORDS: ['分析', '检查一下', '解释', '说明一下', '介绍一下', '是什么', 'analyze', 'explain', 'describe', 'walk me through'],
+  ANALYZE_KEYWORDS: ['分析', '检查一下', '解释', '说明一下', '介绍一下', '了解一下', '是什么', '了解', '看看', 'analyze', 'explain', 'describe', 'walk me through', 'what is', 'show me'],
   /** 诊断关键词：遇到问题要求定位 */
   DIAGNOSE_KEYWORDS: ['为什么', '报错', '不工作', '不生效', '没反应', '有问题', 'bug', '出错', '修复', '排查', 'why', 'error', 'broken', 'fix', 'debug'],
+  /** 对话/闲聊关键词：纯对话、问候、致谢等，无明确任务意图 */
+  CONVERSATION_KEYWORDS: ['你好', '您好', '谢谢', '感谢', '再见', '拜拜', '好的', '可以吗', '能不能', '是否', '怎么样', '如何理解', '是什么意思', '帮我看看', 'hello', 'hi', 'hey', 'thanks', 'thank you', 'bye', 'goodbye', 'ok', 'okay', 'yes', 'no'],
   /** React 框架关键词 */
   REACT_KEYWORDS: ['react', 'jsx', 'react组件', 'React 组件', '用 React', '用react', 'React 做一个', 'react 做一个', 'React 写', 'react 写'],
   /** Vue 框架关键词 */
@@ -115,12 +117,23 @@ function matchKeywords(context: IntentContext): IntentResult | null {
   const countHits = (keywords: readonly string[]) =>
     keywords.filter(kw => prompt.includes(kw)).length;
 
+  const conversationHits = countHits(INTENT_CONFIG.CONVERSATION_KEYWORDS);
   const createHits = countHits(INTENT_CONFIG.CREATE_KEYWORDS);
   const modifyHits = countHits(INTENT_CONFIG.MODIFY_KEYWORDS);
   const analyzeHits = countHits(INTENT_CONFIG.ANALYZE_KEYWORDS);
   const diagnoseHits = countHits(INTENT_CONFIG.DIAGNOSE_KEYWORDS);
 
-  // 诊断优先级最高：报错/不工作等词汇表示用户被问题阻塞，
+  // 对话/闲聊检测优先级最高：避免"你好"等问候语被误判为 modify
+  // 只有当对话关键词命中且没有其他明确任务关键词时才判定为对话
+  if (conversationHits > 0 && createHits === 0 && modifyHits === 0 && analyzeHits === 0 && diagnoseHits === 0) {
+    return {
+      type: 'conversation',
+      confidence: Math.min(0.95, 0.85 + conversationHits * 0.05),
+      reasoning: `对话关键词命中 ${conversationHits} 次，无任务意图`,
+    };
+  }
+
+  // 诊断优先级次高：报错/不工作等词汇表示用户被问题阻塞，
   // 即使同时含"修改"字样（如"修复一下"同时命中两边），也应先诊断
   if (diagnoseHits > 0) {
     return {
@@ -195,7 +208,7 @@ function parseLLMOutput(output: string): IntentResult {
     }
     const parsed = JSON.parse(jsonMatch[0]) as { intent?: string; confidence?: number; reasoning?: string };
 
-    const validIntents: IntentType[] = ['create', 'modify', 'analyze', 'diagnose'];
+    const validIntents: IntentType[] = ['create', 'modify', 'analyze', 'diagnose', 'conversation'];
     if (!parsed.intent || !validIntents.includes(parsed.intent as IntentType)) {
       throw new Error(`Invalid intent: ${parsed.intent}`);
     }
@@ -221,6 +234,7 @@ export const INTENT_LABELS: Record<IntentType, string> = {
   modify: '修改迭代',
   analyze: '功能分析',
   diagnose: '问题诊断',
+  conversation: '对话交流',
 };
 
 /**

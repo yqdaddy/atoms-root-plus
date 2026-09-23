@@ -4,7 +4,7 @@
  */
 
 /** 意图类型 */
-export type IntentType = 'create' | 'modify' | 'analyze' | 'diagnose';
+export type IntentType = 'create' | 'modify' | 'analyze' | 'diagnose' | 'conversation';
 
 /** 意图识别结果 */
 export interface IntentResult {
@@ -41,7 +41,9 @@ export const INTENT_CONFIG = {
   /** 修改关键词 */
   MODIFY_KEYWORDS: ['修改', '改一下', '调整', '优化', '增加', '删除', '修改成', '改成', 'modify', 'change', 'update', 'edit'],
   /** 分析关键词 */
-  ANALYZE_KEYWORDS: ['分析', '检查', '解释', '说明', '是什么', 'analyze', 'explain', 'describe', 'what'],
+  ANALYZE_KEYWORDS: ['分析', '检查', '解释', '说明', '是什么', '了解', '介绍一下', '了解一下', '看看', 'analyze', 'explain', 'describe', 'what', 'show me'],
   /** 诊断关键词 */
   DIAGNOSE_KEYWORDS: ['为什么', '报错', '问题', '不工作', 'bug', '错误', 'why', 'error', 'problem', 'fix', '修复'],
+  /** 对话/闲聊关键词 */
+  CONVERSATION_KEYWORDS: ['你好', '您好', '谢谢', '感谢', '再见', '拜拜', '好的', '可以吗', '能不能', '是否', '怎么样', '如何理解', '是什么意思', '帮我看看', 'hello', 'hi', 'hey', 'thanks', 'thank you', 'bye', 'goodbye', 'ok', 'okay', 'yes', 'no'],
 } as const;
