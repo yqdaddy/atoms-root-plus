@@ -4,7 +4,7 @@
  * 支持多文件项目：将 CSS/JS 内容注入为内联标签
  */
 import { useEffect, useState, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Icon } from '@iconify/react';
 import { loadShare, type ShareData, type SharedFile } from '../utils/share';
 import { buildSandboxAttribute, buildPreviewCsp, DEFAULT_CDN_HOSTS } from '../types/sandbox';
@@ -193,13 +193,28 @@ export default function SharePage() {
     <div className="h-screen bg-[var(--color-bg-base)] flex flex-col">
       {/* 顶部提示栏 */}
       <div className="h-12 flex items-center justify-between px-4 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shrink-0">
-        <div className="flex items-center gap-2">
-          <Icon icon="lucide:share-2" width={16} height={16} className="text-[var(--color-accent)]" />
-          <span className="text-sm text-[var(--color-text-secondary)]">
-            {shareData?.projectName || '分享预览'}
-          </span>
+        <div className="flex items-center gap-3">
+          {/* 品牌标识：点击回到首页 */}
+          <Link
+            to="/"
+            className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-[var(--color-bg-base)] transition-all duration-[140ms] group"
+            title="返回首页"
+          >
+            <Icon icon="lucide:home" width={16} height={16} className="text-[var(--color-text-secondary)] group-hover:text-[var(--color-text-primary)] transition-colors" />
+            <span className="text-[15px] font-semibold text-[var(--color-text-primary)] group-hover:text-[var(--color-text-primary)] transition-colors">
+              码孖造
+            </span>
+          </Link>
+          {shareData?.projectName && (
+            <>
+              <div className="w-px h-4 bg-[var(--color-border-default)]" />
+              <span className="text-sm text-[var(--color-text-secondary)]">
+                {shareData.projectName}
+              </span>
+            </>
+          )}
           {shareData?.files && Object.keys(shareData.files).length > 1 && (
-            <span className="text-xs text-[var(--color-text-tertiary)] ml-2">
+            <span className="text-xs text-[var(--color-text-tertiary)]">
               ({Object.keys(shareData.files).length} 个文件)
             </span>
           )}
@@ -208,7 +223,7 @@ export default function SharePage() {
           onClick={() => navigate('/')}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-base)] transition-colors"
         >
-          <Icon icon="lucide:home" width={14} height={14} />
+          <Icon icon="lucide:arrow-left" width={14} height={14} />
           返回首页
         </button>
       </div>

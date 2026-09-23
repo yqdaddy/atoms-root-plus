@@ -3,7 +3,7 @@
  * 支持 Tabs 切换，前端校验，四态完备。
  */
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom'; // F-006: 支持 redirect 参数
+import { useNavigate, useSearchParams, Link } from 'react-router-dom'; // F-006: 支持 redirect 参数
 import { Icon } from '@iconify/react';
 import { useAuthStore } from '../stores/authStore';
 import { toast } from '../components/Toast';
@@ -206,9 +206,12 @@ export default function AuthPage({ mode }: AuthPageProps) {
     <div className="min-h-screen flex flex-col items-center justify-center px-4">
       {/* 品牌 */}
       <div className="absolute top-6 left-6">
-        <h1 className="text-[var(--text-title-lg)] font-semibold text-[var(--color-text-primary)] font-[var(--font-display)]">
+        <Link
+          to="/"
+          className="text-[var(--text-title-lg)] font-semibold text-[var(--color-text-primary)] font-[var(--font-display)] hover:text-[var(--color-accent)] transition-colors"
+        >
           码孖造
-        </h1>
+        </Link>
       </div>
 
       {/* 卡片 */}

@@ -28,11 +28,6 @@ export default function Footer() {
             <Icon icon="lucide:cpu" width={14} height={14} />
             <span>Built with React + TypeScript + Tailwind CSS</span>
           </span>
-          <span className="text-[var(--color-border-default)]">|</span>
-          <span className="flex items-center gap-1.5">
-            <Icon icon="lucide:sparkles" width={14} height={14} />
-            <span>Powered by Agnes AI</span>
-          </span>
         </div>
 
         {/* 开发者信息 */}
@@ -47,7 +42,7 @@ export default function Footer() {
             <span>GitHub</span>
           </a>
           <span className="text-[var(--color-border-default)]">|</span>
-          <span>ROOT AI Native 笔试作品</span>
+          <span>让 AI 帮你写代码</span>
         </div>
       </div>
 

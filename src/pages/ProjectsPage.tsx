@@ -3,7 +3,7 @@
  * 类似秒哒的项目管理界面，支持查看、打开、删除项目。
  */
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { Icon } from '@iconify/react';
 import { useProjectStore } from '../stores/projectStore';
 import { useAuthStore } from '../stores/authStore'; // F-002: 项目列表页守卫
@@ -229,16 +229,17 @@ export default function ProjectsPage() {
       {/* Header */}
       <header className="sticky top-0 z-10 h-14 flex items-center justify-between px-6 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
         <div className="flex items-center gap-4">
-          <button
-            onClick={() => {
-              // 返回工作台视为导航，保留当前项目
-              sessionStorage.setItem('litpp_nav_to_workspace', 'true');
-              navigate('/workspace');
-            }}
-            className="flex items-center gap-2 text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+          {/* 品牌标识：点击回到首页 */}
+          <Link
+            to="/"
+            className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-[var(--color-bg-base)] transition-all duration-[140ms] group"
+            title="返回首页"
           >
-            <Icon icon="lucide:arrow-left" width={18} height={18} />
-          </button>
+            <Icon icon="lucide:home" width={18} height={18} className="text-[var(--color-text-secondary)] group-hover:text-[var(--color-text-primary)] transition-colors" />
+            <span className="text-[15px] font-semibold text-[var(--color-text-primary)] group-hover:text-[var(--color-text-primary)] transition-colors">
+              码孖造
+            </span>
+          </Link>
           <h1 className="text-lg font-semibold text-[var(--color-text-primary)]">我的项目</h1>
           <span className="text-[13px] text-[var(--color-text-tertiary)]">
             {summaries.length} 个项目
