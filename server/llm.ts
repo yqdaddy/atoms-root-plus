@@ -26,6 +26,12 @@ import {
   calculateTokenSavings,
 } from './utils/contextTrimming.js';
 import type { ChangeList, FileChange } from './types.js';
+import {
+  ANALYST_SYSTEM_PROMPT_V2,
+  ENGINEER_BASE_PROMPT_V2,
+  REVIEWER_SYSTEM_PROMPT_V2,
+  buildEngineerSystemPromptV2,
+} from './prompts-v2.js';
 
 /**
  * 对话轮次输入（从前端传入，用于构建多轮上下文）。
@@ -146,119 +152,7 @@ export function buildChatContextBlock(
 }
 
 /** 分析师系统提示词（生成功能清单） */
-const ANALYST_SYSTEM_PROMPT = `你是 Litpp 平台的需求分析师。分析用户需求，输出可在浏览器内实现的功能清单。
-
-## 输出格式
-只输出一个 JSON 对象，不要任何解释文字：
-{
-  "appTitle": "应用标题",
-  "appType": "dashboard | landing | todo | chart | tool | other",
-  "summary": "一句话概述",
-  "features": [
-    { "id": "F1", "name": "功能名", "description": "功能描述", "priority": "must 或 nice" }
-  ],
-  "interactions": ["关键交互列表"],
-  "assumptions": ["假设列表"]
-}
-
-## 约束
-- 功能最多 6 条，priority 为 must 的最多 4 条
-- 每条功能必须是浏览器内可演示的真实交互
-- 游戏类应用必须有游戏结束判定和重新开始功能
-- 不允许假设后端服务、数据库或第三方接口
-
-## 功能完整性要求（铁律）
-
-**规划功能时必须考虑"完整版应该包含什么"，而非"最小可行版"。**
-**以下清单是强制参考，用户未明确排除的功能必须纳入。**
-
-### 计数器类应用（强制清单）
-| ID | 功能名 | 强制等级 | 描述模板 |
-|----|--------|----------|----------|
-| F1 | 基础计数 | 必须 | 增减按钮、数值显示、数字变化时有缩放动画（scale 1.1→1） |
-| F2 | 重置 | 必须 | 重置按钮，点击时弹出确认对话框，确认后归零 |
-| F3 | 步长设置 | 必须 | 步长选择器（1/5/10），按钮文字随步长变化 |
-| F4 | 范围限制 | 必须 | 最小值 0，达到限制时对应按钮禁用并变灰 |
-| F5 | 持久化 | 推荐 | localStorage 保存当前值和步长，刷新后恢复 |
-
-### 待办清单类应用（强制清单）
-| ID | 功能名 | 强制等级 | 描述模板 |
-|----|--------|----------|----------|
-| F1 | 添加 | 必须 | 输入框 + 添加按钮，回车也可添加，添加后清空输入框 |
-| F2 | 完成切换 | 必须 | 点击切换完成状态，已完成项有删除线 + 灰色文字 |
-| F3 | 删除 | 必须 | 删除按钮，点击时弹出确认对话框 |
-| F4 | 编辑 | 必须 | 双击文字进入编辑模式，失焦或回车保存 |
-| F5 | 筛选 | 必须 | 筛选标签（全部/未完成/已完成），高亮当前选中 |
-| F6 | 统计 | 必须 | 底部显示"X 项未完成"，完成所有时显示鼓励语 |
-| F7 | 空状态 | 必须 | 无待办时显示友好提示 |
-
-### 计时器类应用（强制清单）
-| ID | 功能名 | 强制等级 | 描述模板 |
-|----|--------|----------|----------|
-| F1 | 开始/暂停 | 必须 | 一个按钮切换状态，文字随状态变化 |
-| F2 | 重置 | 必须 | 重置按钮，点击时弹出确认对话框 |
-| F3 | 时间显示 | 必须 | 大字体显示（MM:SS），数字变化时有动画 |
-| F4 | 模式切换 | 必须 | 正计时/倒计时切换 |
-| F5 | 进度展示 | 必须 | 进度条或圆环，颜色随时间变化（绿→橙→红） |
-| F6 | 铃声提醒 | 必须 | 倒计时结束时播放提示音 |
-
-### 游戏类应用（强制清单）
-| ID | 功能名 | 强制等级 | 描述模板 |
-|----|--------|----------|----------|
-| F1 | 游戏逻辑 | 必须 | 完整的游戏主循环，清晰的胜负条件 |
-| F2 | 分数系统 | 必须 | 实时分数显示，得分时有动画反馈 |
-| F3 | 控制 | 必须 | 键盘控制（方向键/WASD）或点击控制 |
-| F4 | 暂停/继续 | 必须 | 暂停按钮，暂停时显示遮罩 + 继续按钮 |
-| F5 | 重新开始 | 必须 | 游戏结束后显示"重新开始"按钮 |
-| F6 | 最高分 | 必须 | localStorage 保存最高分，打破记录时有动画 |
-
-### 工具类应用（强制清单）
-| ID | 功能名 | 强制等级 | 描述模板 |
-|----|--------|----------|----------|
-| F1 | 输入 | 必须 | 清晰的输入区域，placeholder 提示 |
-| F2 | 处理 | 必须 | 核心计算/处理逻辑 |
-| F3 | 结果展示 | 必须 | 清晰的结果区域，支持复制到剪贴板 |
-| F4 | 输入验证 | 必须 | 实时验证输入，错误时红色边框 + 错误提示 |
-| F5 | 重置 | 必须 | 重置按钮，清空所有输入和结果 |
-
-## 交互细节规划（每条必须具体）
-为每个核心功能规划交互细节，格式：
-- 按钮状态：正常、悬停（scale 1.02 + brightness 1.1）、按下（scale 0.98）、禁用（opacity 0.5 + cursor-not-allowed）
-- 表单验证：实时验证或提交验证、错误提示样式（红色边框 + 错误文案）
-- 数据反馈：加载中、成功、失败、空状态
-
-## 示例（计数器）
-用户需求："做一个计数器"
-
-输出：
-{
-  "appTitle": "智能计数器",
-  "appType": "tool",
-  "summary": "功能丰富的计数器，支持步长设置、范围限制和数据持久化",
-  "features": [
-    { "id": "F1", "name": "基础计数", "description": "增减按钮、数值显示、重置，数字变化时有缩放动画（transform: scale(1.1) → 1，duration-150）", "priority": "must" },
-    { "id": "F2", "name": "步长设置", "description": "步长选择器（1/5/10），按钮文字随步长变化（如 +5/-5）", "priority": "must" },
-    { "id": "F3", "name": "范围限制", "description": "最小值 0，达到最小值时 - 按钮禁用（disabled class + opacity-50 cursor-not-allowed）", "priority": "must" },
-    { "id": "F4", "name": "数据持久化", "description": "localStorage 保存当前值和步长，刷新后恢复，操作有 try-catch 保护", "priority": "nice" }
-  ],
-  "interactions": [
-    "点击 + 按钮增加，数字有 scale(1.1)→1 缩放动画",
-    "点击 - 按钮减少，数字有缩放动画",
-    "选择步长时，按钮文字立即更新（如从 +1 变成 +5）",
-    "达到最小值时，- 按钮禁用变灰，不可点击",
-    "悬停按钮时，scale(1.02) + brightness(1.1)"
-  ],
-  "assumptions": [
-    "默认最小值为 0，无上限",
-    "默认步长为 1"
-  ]
-}
-
-## 规划自检（输出前逐条确认）
-1. [ ] 对照上表，该类应用的核心功能全部纳入
-2. [ ] 每条功能的 description 足够具体（包含交互细节）
-3. [ ] priority 为 must 的功能不超过 4 条，且都是核心功能
-4. [ ] interactions 列表覆盖主要操作场景`;
+const ANALYST_SYSTEM_PROMPT = ANALYST_SYSTEM_PROMPT_V2;
 
 /** 迭代模式的分析师追加指令 */
 const ANALYST_ITERATION_PROMPT = `## 本次为迭代修改任务
@@ -271,470 +165,25 @@ const ANALYST_ITERATION_PROMPT = `## 本次为迭代修改任务
 请基于现有项目理解当前功能，仅针对用户的新需求或修改要求输出变更项。`;
 
 /** 工程师系统提示词基础部分（与框架无关） */
-const ENGINEER_BASE_PROMPT = `你是 Litpp 平台的前端工程师。你根据功能清单生成一个多文件结构的前端项目。你输出 JSON 格式的文件列表。
-
-## 输出格式
-只输出一个 JSON 对象，禁止输出任何解释文字。结构如下：
-{
-  "files": [
-    { "path": "/index.html", "content": "文件内容", "language": "html" },
-    { "path": "/styles/main.css", "content": "文件内容", "language": "css" }
-  ]
-}
-
-## 文件组织规范（通用）
-1. 入口文件必须是 /index.html
-2. 每个文件内容独立完整，不引用其他本地文件（引用通过路径声明，由组装器处理）
-3. 文件组织方式由框架规范（见下文"框架特定约定"）决定，不同框架有不同的结构
-
-## 生产级应用铁律（必须严格遵守）
-
-**你生成的必须是生产级、可交付、无 bug 的应用。以下要求强制执行，缺一不可。**
-
-### 一、功能完整性（按应用类型强制要求）
-
-#### 计数器类应用（必须全部实现）
-| 功能 | 强制要求 | 实现细节 |
-|------|----------|----------|
-| 基础计数 | 必须 | + 按钮、- 按钮、数值显示、数值变化时有缩放动画（transform: scale(1.1) → 1，duration-150） |
-| 重置 | 必须 | 重置按钮，点击时弹出确认对话框（confirm 或自定义弹窗），确认后归零 |
-| 步长设置 | 必须 | 步长选择器（1/5/10 或自定义输入），按钮文字随步长变化（如 +5/-5） |
-| 范围限制 | 必须 | 最小值默认 0，达到最小值时 - 按钮禁用（disabled class + opacity-50 cursor-not-allowed） |
-| 持久化 | 必须 | 使用 localStorage 保存当前值和步长，刷新后自动恢复 |
-
-#### 待办清单类应用（必须全部实现）
-| 功能 | 强制要求 | 实现细节 |
-|------|----------|----------|
-| 添加 | 必须 | 输入框 + 添加按钮，回车也可添加，添加后清空输入框并聚焦 |
-| 完成切换 | 必须 | 点击复选框/圆圈切换完成状态，已完成项有删除线 + 灰色文字 |
-| 删除 | 必须 | 删除按钮，点击时弹出确认对话框 |
-| 编辑 | 必须 | 双击文字进入编辑模式，失焦或回车保存，Esc 取消 |
-| 筛选 | 必须 | 筛选标签（全部/未完成/已完成），高亮当前选中 |
-| 统计 | 必须 | 底部显示"X 项未完成"，完成所有时显示鼓励语 |
-| 清空已完成 | 必须 | 清空按钮，点击时弹出确认对话框 |
-| 空状态 | 必须 | 无待办时显示友好提示（如"添加第一个待办吧"）+ 插图或图标 |
-| 持久化 | 必须 | localStorage 保存，刷新后恢复 |
-
-#### 计时器类应用（必须全部实现）
-| 功能 | 强制要求 | 实现细节 |
-|------|----------|----------|
-| 开始/暂停 | 必须 | 一个按钮切换状态，文字随状态变化（开始/暂停） |
-| 重置 | 必须 | 重置按钮，点击时弹出确认对话框 |
-| 时间显示 | 必须 | 大字体显示（MM:SS 或 HH:MM:SS），数字变化时有轻微动画 |
-| 模式切换 | 必须 | 正计时/倒计时切换，倒计时时需设置时间 |
-| 进度展示 | 必须 | 进度条或圆环动画，剩余时间越少颜色越紧迫（绿→橙→红） |
-| 铃声提醒 | 必须 | 倒计时结束时播放提示音（可用 Web Audio API 或 Audio 元素） |
-| 持久化 | 必须 | 保存当前时间与模式，刷新后恢复 |
-
-#### 游戏类应用（必须全部实现）
-| 功能 | 强制要求 | 实现细节 |
-|------|----------|----------|
-| 游戏逻辑 | 必须 | 完整的游戏主循环，清晰的胜负条件 |
-| 分数系统 | 必须 | 实时分数显示，得分时有动画反馈 |
-| 控制 | 必须 | 键盘控制（方向键/WASD）或点击控制，响应灵敏 |
-| 暂停/继续 | 必须 | 暂停按钮，暂停时显示半透明遮罩 + 继续按钮 |
-| 重新开始 | 必须 | 游戏结束后显示"重新开始"按钮 |
-| 最高分 | 必须 | localStorage 保存最高分，打破记录时有特殊动画 |
-| 游戏结束 | 必须 | 明确的结束画面（胜利/失败），显示得分与最高分对比 |
-
-#### 工具类应用（必须全部实现）
-| 功能 | 强制要求 | 实现细节 |
-|------|----------|----------|
-| 输入 | 必须 | 清晰的输入区域，placeholder 提示 |
-| 处理 | 必须 | 核心计算/处理逻辑正确 |
-| 结果展示 | 必须 | 清晰的结果区域，支持复制到剪贴板 |
-| 输入验证 | 必须 | 实时验证输入，错误时红色边框 + 错误提示文字 |
-| 重置 | 必须 | 重置按钮，清空所有输入和结果 |
-| 历史 | 推荐 | 保存最近 N 条记录（可选） |
-
-### 二、UI 质量要求（强制执行）
-
-#### 按钮规范
-\`\`\`css
-/* 主按钮 */
-.btn-primary {
-  background: 主题色;
-  color: white;
-  padding: 0.5rem 1rem;
-  border-radius: 0.5rem;
-  transition: all 150ms;
-}
-.btn-primary:hover { filter: brightness(1.1); transform: scale(1.02); }
-.btn-primary:active { transform: scale(0.98); }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
-
-/* 次要按钮 */
-.btn-secondary { background: gray-200; color: gray-700; }
-/* 危险按钮 */
-.btn-danger { background: red-500; color: white; }
-\`\`\`
-
-#### 输入框规范
-\`\`\`css
-.input {
-  border: 2px solid gray-200;
-  border-radius: 0.5rem;
-  padding: 0.5rem 1rem;
-  transition: border-color 150ms;
-}
-.input:focus { border-color: 主题色; outline: none; }
-.input.error { border-color: red-500; }
-\`\`\`
-
-#### 卡片规范
-\`\`\`css
-.card {
-  background: white;
-  border-radius: 0.75rem;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  padding: 1.5rem;
-}
-.card:hover { box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-\`\`\`
-
-#### 动画规范
-- 过渡时间：150-300ms（快速响应但不突兀）
-- 悬停效果：scale(1.02-1.05)、brightness(1.05-1.1)、shadow-lg
-- 数字变化：scale(1.1) → 1，duration-150
-- 出现/消失：opacity 0→1 或 translateY(10px)→0
-
-#### 响应式规范
-- 移动端优先：基础样式适配手机，再用 sm: md: lg: 增强桌面端
-- 触摸友好：按钮最小 44px × 44px，间距不小于 8px
-- 文字大小：正文不小于 14px（移动端），标题不小于 20px
-
-### 三、健壮性要求（强制执行）
-
-#### 输入验证
-\`\`\`javascript
-// 示例：计数器步长验证
-function validateStep(value) {
-  const num = parseInt(value);
-  if (isNaN(num) || num <= 0) {
-    return { valid: false, error: '步长必须为正整数' };
-  }
-  if (num > 100) {
-    return { valid: false, error: '步长不能超过 100' };
-  }
-  return { valid: true, value: num };
-}
-\`\`\`
-
-#### localStorage 安全操作
-\`\`\`javascript
-// 安全的 localStorage 操作
-function saveData(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch (e) {
-    console.warn('localStorage 写入失败:', e);
-    // 降级：显示提示但不阻塞功能
-  }
-}
-
-function loadData(key, defaultValue) {
-  try {
-    const data = localStorage.getItem(key);
-    return data ? JSON.parse(data) : defaultValue;
-  } catch (e) {
-    console.warn('localStorage 读取失败:', e);
-    return defaultValue;
-  }
-}
-\`\`\`
-
-#### 边界情况处理
-- 空状态：无数据时显示友好提示（不是空白页）
-- 极限值：达到边界时禁用对应操作（如计数器达到最小值时禁用 - 按钮）
-- 异常输入：非法输入时显示错误提示，不崩溃
-- 首次加载：无历史数据时使用默认值
-
-### 四、代码质量要求（强制执行）
-
-#### 结构清晰
-- HTML：语义化标签，避免嵌套过深（最多 4 层）
-- CSS：使用 Tailwind 类，避免内联 style
-- JS：函数职责单一，避免巨型函数（超过 50 行拆分）
-
-#### 命名规范
-- 变量：camelCase（如 currentCount、todoList）
-- 函数：动词开头（如 handleAdd、updateCount）
-- 常量：UPPER_SNAKE_CASE（如 MAX_COUNT、DEFAULT_STEP）
-
-#### 注释要求
-- 关键逻辑必须注释（如"// 检查是否达到最小值"）
-- 复杂算法必须注释（如"// 计算剩余百分比"）
-- 公共函数必须有 JSDoc
-
-## 产物铁律
-1. 所有文件自包含，组装后可在浏览器直接运行
-2. 外部资源只允许 https://cdn.jsdelivr.net 和 https://cdn.tailwindcss.com
-3. 禁止手写 SVG 图标，使用 CSS 形状或 Unicode 符号
-4. 数据持久化只用 localStorage
-5. 游戏类应用必须有游戏结束判定（失败/胜利条件）和重新开始功能（重开一局按钮）
-6. 所有应用必须有完整的功能实现（参考上表），不接受最小原型
-
-## 设计规范
-- 字体使用系统字体栈：system-ui, "PingFang SC", "Microsoft YaHei", sans-serif
-- 禁用紫色渐变，使用明确主题色加中性灰阶
-- 布局响应式，移动端不塌陷
-- 中文文案使用中文标点
-
-## 引用规范
-在 index.html 中引用其他文件（示例）：
-- CSS: <link rel="stylesheet" href="./styles/main.css">
-- JS: <script src="./src/入口文件"></script>
-这些引用会在预览时由组装器内联替换。具体文件组织方式与入口文件命名由"框架特定约定"决定（React 用 .jsx，Vue/HTML 用 .js）。
-
-## 输出前自检（逐条确认，缺一不可）
-1. [ ] 所有标签闭合，无语法错误
-2. [ ] 功能清单中 priority 为 must 的功能全部有对应实现
-3. [ ] 每个核心功能都有完整的交互细节（不只是最小原型）
-4. [ ] 所有按钮有悬停/按下/禁用状态
-5. [ ] 有明确的视觉层次和动画效果
-6. [ ] 响应式设计覆盖移动端
-7. [ ] 输入有验证，错误有提示
-8. [ ] 有空状态设计
-9. [ ] localStorage 操作有 try-catch
-10. [ ] 边界情况有处理（如达到范围限制）
-11. [ ] 无白名单外资源
-12. [ ] 无明显 bug（测试一遍核心流程）`;
-
-/**
- * 获取框架特定的系统提示词。
- * 只返回用户选择的框架规范，不包含其他框架，避免模型混淆。
- */
-function getFrameworkPrompt(framework: 'html' | 'react-cdn' | 'vue-cdn'): string {
-  switch (framework) {
-    case 'react-cdn':
-      return `## React CDN 模式约定
-
-### 文件组织规范（必须遵守）
-模拟真实 React 项目的组件化结构，必须按以下目录组织文件：
-
-\`\`\`
-/index.html              # 入口，只含挂载点和 CDN 引用
-/src/main.jsx            # React 入口：ReactDOM.createRoot(...).render(<App />)
-/src/App.jsx             # 根组件
-/src/components/         # 按功能拆分的组件目录
-  /src/components/Header.jsx
-  /src/components/Footer.jsx
-/styles/main.css         # 全局样式
-\`\`\`
-
-**关键规则**：
-1. **入口文件** \`/index.html\` 只包含挂载点 \`<div id="root"></div>\` 和 CDN 引用（React、ReactDOM、Babel），不写组件逻辑
-2. **React 入口** \`/src/main.jsx\` 必须包含 \`ReactDOM.createRoot(document.getElementById('root')).render(<App />)\`
-3. **根组件** \`/src/App.jsx\` 导出主应用组件，组合所有子组件
-4. **组件拆分**：复杂应用必须按功能拆分到 \`/src/components/\` 目录，每个组件一个 \`.jsx\` 文件
-5. **组件文件扩展名**：React 组件文件必须使用 \`.jsx\` 扩展名（不是 \`.js\`）
-6. **引用方式**：在 \`/index.html\` 中引用各组件文件（组装器会内联）
-
-### 代码风格示例
-
-\`\`\`html
-<!-- /index.html -->
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="./styles/main.css">
-  <title>React 应用</title>
-</head>
-<body>
-  <div id="root"></div>
-  <script src="./src/main.jsx"></script>
-</body>
-</html>
-\`\`\`
-
-\`\`\`jsx
-// /src/main.jsx
-function App() {
-  const [count, setCount] = React.useState(0);
-
-  return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <h1 className="text-2xl font-bold">React 应用</h1>
-      <button
-        onClick={() => setCount(c => c + 1)}
-        className="px-4 py-2 bg-blue-500 text-white rounded"
-      >
-        点击 {count} 次
-      </button>
-    </div>
-  );
-}
-
-ReactDOM.createRoot(document.getElementById('root')).render(<App />);
-\`\`\`
-
-### 关键点（必须遵守）
-1. 引入 React、ReactDOM 和 Babel CDN（用于浏览器内 JSX 编译）
-2. <script> 标签引用 .jsx 文件时使用 \`src\` 属性（组装器会内联并处理）
-3. 使用 React Hooks（useState、useEffect）管理状态
-4. 挂载点必须是 \`<div id="root"></div>\`
-5. 使用 Tailwind 类名进行样式设计
-6. 复杂应用按功能拆分组件到 \`/src/components/\` 目录`;
-
-    case 'vue-cdn':
-      return `## Vue CDN 模式约定
-
-### 文件组织规范（必须遵守）
-模拟真实 Vue 项目的组件化结构，必须按以下目录组织文件：
-
-\`\`\`
-/index.html              # 入口，只含挂载点和 CDN 引用
-/src/main.js             # Vue 入口：createApp(App).mount('#app')
-/src/App.js              # 根组件（导出组件选项对象，含 template 字符串）
-/src/components/         # 按功能拆分的组件目录
-  /src/components/Header.js
-  /src/components/Footer.js
-/styles/main.css         # 全局样式
-\`\`\`
-
-**关键规则**：
-1. **入口文件** \`/index.html\` 只包含挂载点 \`<div id="app"></div>\` 和 CDN 引用（Vue 3），不写组件逻辑
-2. **Vue 入口** \`/src/main.js\` 必须包含 \`Vue.createApp(App).mount('#app')\`
-3. **根组件** \`/src/App.js\` 导出组件选项对象，使用 \`template\` 字符串定义模板
-4. **组件拆分**：复杂应用必须按功能拆分到 \`/src/components/\` 目录，每个组件一个 \`.js\` 文件
-5. **组件格式**：Vue CDN 模式使用组件选项对象格式（不使用 SFC），每个组件文件导出含 \`template\` 字段的对象
-6. **引用方式**：在 \`/index.html\` 中引用各组件文件（组装器会内联）
-
-### 代码风格示例
-
-\`\`\`html
-<!-- /index.html -->
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="./styles/main.css">
-  <title>Vue 应用</title>
-</head>
-<body>
-  <div id="app"></div>
-  <script src="./src/main.js"></script>
-</body>
-</html>
-\`\`\`
-
-\`\`\`javascript
-// /src/main.js
-const { createApp, ref } = Vue;
-
-const App = {
-  setup() {
-    const count = ref(0);
-    return { count };
-  },
-  template: \`
-    <div class="min-h-screen bg-gray-50 p-4">
-      <h1 class="text-2xl font-bold">Vue 应用</h1>
-      <button
-        @click="count++"
-        class="px-4 py-2 bg-green-500 text-white rounded"
-      >
-        点击 {{ count }} 次
-      </button>
-    </div>
-  \`
-};
-
-createApp(App).mount('#app');
-\`\`\`
-
-### 关键点（必须遵守）
-1. 引入 Vue 3 CDN：\`<script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>\`
-2. 挂载点必须是 \`<div id="app"></div>\`
-3. 使用 Vue 3 Composition API（ref、reactive、onMounted 等）
-4. 使用 Tailwind 类名进行样式设计
-5. Vue 全局对象通过 CDN 注入，可直接使用 \`const { createApp, ref } = Vue\`
-6. 复杂应用按功能拆分组件到 \`/src/components/\` 目录
-7. 每个组件文件导出组件选项对象，使用 \`template\` 字符串（不是 SFC 格式）`;
-
-    default:
-      return `## HTML 模式约定
-
-### 文件组织规范（必须遵守）
-简单直接的结构，适合快速原型：
-
-\`\`\`
-/index.html              # 入口，包含完整页面结构
-/styles/main.css         # 样式文件
-/src/main.js             # 脚本文件（原生 DOM 操作）
-\`\`\`
-
-**关键规则**：
-1. **入口文件** \`/index.html\` 包含完整的 HTML 结构（头部、主体、脚本引用）
-2. **样式文件** \`/styles/main.css\` 存放所有 CSS 规则
-3. **脚本文件** \`/src/main.js\` 使用原生 JavaScript 进行 DOM 操作
-4. 复杂时可拆分工具函数到 \`/src/utils.js\`，但保持结构简单
-5. 不使用组件化框架，直接操作 DOM
-
-### 代码风格示例
-
-\`\`\`html
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="./styles/main.css">
-  <title>应用标题</title>
-</head>
-<body class="min-h-screen bg-gray-50">
-  <div class="container mx-auto p-4">
-    <h1 id="title" class="text-2xl font-bold">应用标题</h1>
-    <button id="counter" class="px-4 py-2 bg-blue-500 text-white rounded">
-      点击 0 次
-    </button>
-  </div>
-  <script src="./src/main.js"></script>
-</body>
-</html>
-\`\`\`
-
-\`\`\`javascript
-// /src/main.js
-let count = 0;
-const counterBtn = document.getElementById('counter');
-
-counterBtn.addEventListener('click', () => {
-  count++;
-  counterBtn.textContent = \`点击 \${count} 次\`;
-});
-\`\`\`
-
-### 关键点（必须遵守）
-1. 在 <head> 中引入 Tailwind CDN
-2. 使用 Tailwind 类名进行样式设计
-3. JavaScript 直接写在 /src/main.js 文件中
-4. 状态管理使用原生 JavaScript 变量和 DOM 操作`;
-  }
-}
+const ENGINEER_BASE_PROMPT = ENGINEER_BASE_PROMPT_V2;
 
 /**
  * 构建完整的工程师系统提示词。
  * 基础部分 + 用户选择的框架特定规范。
  */
 export function buildEngineerSystemPrompt(framework: 'html' | 'react-cdn' | 'vue-cdn'): string {
-  return ENGINEER_BASE_PROMPT + '\n\n' + getFrameworkPrompt(framework);
+  return buildEngineerSystemPromptV2(framework);
 }
 
 /** 迭代模式的工程师追加指令 */
 const ENGINEER_ITERATION_PROMPT = `## 迭代修改模式
 
 你正在修改一个已有项目。必须遵循以下原则：
+
+### 输出格式【必须严格遵守】
+- 输出格式仍是 { "files": [...] } JSON，与全新生成完全相同
+- 只包含被修改或新增的文件，每个文件输出**完整内容**，path、content、language 三字段齐全
+- **禁止**输出 { "changes": [...] } 变更清单/diff 编辑格式，本模式不支持该格式，输出将导致交付失败
 
 ### 核心原则
 1. **最小变更**：只修改用户要求的部分，不改动其他代码
@@ -749,6 +198,7 @@ const ENGINEER_ITERATION_PROMPT = `## 迭代修改模式
 
 ### 禁止行为
 - 不要重新生成整个项目
+- 不要输出 { "changes": [...] } 变更清单格式，必须输出 { "files": [...] }
 - 不要改变现有代码的命名风格
 - 不要添加用户未要求的新功能
 - 不要删除用户未要求删除的功能
@@ -764,8 +214,10 @@ const ENGINEER_ITERATION_PROMPT = `## 迭代修改模式
  *
  * 输出 JSON 变更清单而非完整文件，节省输出 token 并强制最小变更。
  * 配套 applyChanges 将清单应用到现有文件；解析或应用失败时，
- * 调用方必须回退到 ENGINEER_SYSTEM_PROMPT + ENGINEER_ITERATION_PROMPT 的
+ * 调用方必须回退到 ENGINEER_BASE_PROMPT + ENGINEER_ITERATION_PROMPT 的
  * 全量文件模式（降级路径），避免用户面对裸报错。
+ * 反向容错：迭代全量模式误输出变更清单时，由非 diff 解析路径
+ * （continueAfterApproval）复用 applyChanges 自动应用，不报错不重试。
  */
 const ENGINEER_DIFF_PROMPT = `你是 Litpp 平台的前端工程师，负责根据修改请求**增量修改**代码。
 
@@ -775,7 +227,10 @@ const ENGINEER_DIFF_PROMPT = `你是 Litpp 平台的前端工程师，负责根�
 1. 用户的修改请求
 2. 现有文件内容（带行号标注，行号仅供定位，输出时使用去掉行号后的原文）
 
-【输出格式】
+【输出格式】【必须严格遵守】
+
+**重要：你必须输出 \`{ "changes": [...] }\` 格式，不是其他格式！**
+
 只输出一个 JSON 对象，禁止输出任何解释文字、禁止用 markdown 围栏包裹：
 {
   "changes": [
@@ -792,6 +247,24 @@ const ENGINEER_DIFF_PROMPT = `你是 Litpp 平台的前端工程师，负责根�
     }
   ],
   "summary": "变更摘要（一句话，20 字以内）"
+}
+
+**禁止输出**：
+- ❌ \`{ "files": [...] }\` 格式（这是完整文件模式的格式）
+- ❌ 带解释文字的输出
+- ❌ markdown 围栏包裹
+
+**正确输出示例**：
+{
+  "changes": [
+    {
+      "file": "/index.html",
+      "edits": [
+        { "line": 2, "old": "  <button class=\"bg-red-500\">点击</button>", "new": "  <button class=\"bg-blue-500\">点击</button>", "type": "replace" }
+      ]
+    }
+  ],
+  "summary": "按钮颜色从红色改为蓝色"
 }
 
 【编辑类型说明】
@@ -843,117 +316,7 @@ const ENGINEER_DIFF_PROMPT = `你是 Litpp 平台的前端工程师，负责根�
 - 只输出 JSON，无其他文字`;
 
 /** 审查者系统提示词 */
-const REVIEWER_SYSTEM_PROMPT = `你是 Litpp 平台的质量审查者。你审查多文件项目是否合格交付。你不重写代码，只输出审查结论。
-
-## 审查维度（按顺序逐条检查，每项必须通过）
-
-### 一、结构完整（基础）
-1. 有 /index.html 入口文件
-2. HTML 有 <!DOCTYPE html>、<html>、<head>、<body> 且标签全部闭合
-3. HTML 中引用的 JS/CSS 文件路径在 files 中存在
-
-### 二、脚本可执行
-1. 每个 .js 文件内无明显语法错误
-2. 关键函数有定义（如 handleAdd、handleDelete 等事件处理函数）
-3. 事件绑定正确（如 onclick、addEventListener）
-
-### 三、样式合规
-1. 使用 Tailwind 类名或自定义 CSS
-2. 无内联 style 滥用（少量动态样式除外）
-3. 响应式类存在（sm:、md: 或移动端适配）
-
-### 四、功能覆盖（核心）
-对照功能清单中 priority 为 must 的功能：
-1. 每条 must 功能在代码中有对应实现（函数、组件、UI 元素）
-2. 功能实现完整，不是占位符或空函数
-
-### 五、交互真实（核心）
-1. 按钮有点击事件绑定
-2. 表单有提交/验证逻辑
-3. 交互有视觉反馈（悬停、按下、禁用状态的样式）
-
-### 六、健壮性检查（新增）
-1. 输入验证：有输入校验逻辑（如检查空值、非法值）
-2. 错误提示：错误状态有视觉反馈（红色边框、错误文案）
-3. 空状态：无数据时有友好提示（不是空白页）
-4. localStorage 安全：有 try-catch 包裹
-5. 边界处理：达到边界时有处理（如禁用按钮、提示）
-
-### 七、UI 质量检查（新增）
-1. 按钮样式：有悬停（hover）、按下（active）、禁用（disabled）状态
-2. 动画效果：有 transition 类或 CSS 动画
-3. 视觉层次：标题、正文、按钮有明确区分
-4. 响应式：移动端不崩塌，按钮足够大（至少 44px）
-
-### 八、资源合规
-1. 外部资源只允许来自 cdn.jsdelivr.net 或 cdn.tailwindcss.com
-2. 无手写 SVG 图标（用 CSS 形状或 Unicode）
-3. 无 Inter 字体引用
-4. 无紫色渐变
-
-### 九、代码质量
-1. 无硬编码魔法数字（用常量或配置）
-2. 函数命名清晰（动词开头）
-3. 无明显 bug（逻辑正确）
-
-## 输出格式
-只输出一个 JSON 对象，禁止输出其他任何文字：
-{
-  "pass": true 或 false,
-  "checks": [
-    { "item": "结构完整", "pass": true, "note": "一句话说明，20 字以内" }
-  ],
-  "repairInstructions": [],
-  "missingFiles": ["不存在的文件路径列表"]
-}
-
-约束：
-- checks 必须覆盖上述 9 个维度
-- pass 为 false 时 repairInstructions 必填：最多 3 条，每条是一个具体、可独立执行的修复指令
-- pass 为 true 时 repairInstructions 必须是空数组，missingFiles 必须是空数组
-- 每个 check 的 note 必须说明具体问题（如"缺少重置按钮"、"无空状态设计"）
-
-## 审查示例
-
-### 不通过的审查结果
-{
-  "pass": false,
-  "checks": [
-    { "item": "结构完整", "pass": true, "note": "HTML 结构完整" },
-    { "item": "脚本可执行", "pass": true, "note": "无语法错误" },
-    { "item": "样式合规", "pass": true, "note": "使用 Tailwind" },
-    { "item": "功能覆盖", "pass": false, "note": "缺少重置功能" },
-    { "item": "交互真实", "pass": true, "note": "事件绑定正确" },
-    { "item": "健壮性检查", "pass": false, "note": "无空状态设计，localStorage 无 try-catch" },
-    { "item": "UI 质量检查", "pass": false, "note": "按钮无悬停/禁用状态" },
-    { "item": "资源合规", "pass": true, "note": "资源白名单内" },
-    { "item": "代码质量", "pass": true, "note": "命名清晰" }
-  ],
-  "repairInstructions": [
-    "添加重置按钮，点击时弹出确认对话框",
-    "添加空状态组件：无数据时显示'添加第一条待办吧'",
-    "为按钮添加 hover:scale-105、disabled:opacity-50 样式"
-  ],
-  "missingFiles": []
-}
-
-### 通过的审查结果
-{
-  "pass": true,
-  "checks": [
-    { "item": "结构完整", "pass": true, "note": "HTML 结构完整" },
-    { "item": "脚本可执行", "pass": true, "note": "无语法错误" },
-    { "item": "样式合规", "pass": true, "note": "使用 Tailwind + 响应式" },
-    { "item": "功能覆盖", "pass": true, "note": "must 功能全部实现" },
-    { "item": "交互真实", "pass": true, "note": "事件绑定正确" },
-    { "item": "健壮性检查", "pass": true, "note": "有空状态、输入验证、localStorage 保护" },
-    { "item": "UI 质量检查", "pass": true, "note": "按钮状态完整、有动画" },
-    { "item": "资源合规", "pass": true, "note": "资源白名单内" },
-    { "item": "代码质量", "pass": true, "note": "命名清晰、无硬编码" }
-  ],
-  "repairInstructions": [],
-  "missingFiles": []
-}`;
+const REVIEWER_SYSTEM_PROMPT = REVIEWER_SYSTEM_PROMPT_V2;
 
 /** 分析模式系统提示词（analyze 意图：解释现有项目，不改动、不生成代码） */
 const ANALYZE_SYSTEM_PROMPT = `你是 Litpp 平台的需求分析师。用户想了解现有项目的功能、结构或实现，你的任务是解释与分析，不是修改代码。
@@ -1384,7 +747,7 @@ export async function streamChatCompletionWithUsage(
 
 /**
  * 剥离 LLM 输出中误加的 markdown 代码围栏。
- * 提示词（ENGINEER_SYSTEM_PROMPT）要求首行 <!DOCTYPE html>，但模型偶尔仍以 ```html
+ * 提示词（ENGINEER_BASE_PROMPT）要求首行 <!DOCTYPE html>，但模型偶尔仍以 ```html
  * 围栏包裹输出。采用"流式拼接完成后一次性剥离"而非逐 delta 处理：
  * 围栏序列可能被拆分在相邻 delta 的边界上，逐 delta 剥离需要跨 delta 状态机，
  * 而 delta 仅用于前端实时显示（围栏前缀只影响开头几个字符的显示），只有 done
@@ -1767,140 +1130,166 @@ export async function continueAfterApproval(
       });
     }
 
-    let accumulatedOutput = '';
-    const generateResult = await streamChatCompletionWithUsage(
-      generateMessages,
-      (text) => {
-        accumulatedOutput += text;
-        onEvent({ type: 'delta', payload: { text, phase: 'generate' } });
-      },
-      combinedSignal,
-      { onRetry: forwardRetry }
-    );
-    const generatedOutput = generateResult.content;
-
-    if (combinedSignal.aborted) return;
-
-    // 第一步：先检查输出是否是对话内容（澄清需求、解释概念等）。
-    // 仅非 diff 模式执行：diff 模式的输出是 { changes, summary }，没有 files 数组，
-    // parseOutput 对其必然抛错（a2d9eae 引入的回归），未捕获会误杀整个 diff 流程；
-    // diff 模式的对话信号（空变更清单 / 纯文本输出）分别由 diff 分支内的
-    // 空变更检查与降级路径处理。
-    // parseOutput 可能对畸形输出抛错，此处捕获后交给下方解析路径统一报错或抢救。
-    if (!useDiffMode) {
-      try {
-        const quickParseResult = parseOutput(generatedOutput);
-        if (quickParseResult.type === 'conversation') {
-          console.log('[continueAfterApproval] 检测到纯文本对话内容，跳过代码生成');
-          pendingSessions.delete(sessionId);
-
-          // 通过 done 事件返回对话内容（前端会作为 assistant 消息展示）
-          onEvent({
-            type: 'done',
-            payload: {
-              html: '',
-              files: {},
-              analysis: quickParseResult.content || generatedOutput,
-              stats: generateResult.usage ? {
-                inputTokens: generateResult.usage.prompt_tokens,
-                outputTokens: generateResult.usage.completion_tokens,
-              } : undefined,
-            },
-          });
-          return;
-        }
-      } catch {
-        // 预检解析失败不定论，交给下方多文件解析路径统一处理
-      }
-    }
-
-    // 第二步：解析为代码结构
-    // diff 模式：尝试解析变更清单并应用到现有文件
-    // 非 diff 模式或 diff 解析失败：降级为多文件解析
-    let finalFiles: Record<string, { path: string; content: string; language: FileLanguage; updatedAt: string }>;
+    // 工程师生成与解析（带格式错误重试）
+    // 最多尝试 2 次：首次失败且检测到格式错误时重试一次
+    let retryCount = 0;
+    let formatErrorHint = '';
+    let generatedOutput = '';
+    let generateResult: { content: string; usage?: LLMUsage } | undefined;
+    let finalFiles: Record<string, { path: string; content: string; language: FileLanguage; updatedAt: string }> | undefined;
     let changeList: ChangeList | undefined;
     let multiFileOutput: MultiFileOutput | undefined;
     let rescueNotice: string | null = null;
     let rescuedPaths: string[] = [];
 
-    if (useDiffMode) {
-      // diff 模式：解析变更清单
-      try {
-        changeList = parseChangeList(generatedOutput);
+    // 重试循环
+    for (let attempt = 0; attempt < 2; attempt++) {
+      // 重试时在提示词中强调格式要求
+      const retryMessages: ChatMessage[] = [...generateMessages];
+      if (retryCount > 0 && formatErrorHint) {
+        const originalUserMsg = retryMessages[1]!.content;
+        retryMessages[1] = {
+          role: 'user',
+          content: `${originalUserMsg}\n\n【重要】上次输出格式错误：${formatErrorHint}\n\n请确保输出格式正确：${useDiffMode ? 'diff 模式必须输出 { "changes": [...] } 格式，包含 file、edits、summary 字段' : '必须输出 { "files": [...] } 格式，每个文件包含 path、content、language 字段；禁止输出 { "changes": [...] } 变更清单格式'}`,
+        };
+        console.log('[continueAfterApproval] 格式错误重试，添加格式强调');
+      }
 
-        // 空变更检查：AI 认为无需修改或需求不明确（如 { "changes": [], "summary": "需求不明确" }）。
-        // 参考 Claude Code FileEditTool 的诚实反馈原则（old_string 未命中时报
-        // "String to replace not found"，绝不假装写入了文件）：没做事就说没做。
-        // summary 此时是对话内容而非变更摘要，经 analysis 字段走对话模式，
-        // 由前端作为 assistant 消息展示；绝不发"变更已应用"。
-        if (changeList.changes.length === 0) {
-          console.info('[continueAfterApproval] diff 输出为空变更，转对话模式:', changeList.summary);
-          pendingSessions.delete(sessionId);
-          onEvent({
-            type: 'done',
-            payload: {
-              html: '',
-              files: {},
-              analysis: changeList.summary || '本次未对代码做任何修改：未能确定需要变更的内容，请补充更具体的需求。',
-              stats: generateResult.usage ? {
-                inputTokens: generateResult.usage.prompt_tokens,
-                outputTokens: generateResult.usage.completion_tokens,
-              } : undefined,
-            },
-          });
-          return;
-        }
+      // 执行生成
+      let accumulatedOutput = '';
+      const result = await streamChatCompletionWithUsage(
+        retryMessages,
+        (text) => {
+          accumulatedOutput += text;
+          onEvent({ type: 'delta', payload: { text, phase: 'generate' } });
+        },
+        combinedSignal,
+        { onRetry: forwardRetry }
+      );
+      generatedOutput = result.content;
+      generateResult = result;
 
-        console.info(
-          `[continueAfterApproval] diff 解析成功: ${changeList.changes.length} 个文件, ${changeList.changes.reduce((sum, c) => sum + c.edits.length, 0)} 处编辑`
-        );
+      if (combinedSignal.aborted) return;
 
-        // 应用变更到原始文件（session.originalFiles 是裁剪前的完整文件集）
-        const mergeBase = session.originalFiles ?? currentFiles ?? {};
-        const { newFiles, appliedCount, errors } = applyChanges(mergeBase, changeList.changes);
+      // 解析输出
+      let parseSuccess = false;
+      let shouldRetry = false;
 
-        if (errors.length > 0) {
-          console.warn('[continueAfterApproval] 部分编辑未成功应用:', errors.join('; '));
-        }
-
-        console.info(`[continueAfterApproval] 已应用 ${appliedCount} 处编辑`);
-
-        // 转换为 FileNodeRecord 格式
-        const now = new Date().toISOString();
-        finalFiles = {};
-        for (const [path, file] of Object.entries(newFiles)) {
-          finalFiles[path] = {
-            path: file.path,
-            content: file.content,
-            language: file.language,
-            updatedAt: now,
-          };
-        }
-      } catch (diffError) {
-        // diff 解析失败，降级为多文件解析
-        const errorMsg = diffError instanceof Error ? diffError.message : 'diff 解析失败';
-        console.error('[continueAfterApproval] diff 解析失败，降级为多文件解析:', errorMsg);
-        changeList = undefined;
-
+      if (useDiffMode) {
+        // diff 模式解析
         try {
-          const parseResult = parseOutput(generatedOutput);
+          changeList = parseChangeList(generatedOutput);
+          parseSuccess = true;
 
-          // 检测是否是对话内容
-          if (parseResult.type === 'conversation') {
-            // AI 返回了对话内容而非代码
+          // 空变更检查
+          if (changeList.changes.length === 0) {
+            console.info('[continueAfterApproval] diff 输出为空变更，转对话模式:', changeList.summary);
             pendingSessions.delete(sessionId);
-            // 通过 delta 事件发送对话内容
-            onEvent({ type: 'delta', payload: { text: parseResult.content || '', phase: 'generate' } });
-            // 通过 done 事件标记为分析结果
             onEvent({
               type: 'done',
               payload: {
                 html: '',
                 files: {},
-                analysis: parseResult.content,
-                stats: generateResult.usage ? {
-                  inputTokens: generateResult.usage.prompt_tokens,
-                  outputTokens: generateResult.usage.completion_tokens,
+                analysis: changeList.summary || '本次未对代码做任何修改：未能确定需要变更的内容，请补充更具体的需求。',
+                stats: result.usage ? {
+                  inputTokens: result.usage.prompt_tokens,
+                  outputTokens: result.usage.completion_tokens,
+                } : undefined,
+              },
+            });
+            return;
+          }
+
+          console.info(
+            `[continueAfterApproval] diff 解析成功: ${changeList.changes.length} 个文件, ${changeList.changes.reduce((sum, c) => sum + c.edits.length, 0)} 处编辑`
+          );
+
+          // 应用变更
+          const mergeBase = session.originalFiles ?? currentFiles ?? {};
+          const { newFiles, appliedCount, errors } = applyChanges(mergeBase, changeList.changes);
+
+          if (errors.length > 0) {
+            console.warn('[continueAfterApproval] 部分编辑未成功应用:', errors.join('; '));
+          }
+
+          console.info(`[continueAfterApproval] 已应用 ${appliedCount} 处编辑`);
+
+          const now = new Date().toISOString();
+          finalFiles = {};
+          for (const [path, file] of Object.entries(newFiles)) {
+            finalFiles[path] = {
+              path: file.path,
+              content: file.content,
+              language: file.language,
+              updatedAt: now,
+            };
+          }
+        } catch (diffError) {
+          const errorMsg = diffError instanceof Error ? diffError.message : 'diff 解析失败';
+          console.error('[continueAfterApproval] diff 解析失败:', errorMsg);
+          changeList = undefined;
+
+          // 检测是否应该重试
+          shouldRetry = retryCount === 0 && (errorMsg.includes('格式') || generatedOutput.includes('"files"'));
+
+          // 如果不重试，尝试降级为多文件解析
+          if (!shouldRetry) {
+            try {
+              const parseResult = parseOutput(generatedOutput);
+              if (parseResult.type === 'conversation') {
+                pendingSessions.delete(sessionId);
+                onEvent({ type: 'delta', payload: { text: parseResult.content || '', phase: 'generate' } });
+                onEvent({
+                  type: 'done',
+                  payload: {
+                    html: '',
+                    files: {},
+                    analysis: parseResult.content,
+                    stats: result.usage ? {
+                      inputTokens: result.usage.prompt_tokens,
+                      outputTokens: result.usage.completion_tokens,
+                    } : undefined,
+                  },
+                });
+                return;
+              }
+              multiFileOutput = { files: parseResult.files! };
+              parseSuccess = true;
+            } catch (parseError) {
+              const parseErrorMsg = parseError instanceof Error ? parseError.message : '输出解析失败';
+              const rescued = repairTruncatedMultiFileOutput(generatedOutput);
+              if (!rescued) {
+                pendingSessions.delete(sessionId);
+                onEvent({ type: 'error', payload: { message: `生成输出格式错误: ${parseErrorMsg}` } });
+                return;
+              }
+              rescuedPaths = rescued.files.map(f => f.path);
+              rescueNotice = `输出因长度限制被截断，已恢复 ${rescuedPaths.length} 个已完成文件`;
+              multiFileOutput = rescued;
+              parseSuccess = true;
+            }
+          } else {
+            // 设置重试提示
+            formatErrorHint = errorMsg;
+          }
+        }
+      } else {
+        // 非 diff 模式解析
+        try {
+          const parseResult = parseOutput(generatedOutput);
+
+          if (parseResult.type === 'conversation') {
+            console.log('[continueAfterApproval] 检测到纯文本对话内容，跳过代码生成');
+            pendingSessions.delete(sessionId);
+            onEvent({
+              type: 'done',
+              payload: {
+                html: '',
+                files: {},
+                analysis: parseResult.content || generatedOutput,
+                stats: result.usage ? {
+                  inputTokens: result.usage.prompt_tokens,
+                  outputTokens: result.usage.completion_tokens,
                 } : undefined,
               },
             });
@@ -1908,77 +1297,108 @@ export async function continueAfterApproval(
           }
 
           multiFileOutput = { files: parseResult.files! };
+          parseSuccess = true;
         } catch (parseError) {
-          const parseErrorMsg = parseError instanceof Error ? parseError.message : '输出解析失败';
-          console.error('[continueAfterApproval] 多文件解析失败:', parseErrorMsg);
+          const errorMsg = parseError instanceof Error ? parseError.message : '输出解析失败';
+          console.error('[continueAfterApproval] 多文件解析失败:', errorMsg);
 
-          const rescued = repairTruncatedMultiFileOutput(generatedOutput);
-          if (!rescued) {
-            pendingSessions.delete(sessionId);
-            onEvent({ type: 'error', payload: { message: `生成输出格式错误: ${parseErrorMsg}` } });
-            return;
+          // 智能容错：迭代模式下模型误输出 diff 模式的 { "changes": [...] } 变更清单。
+          // 迭代模式必有现有文件上下文，复用 diff 模式的 applyChanges 将清单应用到
+          // 现有文件，转换为全量文件走与非 diff 模式相同的交付流程，避免用户面对格式报错。
+          // 仅当无法应用（无现有文件 / 清单为空 / 全部编辑不可应用）时降级走重试。
+          if (isIteration && currentFiles) {
+            try {
+              const toleratedList = parseChangeList(generatedOutput);
+              if (toleratedList.changes.length === 0) {
+                // 与 diff 模式空变更处理一致：交付说明而非报错
+                console.info('[continueAfterApproval] 容错解析到空变更，转对话模式:', toleratedList.summary);
+                pendingSessions.delete(sessionId);
+                onEvent({
+                  type: 'done',
+                  payload: {
+                    html: '',
+                    files: {},
+                    analysis: toleratedList.summary || '本次未对代码做任何修改：未能确定需要变更的内容，请补充更具体的需求。',
+                    stats: result.usage ? {
+                      inputTokens: result.usage.prompt_tokens,
+                      outputTokens: result.usage.completion_tokens,
+                    } : undefined,
+                  },
+                });
+                return;
+              }
+
+              const mergeBase = session.originalFiles ?? currentFiles;
+              const { newFiles, appliedCount, errors } = applyChanges(mergeBase, toleratedList.changes);
+              if (appliedCount > 0) {
+                if (errors.length > 0) {
+                  console.warn('[continueAfterApproval] changes 格式容错：部分编辑未成功应用:', errors.join('; '));
+                }
+                changeList = toleratedList;
+                // 全量文件走正常交付流程（后续审查、finalFiles 组装与 diff 模式共用）
+                multiFileOutput = { files: Object.values(newFiles) };
+                parseSuccess = true;
+                console.info(
+                  `[continueAfterApproval] changes 格式容错成功: 应用 ${appliedCount} 处编辑，交付 ${Object.keys(newFiles).length} 个文件`
+                );
+              } else {
+                console.warn('[continueAfterApproval] changes 格式容错失败：无可用编辑，降级走重试');
+              }
+            } catch (tolerantError) {
+              // 输出不是合法的 changes 格式（多为截断的 files 输出），继续走重试/抢救
+              const tolerantMsg = tolerantError instanceof Error ? tolerantError.message : 'changes 容错解析失败';
+              console.info('[continueAfterApproval] 非 changes 格式，继续重试/抢救路径:', tolerantMsg);
+            }
           }
 
-          rescuedPaths = rescued.files.map(f => f.path);
-          rescueNotice = `输出因长度限制被截断，已恢复 ${rescuedPaths.length} 个已完成文件`;
-          console.warn('[continueAfterApproval] 截断抢救成功:', rescueNotice, rescuedPaths.join(', '));
-          multiFileOutput = rescued;
+          if (!parseSuccess) {
+            // 检测是否是格式错误（files vs changes）
+            const isFormatError = errorMsg.includes('输出格式错误') ||
+                                 (generatedOutput.includes('"changes"') && !generatedOutput.includes('"files"'));
+            shouldRetry = retryCount === 0 && isFormatError;
+
+            if (!shouldRetry) {
+              // 不重试，尝试抢救
+              const rescued = repairTruncatedMultiFileOutput(generatedOutput);
+              if (!rescued) {
+                pendingSessions.delete(sessionId);
+                onEvent({ type: 'error', payload: { message: `生成输出格式错误: ${errorMsg}` } });
+                return;
+              }
+              rescuedPaths = rescued.files.map(f => f.path);
+              rescueNotice = `输出因长度限制被截断，已恢复 ${rescuedPaths.length} 个已完成文件`;
+              multiFileOutput = rescued;
+              parseSuccess = true;
+            } else {
+              // 设置重试提示
+              formatErrorHint = errorMsg;
+              console.log('[continueAfterApproval] 检测到格式错误，准备重试');
+            }
+          }
         }
-
-        const mergeBase = isIteration && session.originalFiles ? session.originalFiles : currentFiles;
-        finalFiles = isIteration && mergeBase
-          ? toFileNodeRecord(multiFileOutput, mergeBase)
-          : toFileNodeRecord(multiFileOutput);
-      }
-    } else {
-      // 非 diff 模式：解析多文件输出
-      try {
-        const parseResult = parseOutput(generatedOutput);
-
-        // 检测是否是对话内容
-        if (parseResult.type === 'conversation') {
-          // AI 返回了对话内容而非代码
-          pendingSessions.delete(sessionId);
-          // 通过 delta 事件发送对话内容
-          onEvent({ type: 'delta', payload: { text: parseResult.content || '', phase: 'generate' } });
-          // 通过 done 事件标记为分析结果
-          onEvent({
-            type: 'done',
-            payload: {
-              html: '',
-              files: {},
-              analysis: parseResult.content,
-              stats: generateResult.usage ? {
-                inputTokens: generateResult.usage.prompt_tokens,
-                outputTokens: generateResult.usage.completion_tokens,
-              } : undefined,
-            },
-          });
-          return;
-        }
-
-        multiFileOutput = { files: parseResult.files! };
-      } catch (parseError) {
-        const errorMsg = parseError instanceof Error ? parseError.message : '输出解析失败';
-        console.error('[continueAfterApproval] 多文件解析失败:', errorMsg);
-
-        const rescued = repairTruncatedMultiFileOutput(generatedOutput);
-        if (!rescued) {
-          pendingSessions.delete(sessionId);
-          onEvent({ type: 'error', payload: { message: `生成输出格式错误: ${errorMsg}` } });
-          return;
-        }
-
-        rescuedPaths = rescued.files.map(f => f.path);
-        rescueNotice = `输出因长度限制被截断，已恢复 ${rescuedPaths.length} 个已完成文件`;
-        console.warn('[continueAfterApproval] 截断抢救成功:', rescueNotice, rescuedPaths.join(', '));
-        multiFileOutput = rescued;
       }
 
+      // 如果解析成功或不需要重试，跳出循环
+      if (parseSuccess || !shouldRetry) {
+        break;
+      }
+
+      retryCount++;
+    }
+
+    // 处理 multiFileOutput（如果解析成功且需要转换为 finalFiles）
+    if (multiFileOutput && !finalFiles) {
       const mergeBase = isIteration && session.originalFiles ? session.originalFiles : currentFiles;
       finalFiles = isIteration && mergeBase
         ? toFileNodeRecord(multiFileOutput, mergeBase)
         : toFileNodeRecord(multiFileOutput);
+    }
+
+    // 如果仍然没有 finalFiles，说明解析失败且重试耗尽
+    if (!finalFiles) {
+      pendingSessions.delete(sessionId);
+      onEvent({ type: 'error', payload: { message: '生成输出格式错误：重试后仍无法解析，请重新描述需求' } });
+      return;
     }
 
     if (rescueNotice) {
@@ -2048,7 +1468,7 @@ export async function continueAfterApproval(
     // 计算 token 统计：累加分析、工程师和审查阶段的 usage
     const totalStats = (() => {
       const analysisUsage = session.analysisUsage;
-      const genUsage = generateResult.usage;
+      const genUsage = generateResult?.usage;
       if (!analysisUsage && !genUsage && !reviewUsage) return undefined;
       return {
         inputTokens: (analysisUsage?.prompt_tokens ?? 0) + (genUsage?.prompt_tokens ?? 0) + (reviewUsage?.prompt_tokens ?? 0),

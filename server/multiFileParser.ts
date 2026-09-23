@@ -181,6 +181,46 @@ function looksLikeConversation(text: string): boolean {
 }
 
 /**
+ * 将 changes 格式转换为 files 格式的尝试结果。
+ * changes 格式基于现有文件进行修改，无法在解析阶段完整转换，
+ * 所以这个函数主要用于检测和提供诊断信息。
+ */
+function convertChangesToFiles(changes: unknown[]): GeneratedFile[] {
+  // 检查 changes 结构
+  if (!Array.isArray(changes) || changes.length === 0) {
+    throw new Error('changes 数组为空或无效');
+  }
+
+  // 遍历每个 change，检查是否包含完整的文件内容
+  // 某些情况下，LLM 可能在 changes 中输出完整的新文件
+  const files: GeneratedFile[] = [];
+  for (const change of changes) {
+    if (typeof change !== 'object' || change === null) continue;
+    const c = change as Record<string, unknown>;
+
+    // 如果 change 中包含完整的 file 对象（有 path、content、language）
+    if (isValidPath(c.path) && typeof c.content === 'string') {
+      const language = isValidLanguage(c.language)
+        ? c.language
+        : inferLanguageFromPath(c.path);
+      files.push({
+        path: c.path as string,
+        content: c.content as string,
+        language,
+      });
+    }
+  }
+
+  // 如果所有 changes 都包含完整文件内容，可以转换
+  if (files.length === changes.length) {
+    return files;
+  }
+
+  // 否则，changes 是增量修改格式，无法在此阶段转换
+  throw new Error('changes 格式为增量修改，需要现有文件才能应用');
+}
+
+/**
  * 解析多文件 JSON 输出。
  *
  * @param text LLM 输出的原始文本（可能包含 markdown 围栏）
@@ -291,6 +331,26 @@ export function parseOutput(text: string): ParseResult {
         files: undefined,
       };
     }
+
+    // 智能格式检测：当没有 files 但有 changes 时，尝试转换
+    // 这处理了非 diff 模式下 LLM 返回 diff 格式的情况
+    if (Array.isArray(obj.changes)) {
+      console.log('[parseOutput] 检测到 changes 格式，尝试转换为 files');
+      try {
+        const convertedFiles = convertChangesToFiles(obj.changes as unknown[]);
+        if (convertedFiles.length > 0) {
+          console.log('[parseOutput] changes 转换成功，得到', convertedFiles.length, '个文件');
+          return {
+            type: 'files',
+            files: convertedFiles,
+            content: undefined,
+          };
+        }
+      } catch (convertError) {
+        console.warn('[parseOutput] changes 转换失败:', convertError);
+      }
+    }
+
     // 提供更友好的错误信息
     const preview = JSON.stringify(obj).slice(0, 200);
     throw new Error(`输出格式错误：期望包含 files 数组的对象，但得到：${preview}...`);

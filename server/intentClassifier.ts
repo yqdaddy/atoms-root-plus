@@ -398,14 +398,21 @@ function matchKeywords(context: IntentContext): IntentResult | null {
     };
   }
 
-  // 诊断优先级次高：报错/不工作等词汇表示用户被问题阻塞，
-  // 即使同时含"修改"字样（如"修复一下"同时命中两边），也应先诊断
-  if (diagnoseHits > 0) {
-    return {
-      type: 'diagnose',
-      confidence: Math.min(0.9, 0.75 + diagnoseHits * 0.05),
-      reasoning: `诊断关键词命中 ${diagnoseHits} 次`,
-    };
+  // 诊断：只有当诊断关键词命中，且没有创建/修改意图时才判定
+  // 避免需求描述中的技术术语（如"防点击无反应"）被误判
+  if (diagnoseHits > 0 && createHits === 0 && modifyHits === 0) {
+    // 额外检查：是否包含疑问语气或问题陈述
+    const hasQuestionTone = /为什么|怎么(办|回事)|为啥|为何|why|how come/i.test(prompt);
+    const hasProblemStatement = /报错|出错|error|exception|不工作|broken|failed|没反应|不生效|有问题/i.test(prompt);
+
+    // 只有明确的问题语境才判定为诊断
+    if (hasQuestionTone || hasProblemStatement) {
+      return {
+        type: 'diagnose',
+        confidence: Math.min(0.9, 0.75 + diagnoseHits * 0.05),
+        reasoning: `诊断关键词命中 ${diagnoseHits} 次 + 问题语境`,
+      };
+    }
   }
 
   // 创建：空项目 + 创建词，或创建词显著多于修改词（已有项目但用户想推倒重来）
