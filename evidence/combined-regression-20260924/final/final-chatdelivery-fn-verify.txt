@@ -1,0 +1,18 @@
+[parseOutput] 无法提取 JSON 对象，原始输出（前 1000 字符）: {"x":"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy...(truncated)
+[parseOutput] 检测到纯文本对话内容
+PASS | 104K裸JSON识别为bare | len=100034
+FAIL | 可解析files→摘要不贴JSON | ```json
+{"files":[{"path":"App.tsx","content":"..."},{"path":"components/TaskLis
+PASS | 不可解析JSON→围栏兜底 | len=4082
+PASS | 进度标记不误判
+PASS | 纯文本原样放行
+PASS | 围栏兜底≤4000+标记
+PASS | create摘要含文件数无重试 | 已生成完整项目，共 2 个文件：App.tsx、TaskList.tsx。
+PASS | create摘要含策略切换 | 已生成完整项目，共 1 个文件：App.tsx（经 2 次自动重试并切换完整重生成策略）。
+PASS | diff摘要含处数与文件 | 已应用 4 处修改，涉及 App.tsx、StatsBar.tsx；新增统计栏。
+PASS | 超6文件聚合为等N个
+PASS | 阈值下不放行小JSON
+
+总计 11 项, FAIL=1
+PASS | 合规files载荷→人话摘要不贴JSON | out=（模型本次返回的是 3 个文件的项目数据：/index.html、/App.tsx、/components/TaskList.tsx；该输出未被按项目交付，如需生成请重试。）
+PASS | 104K可解析载荷→摘要化 | outLen=53 out=（模型本次返回的是 1 个文件的项目数据：/index.html；该输出未被按项目交付，如需生成请重试。）

@@ -1,0 +1,963 @@
+event: stage
+data: {"phase":"generate"}
+
+event: retry
+data: {"retry":{"attempt":1,"maxRetries":2,"delayMs":0,"errorMessage":"项目结构不完整"}}
+
+event: delta
+data: {"text":"\n[项目结构不完整，自动重试中（第 1/2 次）]\n","phase":"generate"}
+
+event: delta
+data: {"text":"\n已生成完整项目，共 4 个文件：/index.html、/styles/main.css、/src/main.js、/README.md（经 1 次自动重试）。\n","phase":"generate"}
+
+event: stage
+data: {"phase":"review"}
+
+event: delta
+data: {"text":"```","phase":"review"}
+
+event: delta
+data: {"text":"json","phase":"review"}
+
+event: delta
+data: {"text":"\n","phase":"review"}
+
+event: delta
+data: {"text":"{","phase":"review"}
+
+event: delta
+data: {"text":"\n","phase":"review"}
+
+event: delta
+data: {"text":" ","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"pass","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" true","phase":"review"}
+
+event: delta
+data: {"text":",","phase":"review"}
+
+event: delta
+data: {"text":"\n","phase":"review"}
+
+event: delta
+data: {"text":" ","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"checks","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" [","phase":"review"}
+
+event: delta
+data: {"text":"\n","phase":"review"}
+
+event: delta
+data: {"text":"   ","phase":"review"}
+
+event: delta
+data: {"text":" {","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"item","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"结构","phase":"review"}
+
+event: delta
+data: {"text":"完整","phase":"review"}
+
+event: delta
+data: {"text":"\",","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"pass","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" true","phase":"review"}
+
+event: delta
+data: {"text":",","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"note","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"index","phase":"review"}
+
+event: delta
+data: {"text":".html","phase":"review"}
+
+event: delta
+data: {"text":"、","phase":"review"}
+
+event: delta
+data: {"text":"CSS","phase":"review"}
+
+event: delta
+data: {"text":"、","phase":"review"}
+
+event: delta
+data: {"text":"JS","phase":"review"}
+
+event: delta
+data: {"text":" ","phase":"review"}
+
+event: delta
+data: {"text":"文件","phase":"review"}
+
+event: delta
+data: {"text":"齐全","phase":"review"}
+
+event: delta
+data: {"text":"，","phase":"review"}
+
+event: delta
+data: {"text":"标签","phase":"review"}
+
+event: delta
+data: {"text":"闭合","phase":"review"}
+
+event: delta
+data: {"text":"\"","phase":"review"}
+
+event: delta
+data: {"text":" },","phase":"review"}
+
+event: delta
+data: {"text":"\n","phase":"review"}
+
+event: delta
+data: {"text":"   ","phase":"review"}
+
+event: delta
+data: {"text":" {","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"item","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"脚本","phase":"review"}
+
+event: delta
+data: {"text":"可","phase":"review"}
+
+event: delta
+data: {"text":"执行","phase":"review"}
+
+event: delta
+data: {"text":"\",","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"pass","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" true","phase":"review"}
+
+event: delta
+data: {"text":",","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"note","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"无","phase":"review"}
+
+event: delta
+data: {"text":"语法","phase":"review"}
+
+event: delta
+data: {"text":"错误","phase":"review"}
+
+event: delta
+data: {"text":"，","phase":"review"}
+
+event: delta
+data: {"text":"事件","phase":"review"}
+
+event: delta
+data: {"text":"绑定","phase":"review"}
+
+event: delta
+data: {"text":"正确","phase":"review"}
+
+event: delta
+data: {"text":"，","phase":"review"}
+
+event: delta
+data: {"text":"函数","phase":"review"}
+
+event: delta
+data: {"text":"完整","phase":"review"}
+
+event: delta
+data: {"text":"定义","phase":"review"}
+
+event: delta
+data: {"text":"\"","phase":"review"}
+
+event: delta
+data: {"text":" },","phase":"review"}
+
+event: delta
+data: {"text":"\n","phase":"review"}
+
+event: delta
+data: {"text":"   ","phase":"review"}
+
+event: delta
+data: {"text":" {","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"item","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"功能","phase":"review"}
+
+event: delta
+data: {"text":"覆盖","phase":"review"}
+
+event: delta
+data: {"text":"\",","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"pass","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" true","phase":"review"}
+
+event: delta
+data: {"text":",","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"note","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"加减","phase":"review"}
+
+event: delta
+data: {"text":"乘","phase":"review"}
+
+event: delta
+data: {"text":"除","phase":"review"}
+
+event: delta
+data: {"text":"、","phase":"review"}
+
+event: delta
+data: {"text":"百分比","phase":"review"}
+
+event: delta
+data: {"text":"、","phase":"review"}
+
+event: delta
+data: {"text":"清零","phase":"review"}
+
+event: delta
+data: {"text":"、","phase":"review"}
+
+event: delta
+data: {"text":"退","phase":"review"}
+
+event: delta
+data: {"text":"格","phase":"review"}
+
+event: delta
+data: {"text":"、","phase":"review"}
+
+event: delta
+data: {"text":"小数","phase":"review"}
+
+event: delta
+data: {"text":"点","phase":"review"}
+
+event: delta
+data: {"text":"全部","phase":"review"}
+
+event: delta
+data: {"text":"实现","phase":"review"}
+
+event: delta
+data: {"text":"\"","phase":"review"}
+
+event: delta
+data: {"text":" },","phase":"review"}
+
+event: delta
+data: {"text":"\n","phase":"review"}
+
+event: delta
+data: {"text":"   ","phase":"review"}
+
+event: delta
+data: {"text":" {","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"item","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"交互","phase":"review"}
+
+event: delta
+data: {"text":"真实","phase":"review"}
+
+event: delta
+data: {"text":"\",","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"pass","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" true","phase":"review"}
+
+event: delta
+data: {"text":",","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"note","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"按钮","phase":"review"}
+
+event: delta
+data: {"text":"点击","phase":"review"}
+
+event: delta
+data: {"text":"有","phase":"review"}
+
+event: delta
+data: {"text":"响应","phase":"review"}
+
+event: delta
+data: {"text":"，","phase":"review"}
+
+event: delta
+data: {"text":"键盘","phase":"review"}
+
+event: delta
+data: {"text":"输入","phase":"review"}
+
+event: delta
+data: {"text":"完整","phase":"review"}
+
+event: delta
+data: {"text":"映射","phase":"review"}
+
+event: delta
+data: {"text":"，","phase":"review"}
+
+event: delta
+data: {"text":"视觉","phase":"review"}
+
+event: delta
+data: {"text":"反馈","phase":"review"}
+
+event: delta
+data: {"text":"存在","phase":"review"}
+
+event: delta
+data: {"text":"\"","phase":"review"}
+
+event: delta
+data: {"text":" },","phase":"review"}
+
+event: delta
+data: {"text":"\n","phase":"review"}
+
+event: delta
+data: {"text":"   ","phase":"review"}
+
+event: delta
+data: {"text":" {","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"item","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"健壮","phase":"review"}
+
+event: delta
+data: {"text":"性","phase":"review"}
+
+event: delta
+data: {"text":"\",","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"pass","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" true","phase":"review"}
+
+event: delta
+data: {"text":",","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"note","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"除法","phase":"review"}
+
+event: delta
+data: {"text":"零","phase":"review"}
+
+event: delta
+data: {"text":"检查","phase":"review"}
+
+event: delta
+data: {"text":"、","phase":"review"}
+
+event: delta
+data: {"text":"小数","phase":"review"}
+
+event: delta
+data: {"text":"点","phase":"review"}
+
+event: delta
+data: {"text":"去","phase":"review"}
+
+event: delta
+data: {"text":"重","phase":"review"}
+
+event: delta
+data: {"text":"、","phase":"review"}
+
+event: delta
+data: {"text":"浮","phase":"review"}
+
+event: delta
+data: {"text":"点","phase":"review"}
+
+event: delta
+data: {"text":"精度","phase":"review"}
+
+event: delta
+data: {"text":"处理","phase":"review"}
+
+event: delta
+data: {"text":"均","phase":"review"}
+
+event: delta
+data: {"text":"到位","phase":"review"}
+
+event: delta
+data: {"text":"\"","phase":"review"}
+
+event: delta
+data: {"text":" },","phase":"review"}
+
+event: delta
+data: {"text":"\n","phase":"review"}
+
+event: delta
+data: {"text":"   ","phase":"review"}
+
+event: delta
+data: {"text":" {","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"item","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"UI","phase":"review"}
+
+event: delta
+data: {"text":" ","phase":"review"}
+
+event: delta
+data: {"text":"质量","phase":"review"}
+
+event: delta
+data: {"text":"\",","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"pass","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" true","phase":"review"}
+
+event: delta
+data: {"text":",","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"note","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"hover","phase":"review"}
+
+event: delta
+data: {"text":"/","phase":"review"}
+
+event: delta
+data: {"text":"active","phase":"review"}
+
+event: delta
+data: {"text":" ","phase":"review"}
+
+event: delta
+data: {"text":"动画","phase":"review"}
+
+event: delta
+data: {"text":"、","phase":"review"}
+
+event: delta
+data: {"text":"响应","phase":"review"}
+
+event: delta
+data: {"text":"式","phase":"review"}
+
+event: delta
+data: {"text":"适配","phase":"review"}
+
+event: delta
+data: {"text":"、","phase":"review"}
+
+event: delta
+data: {"text":"深色","phase":"review"}
+
+event: delta
+data: {"text":"主题","phase":"review"}
+
+event: delta
+data: {"text":"完整","phase":"review"}
+
+event: delta
+data: {"text":"\"","phase":"review"}
+
+event: delta
+data: {"text":" },","phase":"review"}
+
+event: delta
+data: {"text":"\n","phase":"review"}
+
+event: delta
+data: {"text":"   ","phase":"review"}
+
+event: delta
+data: {"text":" {","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"item","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"资源","phase":"review"}
+
+event: delta
+data: {"text":"合规","phase":"review"}
+
+event: delta
+data: {"text":"\",","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"pass","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" true","phase":"review"}
+
+event: delta
+data: {"text":",","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"note","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"无","phase":"review"}
+
+event: delta
+data: {"text":"外部","phase":"review"}
+
+event: delta
+data: {"text":" CDN","phase":"review"}
+
+event: delta
+data: {"text":"，","phase":"review"}
+
+event: delta
+data: {"text":"无","phase":"review"}
+
+event: delta
+data: {"text":"框架","phase":"review"}
+
+event: delta
+data: {"text":"，","phase":"review"}
+
+event: delta
+data: {"text":"无","phase":"review"}
+
+event: delta
+data: {"text":"紫色","phase":"review"}
+
+event: delta
+data: {"text":"渐变","phase":"review"}
+
+event: delta
+data: {"text":"，","phase":"review"}
+
+event: delta
+data: {"text":"无","phase":"review"}
+
+event: delta
+data: {"text":"手写","phase":"review"}
+
+event: delta
+data: {"text":" SVG","phase":"review"}
+
+event: delta
+data: {"text":"\"","phase":"review"}
+
+event: delta
+data: {"text":" },","phase":"review"}
+
+event: delta
+data: {"text":"\n","phase":"review"}
+
+event: delta
+data: {"text":"   ","phase":"review"}
+
+event: delta
+data: {"text":" {","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"item","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"工程","phase":"review"}
+
+event: delta
+data: {"text":"化","phase":"review"}
+
+event: delta
+data: {"text":"\",","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"pass","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" true","phase":"review"}
+
+event: delta
+data: {"text":",","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"note","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"单","phase":"review"}
+
+event: delta
+data: {"text":"页","phase":"review"}
+
+event: delta
+data: {"text":"应用","phase":"review"}
+
+event: delta
+data: {"text":"逻辑","phase":"review"}
+
+event: delta
+data: {"text":"清晰","phase":"review"}
+
+event: delta
+data: {"text":"，","phase":"review"}
+
+event: delta
+data: {"text":"无","phase":"review"}
+
+event: delta
+data: {"text":"横向","phase":"review"}
+
+event: delta
+data: {"text":"滚动","phase":"review"}
+
+event: delta
+data: {"text":"，","phase":"review"}
+
+event: delta
+data: {"text":"文件","phase":"review"}
+
+event: delta
+data: {"text":"间","phase":"review"}
+
+event: delta
+data: {"text":"引用","phase":"review"}
+
+event: delta
+data: {"text":"正确","phase":"review"}
+
+event: delta
+data: {"text":"\"","phase":"review"}
+
+event: delta
+data: {"text":" }","phase":"review"}
+
+event: delta
+data: {"text":"\n","phase":"review"}
+
+event: delta
+data: {"text":" ","phase":"review"}
+
+event: delta
+data: {"text":" ],","phase":"review"}
+
+event: delta
+data: {"text":"\n","phase":"review"}
+
+event: delta
+data: {"text":" ","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"repair","phase":"review"}
+
+event: delta
+data: {"text":"Instructions","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" [],","phase":"review"}
+
+event: delta
+data: {"text":"\n","phase":"review"}
+
+event: delta
+data: {"text":" ","phase":"review"}
+
+event: delta
+data: {"text":" \"","phase":"review"}
+
+event: delta
+data: {"text":"missing","phase":"review"}
+
+event: delta
+data: {"text":"Files","phase":"review"}
+
+event: delta
+data: {"text":"\":","phase":"review"}
+
+event: delta
+data: {"text":" []","phase":"review"}
+
+event: delta
+data: {"text":"\n","phase":"review"}
+
+event: delta
+data: {"text":"}","phase":"review"}
+
+event: delta
+data: {"text":"\n","phase":"review"}
+
+event: delta
+data: {"text":"```","phase":"review"}
+
+event: done
+data: {"html":"<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>深色极简计算器</title>\n  <style>\n*, *::before, *::after {\n  box-sizing: border-box;\n  margin: 0;\n  padding: 0;\n}\n\nbody {\n  min-height: 100vh;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  background: #121212;\n  font-family: system-ui, -apple-system, \"PingFang SC\", sans-serif;\n  color: #e0e0e0;\n}\n\n.calculator {\n  width: 100%;\n  max-width: 340px;\n  background: #1e1e1e;\n  border-radius: 16px;\n  padding: 20px;\n  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);\n}\n\n.display {\n  background: #2a2a2a;\n  border-radius: 12px;\n  padding: 16px 20px;\n  margin-bottom: 16px;\n  text-align: right;\n  min-height: 100px;\n  display: flex;\n  flex-direction: column;\n  justify-content: flex-end;\n  overflow: hidden;\n}\n\n.previous-operand {\n  font-size: 14px;\n  color: #888;\n  min-height: 20px;\n  word-break: break-all;\n}\n\n.current-operand {\n  font-size: 36px;\n  font-weight: 700;\n  color: #fff;\n  word-break: break-all;\n  line-height: 1.2;\n}\n\n.buttons {\n  display: grid;\n  grid-template-columns: repeat(4, 1fr);\n  gap: 10px;\n}\n\n.btn {\n  height: 60px;\n  border: none;\n  border-radius: 10px;\n  font-size: 20px;\n  font-weight: 600;\n  cursor: pointer;\n  transition: all 150ms ease;\n  background: #333;\n  color: #fff;\n  outline: none;\n}\n\n.btn:hover {\n  filter: brightness(1.15);\n  transform: scale(1.02);\n}\n\n.btn:active {\n  transform: scale(0.97);\n}\n\n.btn.fn {\n  background: #ff6b6b;\n}\n\n.btn.fn:hover {\n  background: #ff8585;\n}\n\n.btn.operator {\n  background: #4ecdc4;\n  color: #1a1a1a;\n}\n\n.btn.operator:hover {\n  background: #6dd6cf;\n}\n\n.btn.equals {\n  background: #ffd93d;\n  color: #1a1a1a;\n  grid-row: span 1;\n}\n\n.btn.equals:hover {\n  background: #ffe066;\n}\n\n.btn.wide {\n  grid-column: span 2;\n}\n\n@media (max-width: 400px) {\n  .calculator {\n    padding: 12px;\n  }\n  .btn {\n    height: 52px;\n    font-size: 18px;\n  }\n  .current-operand {\n    font-size: 28px;\n  }\n}\n</style>\n</head>\n<body>\n  <div class=\"calculator\">\n    <div class=\"display\">\n      <div class=\"previous-operand\" id=\"previousOperand\"></div>\n      <div class=\"current-operand\" id=\"currentOperand\">0</div>\n    </div>\n    <div class=\"buttons\">\n      <button data-action=\"clear\" class=\"btn fn\">C</button>\n      <button data-action=\"delete\" class=\"btn fn\">DEL</button>\n      <button data-action=\"percent\" class=\"btn fn\">%</button>\n      <button data-action=\"operator\" data-op=\"/\" class=\"btn operator\">÷</button>\n\n      <button data-action=\"number\" data-num=\"7\" class=\"btn\">7</button>\n      <button data-action=\"number\" data-num=\"8\" class=\"btn\">8</button>\n      <button data-action=\"number\" data-num=\"9\" class=\"btn\">9</button>\n      <button data-action=\"operator\" data-op=\"*\" class=\"btn operator\">×</button>\n\n      <button data-action=\"number\" data-num=\"4\" class=\"btn\">4</button>\n      <button data-action=\"number\" data-num=\"5\" class=\"btn\">5</button>\n      <button data-action=\"number\" data-num=\"6\" class=\"btn\">6</button>\n      <button data-action=\"operator\" data-op=\"-\" class=\"btn operator\">−</button>\n\n      <button data-action=\"number\" data-num=\"1\" class=\"btn\">1</button>\n      <button data-action=\"number\" data-num=\"2\" class=\"btn\">2</button>\n      <button data-action=\"number\" data-num=\"3\" class=\"btn\">3</button>\n      <button data-action=\"operator\" data-op=\"+\" class=\"btn operator\">+</button>\n\n      <button data-action=\"number\" data-num=\"0\" class=\"btn wide\">0</button>\n      <button data-action=\"decimal\" class=\"btn\">.</button>\n      <button data-action=\"equals\" class=\"btn equals\">=</button>\n    </div>\n  </div>\n  <script>\n(function() {\n  let currentOperand = '0';\n  let previousOperand = '';\n  let operator = null;\n  let shouldResetScreen = false;\n\n  const currentDisplay = document.getElementById('currentOperand');\n  const previousDisplay = document.getElementById('previousOperand');\n\n  function formatNumber(num) {\n    if (num === '' || num === '-') return num;\n    const str = num.toString();\n    if (str.includes('e')) return str;\n    const [intPart, decPart] = str.split('.');\n    const formattedInt = parseInt(intPart || '0').toLocaleString('en-US');\n    if (decPart !== undefined) {\n      return formattedInt + '.' + decPart;\n    }\n    return formattedInt;\n  }\n\n  function updateDisplay() {\n    currentDisplay.textContent = formatNumber(currentOperand);\n    if (operator) {\n      const opSymbol = operator === '*' ? '×' : operator === '/' ? '÷' : operator === '-' ? '−' : operator;\n      previousDisplay.textContent = formatNumber(previousOperand) + ' ' + opSymbol;\n    } else {\n      previousDisplay.textContent = '';\n    }\n  }\n\n  function calculate(a, op, b) {\n    const numA = parseFloat(a);\n    const numB = parseFloat(b);\n    if (isNaN(numA) || isNaN(numB)) return '';\n    let result;\n    switch (op) {\n      case '+': result = numA + numB; break;\n      case '-': result = numA - numB; break;\n      case '*': result = numA * numB; break;\n      case '/': result = numB !== 0 ? numA / numB : ''; break;\n      default: return '';\n    }\n    if (result === '') return '错误';\n    const fixed = parseFloat(result.toFixed(10)).toString();\n    return fixed;\n  }\n\n  function inputNumber(num) {\n    if (shouldResetScreen) {\n      currentOperand = num;\n      shouldResetScreen = false;\n    } else {\n      if (currentOperand === '0' && num !== '.') {\n        currentOperand = num;\n      } else {\n        currentOperand += num;\n      }\n    }\n    updateDisplay();\n  }\n\n  function inputDecimal() {\n    if (shouldResetScreen) {\n      currentOperand = '0.';\n      shouldResetScreen = false;\n      updateDisplay();\n      return;\n    }\n    if (!currentOperand.includes('.')) {\n      currentOperand += '.';\n    }\n    updateDisplay();\n  }\n\n  function inputOperator(op) {\n    if (currentOperand === '错误') return;\n    if (operator && !shouldResetScreen) {\n      const result = calculate(previousOperand, operator, currentOperand);\n      currentOperand = result;\n      previousOperand = result;\n    } else {\n      previousOperand = currentOperand;\n    }\n    operator = op;\n    shouldResetScreen = true;\n    updateDisplay();\n  }\n\n  function handleEquals() {\n    if (!operator || currentOperand === '错误') return;\n    const result = calculate(previousOperand, operator, currentOperand);\n    previousDisplay.textContent = formatNumber(previousOperand) + ' ' + (operator === '*' ? '×' : operator === '/' ? '÷' : operator === '-' ? '−' : operator) + ' ' + formatNumber(currentOperand) + ' =';\n    currentOperand = result;\n    operator = null;\n    shouldResetScreen = true;\n    updateDisplay();\n  }\n\n  function handleClear() {\n    currentOperand = '0';\n    previousOperand = '';\n    operator = null;\n    shouldResetScreen = false;\n    updateDisplay();\n  }\n\n  function handleDelete() {\n    if (shouldResetScreen || currentOperand === '错误') {\n      currentOperand = '0';\n      shouldResetScreen = false;\n    } else if (currentOperand.length > 1) {\n      currentOperand = currentOperand.slice(0, -1);\n    } else {\n      currentOperand = '0';\n    }\n    updateDisplay();\n  }\n\n  function handlePercent() {\n    if (currentOperand === '错误') return;\n    const num = parseFloat(currentOperand);\n    if (isNaN(num)) return;\n    if (operator && previousOperand) {\n      currentOperand = (parseFloat(previousOperand) * num / 100).toString();\n    } else {\n      currentOperand = (num / 100).toString();\n    }\n    updateDisplay();\n  }\n\n  document.querySelector('.buttons').addEventListener('click', (e) => {\n    const btn = e.target.closest('button');\n    if (!btn) return;\n    const action = btn.dataset.action;\n    if (action === 'number') {\n      inputNumber(btn.dataset.num);\n    } else if (action === 'decimal') {\n      inputDecimal();\n    } else if (action === 'operator') {\n      inputOperator(btn.dataset.op);\n    } else if (action === 'equals') {\n      handleEquals();\n    } else if (action === 'clear') {\n      handleClear();\n    } else if (action === 'delete') {\n      handleDelete();\n    } else if (action === 'percent') {\n      handlePercent();\n    }\n  });\n\n  document.addEventListener('keydown', (e) => {\n    if (e.key >= '0' && e.key <= '9') inputNumber(e.key);\n    else if (e.key === '.') inputDecimal();\n    else if (e.key === '+') inputOperator('+');\n    else if (e.key === '-') inputOperator('-');\n    else if (e.key === '*') inputOperator('*');\n    else if (e.key === '/') { e.preventDefault(); inputOperator('/'); }\n    else if (e.key === '%') handlePercent();\n    else if (e.key === 'Enter' || e.key === '=') handleEquals();\n    else if (e.key === 'Backspace') handleDelete();\n    else if (e.key === 'Escape') handleClear();\n  });\n\n  updateDisplay();\n})();\n</script>\n</body>\n</html>","files":{"/index.html":{"path":"/index.html","content":"<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>深色极简计算器</title>\n  <link rel=\"stylesheet\" href=\"./styles/main.css\">\n</head>\n<body>\n  <div class=\"calculator\">\n    <div class=\"display\">\n      <div class=\"previous-operand\" id=\"previousOperand\"></div>\n      <div class=\"current-operand\" id=\"currentOperand\">0</div>\n    </div>\n    <div class=\"buttons\">\n      <button data-action=\"clear\" class=\"btn fn\">C</button>\n      <button data-action=\"delete\" class=\"btn fn\">DEL</button>\n      <button data-action=\"percent\" class=\"btn fn\">%</button>\n      <button data-action=\"operator\" data-op=\"/\" class=\"btn operator\">÷</button>\n\n      <button data-action=\"number\" data-num=\"7\" class=\"btn\">7</button>\n      <button data-action=\"number\" data-num=\"8\" class=\"btn\">8</button>\n      <button data-action=\"number\" data-num=\"9\" class=\"btn\">9</button>\n      <button data-action=\"operator\" data-op=\"*\" class=\"btn operator\">×</button>\n\n      <button data-action=\"number\" data-num=\"4\" class=\"btn\">4</button>\n      <button data-action=\"number\" data-num=\"5\" class=\"btn\">5</button>\n      <button data-action=\"number\" data-num=\"6\" class=\"btn\">6</button>\n      <button data-action=\"operator\" data-op=\"-\" class=\"btn operator\">−</button>\n\n      <button data-action=\"number\" data-num=\"1\" class=\"btn\">1</button>\n      <button data-action=\"number\" data-num=\"2\" class=\"btn\">2</button>\n      <button data-action=\"number\" data-num=\"3\" class=\"btn\">3</button>\n      <button data-action=\"operator\" data-op=\"+\" class=\"btn operator\">+</button>\n\n      <button data-action=\"number\" data-num=\"0\" class=\"btn wide\">0</button>\n      <button data-action=\"decimal\" class=\"btn\">.</button>\n      <button data-action=\"equals\" class=\"btn equals\">=</button>\n    </div>\n  </div>\n  <script src=\"./src/main.js\"></script>\n</body>\n</html>","language":"html","updatedAt":"2026-09-24T15:11:35.527Z"},"/styles/main.css":{"path":"/styles/main.css","content":"*, *::before, *::after {\n  box-sizing: border-box;\n  margin: 0;\n  padding: 0;\n}\n\nbody {\n  min-height: 100vh;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  background: #121212;\n  font-family: system-ui, -apple-system, \"PingFang SC\", sans-serif;\n  color: #e0e0e0;\n}\n\n.calculator {\n  width: 100%;\n  max-width: 340px;\n  background: #1e1e1e;\n  border-radius: 16px;\n  padding: 20px;\n  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);\n}\n\n.display {\n  background: #2a2a2a;\n  border-radius: 12px;\n  padding: 16px 20px;\n  margin-bottom: 16px;\n  text-align: right;\n  min-height: 100px;\n  display: flex;\n  flex-direction: column;\n  justify-content: flex-end;\n  overflow: hidden;\n}\n\n.previous-operand {\n  font-size: 14px;\n  color: #888;\n  min-height: 20px;\n  word-break: break-all;\n}\n\n.current-operand {\n  font-size: 36px;\n  font-weight: 700;\n  color: #fff;\n  word-break: break-all;\n  line-height: 1.2;\n}\n\n.buttons {\n  display: grid;\n  grid-template-columns: repeat(4, 1fr);\n  gap: 10px;\n}\n\n.btn {\n  height: 60px;\n  border: none;\n  border-radius: 10px;\n  font-size: 20px;\n  font-weight: 600;\n  cursor: pointer;\n  transition: all 150ms ease;\n  background: #333;\n  color: #fff;\n  outline: none;\n}\n\n.btn:hover {\n  filter: brightness(1.15);\n  transform: scale(1.02);\n}\n\n.btn:active {\n  transform: scale(0.97);\n}\n\n.btn.fn {\n  background: #ff6b6b;\n}\n\n.btn.fn:hover {\n  background: #ff8585;\n}\n\n.btn.operator {\n  background: #4ecdc4;\n  color: #1a1a1a;\n}\n\n.btn.operator:hover {\n  background: #6dd6cf;\n}\n\n.btn.equals {\n  background: #ffd93d;\n  color: #1a1a1a;\n  grid-row: span 1;\n}\n\n.btn.equals:hover {\n  background: #ffe066;\n}\n\n.btn.wide {\n  grid-column: span 2;\n}\n\n@media (max-width: 400px) {\n  .calculator {\n    padding: 12px;\n  }\n  .btn {\n    height: 52px;\n    font-size: 18px;\n  }\n  .current-operand {\n    font-size: 28px;\n  }\n}","language":"css","updatedAt":"2026-09-24T15:11:35.527Z"},"/src/main.js":{"path":"/src/main.js","content":"(function() {\n  let currentOperand = '0';\n  let previousOperand = '';\n  let operator = null;\n  let shouldResetScreen = false;\n\n  const currentDisplay = document.getElementById('currentOperand');\n  const previousDisplay = document.getElementById('previousOperand');\n\n  function formatNumber(num) {\n    if (num === '' || num === '-') return num;\n    const str = num.toString();\n    if (str.includes('e')) return str;\n    const [intPart, decPart] = str.split('.');\n    const formattedInt = parseInt(intPart || '0').toLocaleString('en-US');\n    if (decPart !== undefined) {\n      return formattedInt + '.' + decPart;\n    }\n    return formattedInt;\n  }\n\n  function updateDisplay() {\n    currentDisplay.textContent = formatNumber(currentOperand);\n    if (operator) {\n      const opSymbol = operator === '*' ? '×' : operator === '/' ? '÷' : operator === '-' ? '−' : operator;\n      previousDisplay.textContent = formatNumber(previousOperand) + ' ' + opSymbol;\n    } else {\n      previousDisplay.textContent = '';\n    }\n  }\n\n  function calculate(a, op, b) {\n    const numA = parseFloat(a);\n    const numB = parseFloat(b);\n    if (isNaN(numA) || isNaN(numB)) return '';\n    let result;\n    switch (op) {\n      case '+': result = numA + numB; break;\n      case '-': result = numA - numB; break;\n      case '*': result = numA * numB; break;\n      case '/': result = numB !== 0 ? numA / numB : ''; break;\n      default: return '';\n    }\n    if (result === '') return '错误';\n    const fixed = parseFloat(result.toFixed(10)).toString();\n    return fixed;\n  }\n\n  function inputNumber(num) {\n    if (shouldResetScreen) {\n      currentOperand = num;\n      shouldResetScreen = false;\n    } else {\n      if (currentOperand === '0' && num !== '.') {\n        currentOperand = num;\n      } else {\n        currentOperand += num;\n      }\n    }\n    updateDisplay();\n  }\n\n  function inputDecimal() {\n    if (shouldResetScreen) {\n      currentOperand = '0.';\n      shouldResetScreen = false;\n      updateDisplay();\n      return;\n    }\n    if (!currentOperand.includes('.')) {\n      currentOperand += '.';\n    }\n    updateDisplay();\n  }\n\n  function inputOperator(op) {\n    if (currentOperand === '错误') return;\n    if (operator && !shouldResetScreen) {\n      const result = calculate(previousOperand, operator, currentOperand);\n      currentOperand = result;\n      previousOperand = result;\n    } else {\n      previousOperand = currentOperand;\n    }\n    operator = op;\n    shouldResetScreen = true;\n    updateDisplay();\n  }\n\n  function handleEquals() {\n    if (!operator || currentOperand === '错误') return;\n    const result = calculate(previousOperand, operator, currentOperand);\n    previousDisplay.textContent = formatNumber(previousOperand) + ' ' + (operator === '*' ? '×' : operator === '/' ? '÷' : operator === '-' ? '−' : operator) + ' ' + formatNumber(currentOperand) + ' =';\n    currentOperand = result;\n    operator = null;\n    shouldResetScreen = true;\n    updateDisplay();\n  }\n\n  function handleClear() {\n    currentOperand = '0';\n    previousOperand = '';\n    operator = null;\n    shouldResetScreen = false;\n    updateDisplay();\n  }\n\n  function handleDelete() {\n    if (shouldResetScreen || currentOperand === '错误') {\n      currentOperand = '0';\n      shouldResetScreen = false;\n    } else if (currentOperand.length > 1) {\n      currentOperand = currentOperand.slice(0, -1);\n    } else {\n      currentOperand = '0';\n    }\n    updateDisplay();\n  }\n\n  function handlePercent() {\n    if (currentOperand === '错误') return;\n    const num = parseFloat(currentOperand);\n    if (isNaN(num)) return;\n    if (operator && previousOperand) {\n      currentOperand = (parseFloat(previousOperand) * num / 100).toString();\n    } else {\n      currentOperand = (num / 100).toString();\n    }\n    updateDisplay();\n  }\n\n  document.querySelector('.buttons').addEventListener('click', (e) => {\n    const btn = e.target.closest('button');\n    if (!btn) return;\n    const action = btn.dataset.action;\n    if (action === 'number') {\n      inputNumber(btn.dataset.num);\n    } else if (action === 'decimal') {\n      inputDecimal();\n    } else if (action === 'operator') {\n      inputOperator(btn.dataset.op);\n    } else if (action === 'equals') {\n      handleEquals();\n    } else if (action === 'clear') {\n      handleClear();\n    } else if (action === 'delete') {\n      handleDelete();\n    } else if (action === 'percent') {\n      handlePercent();\n    }\n  });\n\n  document.addEventListener('keydown', (e) => {\n    if (e.key >= '0' && e.key <= '9') inputNumber(e.key);\n    else if (e.key === '.') inputDecimal();\n    else if (e.key === '+') inputOperator('+');\n    else if (e.key === '-') inputOperator('-');\n    else if (e.key === '*') inputOperator('*');\n    else if (e.key === '/') { e.preventDefault(); inputOperator('/'); }\n    else if (e.key === '%') handlePercent();\n    else if (e.key === 'Enter' || e.key === '=') handleEquals();\n    else if (e.key === 'Backspace') handleDelete();\n    else if (e.key === 'Escape') handleClear();\n  });\n\n  updateDisplay();\n})();","language":"javascript","updatedAt":"2026-09-24T15:11:35.527Z"},"/README.md":{"path":"/README.md","content":"# 深色极简计算器\n\n> 一个支持加减乘除及百分比运算的深色风格桌面计算器，单文件实现。\n\n- 应用类型：tool\n\n## 运行方式\n\n- 预览由 Litpp 内置沙箱运行，无需安装依赖。\n- npm 方式需 Node 18+：`npm install` 后作为工程起点使用（本产物为 CDN 运行时形态，不承诺本地构建通过）。\n\n## 功能清单\n\n- [must] **算式预览**：屏幕上方显示当前输入的小字号算式（如 12 + ），屏幕中央显示当前数字（大号加粗）。\n- [must] **数字与基础运算**：支持 0-9 数字输入，以及加减乘除（×÷±-）运算，点击运算符时立即记录前值并清空当前输入框等待下一步。\n- [must] **百分比计算**：点击 % 按钮触发计算，例如在 '50 + 10%' 时自动将 10% 解析为 50 的 10%（即 5）进行计算。\n- [must] **删除与清零**：C 键清空整个状态；DEL 键退格删除当前输入的最后一个数字；支持连续点小数点处理。\n- [must] **精确结果显示**：按 = 键计算结果，自动保留至多位小数且不末尾去零（如 0.50 保留显示），处理浮点精度问题（如 0.1+0.2=0.3）。\n","language":"text","updatedAt":"2026-09-24T15:11:35.527Z"}},"stats":{"inputTokens":7919,"outputTokens":3803}}
+

@@ -1,0 +1,61 @@
+{
+  "results": [
+    {
+      "name": "登录 rc_final_gate",
+      "status": "PASS",
+      "detail": "url=http://localhost:5173/workspace"
+    },
+    {
+      "name": "模板chip(待办清单=react-cdn)",
+      "status": "PASS",
+      "detail": "selectedFramework 已同步为 react-cdn"
+    },
+    {
+      "name": "提交生成",
+      "status": "PASS",
+      "detail": "点击直接生成 @2026-09-24T14:49:19.737Z"
+    },
+    {
+      "name": "react-cdn 生成完成(端到端)",
+      "status": "PASS",
+      "detail": "耗时 66.9s iframe内应用可见=true"
+    },
+    {
+      "name": "沙箱内添加任务",
+      "status": "FAIL",
+      "detail": "新任务可见=false"
+    },
+    {
+      "name": "沙箱内勾选任务(state更新)",
+      "status": "WARN",
+      "detail": "checkbox勾选=false"
+    },
+    {
+      "name": "刷新重挂载(无CDN长等待)",
+      "status": "PASS",
+      "detail": "点击到应用内容=135ms (旧缺陷90-134s)"
+    },
+    {
+      "name": "ZIP 导出下载",
+      "status": "PASS",
+      "detail": "1005051 bytes"
+    },
+    {
+      "name": "项目服务端持久化",
+      "status": "PASS",
+      "detail": "服务端项目数=1"
+    }
+  ],
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 401 (Unauthorized)",
+    "Failed to load resource: net::ERR_CONNECTION_RESET",
+    "Failed to load resource: net::ERR_CONNECTION_RESET",
+    "Failed to load resource: net::ERR_CONNECTION_RESET",
+    "Blocked form submission to '' because the form's frame is sandboxed and the 'allow-forms' permission is not set.",
+    "Blocked form submission to '' because the form's frame is sandboxed and the 'allow-forms' permission is not set."
+  ],
+  "pageErrors": [
+    "AbortError: BodyStreamBuffer was aborted",
+    "SyntaxError: [JSX] Cannot use import statement outside a module"
+  ]
+}

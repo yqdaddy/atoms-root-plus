@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><script src="/vendor/react.vendor.js"></script>
+<script>
+  if (!window.React || !window.ReactDOM) {
+    setTimeout(function() { throw new Error('React 运行时加载失败（/vendor/react.vendor.js），请刷新重试'); }, 0);
+  }
+</script>
+<script src="/vendor/sucrase.vendor.js"></script>
+<script>
+(function() {
+  function reportAndRethrow(err) {
+    // 标记来源便于宿主区分编译错误与普通运行错误
+    if (err instanceof Error && err.message.indexOf('[JSX]') !== 0) {
+      err.message = '[JSX] ' + err.message;
+    }
+    // 异步抛出：走 window error 事件，由桥接脚本以标准协议上报
+    setTimeout(function() { throw err; }, 0);
+  }
+
+  // 编译任务队列：保留历史形态（编译请求先入队，运行时按入队顺序 flush）
+  window.__jsxQueue = window.__jsxQueue || [];
+
+  window.__compileAndRun = function(code, fileName) {
+    if (!window.__sucraseReady) {
+      window.__jsxQueue.push([code, fileName]);
+      return;
+    }
+    var compiled;
+    try {
+      compiled = window.__sucraseTransform(code, {
+        transforms: ['jsx'],
+        jsxRuntime: 'classic',
+        jsxPragma: 'React.createElement',
+        jsxFragmentPragma: 'React.Fragment',
+        production: true
+      });
+    } catch (err) {
+      reportAndRethrow(err);
+      return;
+    }
+    try {
+      if (typeof React === 'undefined' || typeof ReactDOM === 'undefined') {
+        reportAndRethrow(new Error('React 运行时加载失败，请刷新重试'));
+        return;
+      }
+      var fn = new Function('React', 'ReactDOM', compiled.code);
+      return fn(window.React, window.ReactDOM);
+    } catch (err) {
+      reportAndRethrow(err);
+    }
+  };
+
+  // vendor script（经典 script）按顺序先于本脚本执行完成；
+  // 未就绪即产物缺失（部署不完整、路径被改），立即报错而非静默白屏
+  window.__sucraseTransform = window.Sucrase && window.Sucrase.transform;
+  window.__sucraseReady = typeof window.__sucraseTransform === 'function';
+  if (!window.__sucraseReady) {
+    reportAndRethrow(new Error('Sucrase 编译器加载失败（/vendor/sucrase.vendor.js），请刷新重试'));
+    return;
+  }
+  // 就绪：按序 flush 编译队列
+  var queue = window.__jsxQueue || [];
+  window.__jsxQueue = [];
+  for (var i = 0; i < queue.length; i++) {
+    window.__compileAndRun(queue[i][0], queue[i][1]);
+  }
+})();
+</script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>任务清单</title>
+  <style>
+:root {
+  --bg-primary: #0f172a;
+  --bg-card: #1e293b;
+  --bg-card-hover: #334155;
+  --accent: #6366f1;
+  --accent-hover: #4f46e5;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --danger: #ef4444;
+  --danger-hover: #dc2626;
+  --success: #22c55e;
+  --border: #334155;
+  --shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  --radius: 12px;
+  --transition: 150ms ease;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: system-ui, "PingFang SC", sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 2rem 1rem;
+}
+
+.app-container {
+  width: 100%;
+  max-width: 520px;
+}
+
+.app-title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 1.5rem;
+  letter-spacing: -0.02em;
+}
+
+.stats-bar {
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+}
+
+.stats-text {
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+}
+
+.stats-highlight {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.add-task-form {
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+}
+
+.input-field {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 1rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.input-field::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  padding: 0.625rem 1rem;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: white;
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+  filter: brightness(1.1);
+  transform: scale(1.02);
+}
+
+.btn-primary:active {
+  transform: scale(0.98);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-danger {
+  background: transparent;
+  color: var(--danger);
+  padding: 0.5rem;
+  border-radius: 6px;
+}
+
+.btn-danger:hover {
+  background: rgba(239, 68, 68, 0.1);
+  filter: brightness(1.1);
+}
+
+.task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.task-item {
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  padding: 0.875rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  transition: all var(--transition);
+  animation: slideIn 200ms ease;
+}
+
+.task-item:hover {
+  background: var(--bg-card-hover);
+}
+
+.task-item.removing {
+  animation: slideOut 200ms ease forwards;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideOut {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+}
+
+.checkbox-wrapper {
+  display: flex;
+  align-items: center;
+}
+
+.custom-checkbox {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+  flex-shrink: 0;
+}
+
+.custom-checkbox:hover {
+  border-color: var(--accent);
+}
+
+.custom-checkbox.checked {
+  background: var(--success);
+  border-color: var(--success);
+}
+
+.custom-checkbox.checked::after {
+  content: "✓";
+  color: white;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.task-text {
+  flex: 1;
+  font-size: 1rem;
+  transition: all var(--transition);
+  word-break: break-word;
+}
+
+.task-text.completed {
+  text-decoration: line-through;
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 3rem 1rem;
+  color: var(--text-secondary);
+}
+
+.empty-state-icon {
+  font-size: 3rem;
+  margin-bottom: 0.75rem;
+  opacity: 0.5;
+}
+
+.empty-state-text {
+  font-size: 1rem;
+}
+
+.confirm-dialog {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 150ms ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.dialog-content {
+  background: var(--bg-card);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  max-width: 320px;
+  width: 90%;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  animation: dialogScale 200ms ease;
+}
+
+@keyframes dialogScale {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.dialog-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.dialog-message {
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+  margin-bottom: 1.25rem;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.btn-cancel {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.btn-cancel:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.btn-confirm-delete {
+  background: var(--danger);
+  color: white;
+}
+
+.btn-confirm-delete:hover {
+  background: var(--danger-hover);
+  filter: brightness(1.1);
+  transform: scale(1.02);
+}
+
+.btn-confirm-delete:active {
+  transform: scale(0.98);
+}
+</style>
+  <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js" crossorigin defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js" crossorigin defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js" defer></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+(function () {
+'use strict';
+  var __registry = Object.create(null);
+
+  function __defineModule(path, factory) {
+    __registry[path] = { factory: factory, exports: {}, state: 'pending' };
+  }
+
+  var __bareShimCache = Object.create(null);
+  function __loadBareModule(spec) {
+    if (spec === "__css_module__") { return {}; }
+    if (Object.prototype.hasOwnProperty.call(__bareShimCache, spec)) { return __bareShimCache[spec]; }
+    var exportsValue;
+    switch (spec) {
+      case "react": {
+        exportsValue = (function () {
+
+      var R = window.React;
+      if (!R) { throw new Error('window.React 未加载（React CDN 运行时缺失），无法解析 import "react"'); }
+      var m = { __esModule: true, default: R };
+      for (var k in R) { if (Object.prototype.hasOwnProperty.call(R, k) && !(k in m)) { m[k] = R[k]; } }
+      return m;
+        })();
+        break;
+      }
+      case "react-dom": {
+        exportsValue = (function () {
+
+      var RD = window.ReactDOM;
+      if (!RD) { throw new Error('window.ReactDOM 未加载（React CDN 运行时缺失），无法解析 import "react-dom"'); }
+      var m = { __esModule: true, default: RD };
+      for (var k in RD) { if (Object.prototype.hasOwnProperty.call(RD, k) && !(k in m)) { m[k] = RD[k]; } }
+      return m;
+        })();
+        break;
+      }
+      case "react-dom/client": {
+        exportsValue = (function () {
+
+      var RD = window.ReactDOM;
+      if (!RD || typeof RD.createRoot !== 'function') { throw new Error('window.ReactDOM 未加载或缺少 createRoot（React CDN 运行时缺失），无法解析 import "react-dom/client"'); }
+      var client = {
+        createRoot: function () { return RD.createRoot.apply(RD, arguments); },
+        hydrateRoot: typeof RD.hydrateRoot === 'function' ? function () { return RD.hydrateRoot.apply(RD, arguments); } : undefined
+      };
+      client.default = client;
+      client.__esModule = true;
+      return client;
+        })();
+        break;
+      }
+      case "react/jsx-runtime": {
+        exportsValue = (function () {
+
+      var R = window.React;
+      if (!R) { throw new Error('window.React 未加载（React CDN 运行时缺失），无法解析 import "react/jsx-runtime"'); }
+      function jsx(type, props, key) {
+        var children = props.children;
+        var cfg = {};
+        for (var pk in props) { if (pk !== 'children' && Object.prototype.hasOwnProperty.call(props, pk)) { cfg[pk] = props[pk]; } }
+        if (key !== undefined && key !== null) { cfg.key = key; }
+        return R.createElement(type, cfg, children);
+      }
+      return { __esModule: true, jsx: jsx, jsxs: jsx, Fragment: R.Fragment, default: { jsx: jsx, jsxs: jsx, Fragment: R.Fragment } };
+        })();
+        break;
+      }
+      case "react/jsx-dev-runtime": {
+        exportsValue = (function () {
+
+      var R = window.React;
+      if (!R) { throw new Error('window.React 未加载（React CDN 运行时缺失），无法解析 import "react/jsx-dev-runtime"'); }
+      function jsx(type, props, key) {
+        var children = props.children;
+        var cfg = {};
+        for (var pk in props) { if (pk !== 'children' && Object.prototype.hasOwnProperty.call(props, pk)) { cfg[pk] = props[pk]; } }
+        if (key !== undefined && key !== null) { cfg.key = key; }
+        return R.createElement(type, cfg, children);
+      }
+      return { __esModule: true, jsx: jsx, jsxs: jsx, jsxDEV: jsx, Fragment: R.Fragment, default: { jsx: jsx, jsxs: jsx, jsxDEV: jsx, Fragment: R.Fragment } };
+        })();
+        break;
+      }
+      case "chart.js": {
+        exportsValue = (function () {
+
+      var C = window.Chart;
+      if (!C) { throw new Error('window.Chart 未加载：chart.js 需在入口 HTML 通过 script 标签引入（jsdelivr UMD 构建，须带 defer）'); }
+      var m = { __esModule: true, default: C, Chart: C };
+      for (var k in C) { if (Object.prototype.hasOwnProperty.call(C, k) && !(k in m)) { m[k] = C[k]; } }
+      return m;
+        })();
+        break;
+      }
+      case "echarts": {
+        exportsValue = (function () {
+
+      var E = window.echarts;
+      if (!E) { throw new Error('window.echarts 未加载：echarts 需在入口 HTML 通过 script 标签引入（jsdelivr UMD 构建，须带 defer）'); }
+      var m = { __esModule: true, default: E };
+      for (var k in E) { if (Object.prototype.hasOwnProperty.call(E, k) && !(k in m)) { m[k] = E[k]; } }
+      return m;
+        })();
+        break;
+      }
+      default:
+        throw new Error('不支持的依赖: "' + spec + '"。当前沙箱仅支持以下依赖: react, react-dom, react-dom/client, react/jsx-runtime, react/jsx-dev-runtime, chart.js, echarts（经 CDN 全局提供）。如需其他库请改用以上白名单依赖或自行实现。');
+    }
+    __bareShimCache[spec] = exportsValue;
+    return exportsValue;
+  }
+
+  function __loadModule(path) {
+    if (path === "__css_module__") { return {}; }
+    var mod = __registry[path];
+    if (mod) {
+      if (mod.state === 'executing') {
+        console.warn('[litpp 模块运行时] 检测到循环依赖: ' + path + '（本次返回部分导出）');
+        return mod.exports;
+      }
+      if (mod.state === 'pending') {
+        var module = { exports: mod.exports };
+        mod.state = 'executing';
+        try {
+          mod.factory(module, module.exports, __requireModule);
+          mod.exports = module.exports;
+          mod.state = 'done';
+        } catch (err) {
+          mod.state = 'error';
+          var msg = (err && typeof err.message === 'string') ? err.message : String(err);
+          if (msg.indexOf('[模块] ') !== 0) {
+            var target = (err && typeof err === 'object') ? err : new Error(String(err));
+            target.message = '[模块] ' + path + ': ' + msg;
+            throw target;
+          }
+          throw err;
+        }
+      }
+      return mod.exports;
+    }
+    if (path.charAt(0) === '/') {
+      throw new Error('模块不存在: ' + path + '（检查 import 拼写，或该文件是否已在项目中创建）');
+    }
+    return __loadBareModule(path);
+  }
+
+  function __requireModule(path) {
+    return __loadModule(path);
+  }
+
+  window.__modules = __registry;
+  window.__requireModule = __requireModule;
+  window.__defineModule = __defineModule;
+
+  __defineModule("/src/utils/taskUtils.js", function (module, exports, require) {
+"use strict";Object.defineProperty(exports, "__esModule", {value: true});const STORAGE_KEY = 'litpp_tasks';
+
+ function loadTasks() {
+  try {
+    const data = localStorage.getItem(STORAGE_KEY);
+    if (data) {
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.warn('localStorage 读取失败:', e);
+  }
+  return [];
+} exports.loadTasks = loadTasks;
+
+ function saveTasks(tasks) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+  } catch (e) {
+    console.warn('localStorage 写入失败:', e);
+  }
+} exports.saveTasks = saveTasks;
+
+ function validateTaskName(value) {
+  if (!value || value.trim() === '') return { valid: false, error: '任务不能为空' };
+  return { valid: true, value: value.trim() };
+} exports.validateTaskName = validateTaskName;
+
+ function createTask(name) {
+  return {
+    id: Date.now() + Math.random(),
+    text: name,
+    completed: false,
+  };
+} exports.createTask = createTask;
+
+ function getStats(tasks) {
+  const total = tasks.length;
+  const completed = tasks.filter(t => t.completed).length;
+  return { total, completed };
+} exports.getStats = getStats;
+
+  });
+  __defineModule("/src/hooks/useTasks.js", function (module, exports, require) {
+"use strict";Object.defineProperty(exports, "__esModule", {value: true}); function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }var _react = require('react'); var _react2 = _interopRequireDefault(_react);
+var _taskUtilsjs = require("/src/utils/taskUtils.js");
+
+ function useTasks() {
+  const [tasks, setTasks] = _react2.default.useState(() => _taskUtilsjs.loadTasks.call(void 0, ));
+
+  _react2.default.useEffect(() => {
+    _taskUtilsjs.saveTasks.call(void 0, tasks);
+  }, [tasks]);
+
+  function addTask(rawName) {
+    const result = _taskUtilsjs.validateTaskName.call(void 0, rawName);
+    if (!result.valid) return null;
+    const newTask = _taskUtilsjs.createTask.call(void 0, result.value);
+    setTasks(prev => [...prev, newTask]);
+    return newTask;
+  }
+
+  function toggleTask(id) {
+    setTasks(prev => prev.map(task =>
+      task.id === id ? { ...task, completed: !task.completed } : task
+    ));
+  }
+
+  function removeTask(id) {
+    setTasks(prev => prev.filter(task => task.id !== id));
+  }
+
+  return { tasks, addTask, toggleTask, removeTask };
+} exports.default = useTasks;
+
+  });
+  __defineModule("/src/components/StatsBar.jsx", function (module, exports, require) {
+"use strict";Object.defineProperty(exports, "__esModule", {value: true}); function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }var _react = require('react'); var _react2 = _interopRequireDefault(_react);
+
+ function StatsBar({ tasks }) {
+  const total = tasks.length;
+  const completed = tasks.filter(t => t.completed).length;
+
+  return (
+    _react2.default.createElement('div', { className: "stats-bar",}
+      , _react2.default.createElement('span', { className: "stats-text",}, "已完成 "
+         , _react2.default.createElement('span', { className: "stats-highlight",}, completed), " / 总数 "   , _react2.default.createElement('strong', null, total)
+      )
+      , total > 0 && (
+        _react2.default.createElement('span', { className: "stats-text",}, "进度 "
+           , _react2.default.createElement('span', { className: "stats-highlight",}, Math.round((completed / total) * 100), "%")
+        )
+      )
+    )
+  );
+} exports.default = StatsBar;
+
+  });
+  __defineModule("/src/components/AddTaskForm.jsx", function (module, exports, require) {
+"use strict";Object.defineProperty(exports, "__esModule", {value: true}); function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }var _react = require('react'); var _react2 = _interopRequireDefault(_react);
+
+ function AddTaskForm({ onAdd }) {
+  const [inputValue, setInputValue] = _react2.default.useState('');
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    const task = onAdd(inputValue);
+    if (task) setInputValue('');
+  }
+
+  function handleChange(e) {
+    setInputValue(e.target.value);
+  }
+
+  return (
+    _react2.default.createElement('form', { className: "add-task-form", onSubmit: handleSubmit,}
+      , _react2.default.createElement('input', {
+        type: "text",
+        className: "input-field",
+        placeholder: "添加新任务...",
+        value: inputValue,
+        onChange: handleChange,
+        maxLength: 200,}
+      )
+      , _react2.default.createElement('button', {
+        type: "submit",
+        className: "btn btn-primary" ,
+        disabled: !inputValue.trim(),}
+, "添加"
+
+      )
+    )
+  );
+} exports.default = AddTaskForm;
+
+  });
+  __defineModule("/src/components/TaskItem.jsx", function (module, exports, require) {
+"use strict";Object.defineProperty(exports, "__esModule", {value: true}); function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }var _react = require('react'); var _react2 = _interopRequireDefault(_react);
+
+ function TaskItem({ task, onToggle, onDelete }) {
+  const [isDeleting, setIsDeleting] = _react2.default.useState(false);
+
+  function handleDelete() {
+    setIsDeleting(true);
+    setTimeout(() => onDelete(task.id), 200);
+  }
+
+  return (
+    _react2.default.createElement('div', { className: `task-item${isDeleting ? ' removing' : ''}`,}
+      , _react2.default.createElement('div', { className: "checkbox-wrapper",}
+        , _react2.default.createElement('div', {
+          className: `custom-checkbox ${task.completed ? 'checked' : ''}`,
+          onClick: () => onToggle(task.id),
+          role: "checkbox",
+          'aria-checked': task.completed,
+          tabIndex: 0,
+          onKeyDown: (e) => { if (e.key === ' ' || e.key === 'Enter') onToggle(task.id); },}
+        )
+      )
+      , _react2.default.createElement('span', { className: `task-text ${task.completed ? 'completed' : ''}`,}
+        , task.text
+      )
+      , _react2.default.createElement('button', {
+        className: "btn btn-danger" ,
+        onClick: handleDelete,
+        'aria-label': "删除任务",}
+, "✕"
+
+      )
+    )
+  );
+} exports.default = TaskItem;
+
+  });
+  __defineModule("/src/components/TaskList.jsx", function (module, exports, require) {
+"use strict";Object.defineProperty(exports, "__esModule", {value: true}); function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }var _react = require('react'); var _react2 = _interopRequireDefault(_react);
+var _TaskItemjsx = require("/src/components/TaskItem.jsx"); var _TaskItemjsx2 = _interopRequireDefault(_TaskItemjsx);
+
+ function TaskList({ tasks, onToggle, onDelete }) {
+  if (tasks.length === 0) {
+    return (
+      _react2.default.createElement('div', { className: "empty-state",}
+        , _react2.default.createElement('div', { className: "empty-state-icon",}, "📝")
+        , _react2.default.createElement('p', { className: "empty-state-text",}, "还没有任务，添加一个吧！")
+      )
+    );
+  }
+
+  return (
+    _react2.default.createElement('div', { className: "task-list",}
+      , tasks.map(task => (
+        _react2.default.createElement(_TaskItemjsx2.default, {
+          key: task.id,
+          task: task,
+          onToggle: onToggle,
+          onDelete: onDelete,}
+        )
+      ))
+    )
+  );
+} exports.default = TaskList;
+
+  });
+  __defineModule("/src/components/ConfirmDialog.jsx", function (module, exports, require) {
+"use strict";Object.defineProperty(exports, "__esModule", {value: true}); function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }var _react = require('react'); var _react2 = _interopRequireDefault(_react);
+
+ function ConfirmDialog({ message, onConfirm, onCancel }) {
+  return (
+    _react2.default.createElement('div', { className: "confirm-dialog", onClick: onCancel,}
+      , _react2.default.createElement('div', { className: "dialog-content", onClick: e => e.stopPropagation(),}
+        , _react2.default.createElement('h3', { className: "dialog-title",}, "确认删除")
+        , _react2.default.createElement('p', { className: "dialog-message",}, message)
+        , _react2.default.createElement('div', { className: "dialog-actions",}
+          , _react2.default.createElement('button', { className: "btn btn-cancel" , onClick: onCancel,}, "取消")
+          , _react2.default.createElement('button', { className: "btn btn-confirm-delete" , onClick: onConfirm,}, "删除")
+        )
+      )
+    )
+  );
+} exports.default = ConfirmDialog;
+
+  });
+  __defineModule("/src/App.jsx", function (module, exports, require) {
+"use strict";Object.defineProperty(exports, "__esModule", {value: true}); function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }var _react = require('react'); var _react2 = _interopRequireDefault(_react);
+var _useTasksjs = require("/src/hooks/useTasks.js"); var _useTasksjs2 = _interopRequireDefault(_useTasksjs);
+var _StatsBarjsx = require("/src/components/StatsBar.jsx"); var _StatsBarjsx2 = _interopRequireDefault(_StatsBarjsx);
+var _AddTaskFormjsx = require("/src/components/AddTaskForm.jsx"); var _AddTaskFormjsx2 = _interopRequireDefault(_AddTaskFormjsx);
+var _TaskListjsx = require("/src/components/TaskList.jsx"); var _TaskListjsx2 = _interopRequireDefault(_TaskListjsx);
+var _ConfirmDialogjsx = require("/src/components/ConfirmDialog.jsx"); var _ConfirmDialogjsx2 = _interopRequireDefault(_ConfirmDialogjsx);
+
+ function App() {
+  const { tasks, addTask, toggleTask, removeTask } = _useTasksjs2.default.call(void 0, );
+  const [deleteTarget, setDeleteTarget] = _react2.default.useState(null);
+
+  function handleToggle(id) {
+    toggleTask(id);
+  }
+
+  function handleDeleteRequest(id) {
+    const task = tasks.find(t => t.id === id);
+    if (task) {
+      setDeleteTarget({ id, text: task.text });
+    }
+  }
+
+  function handleConfirmDelete() {
+    if (deleteTarget) {
+      removeTask(deleteTarget.id);
+      setDeleteTarget(null);
+    }
+  }
+
+  function handleCancelDelete() {
+    setDeleteTarget(null);
+  }
+
+  return (
+    _react2.default.createElement('div', { className: "app-container",}
+      , _react2.default.createElement('h1', { className: "app-title",}, "📋 任务清单" )
+      , _react2.default.createElement(_StatsBarjsx2.default, { tasks: tasks,} )
+      , _react2.default.createElement(_AddTaskFormjsx2.default, { onAdd: addTask,} )
+      , _react2.default.createElement(_TaskListjsx2.default, {
+        tasks: tasks,
+        onToggle: handleToggle,
+        onDelete: handleDeleteRequest,}
+      )
+      , deleteTarget && (
+        _react2.default.createElement(_ConfirmDialogjsx2.default, {
+          message: `确定要删除「${deleteTarget.text}」吗？`,
+          onConfirm: handleConfirmDelete,
+          onCancel: handleCancelDelete,}
+        )
+      )
+    )
+  );
+} exports.default = App;
+
+  });
+  __defineModule("/src/main.jsx", function (module, exports, require) {
+"use strict"; function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }var _react = require('react'); var _react2 = _interopRequireDefault(_react);
+var _client = require('react-dom/client'); var _client2 = _interopRequireDefault(_client);
+var _Appjsx = require("/src/App.jsx"); var _Appjsx2 = _interopRequireDefault(_Appjsx);
+
+const root = _client2.default.createRoot(document.getElementById('root'));
+root.render(
+  _react2.default.createElement(_react2.default.StrictMode, null
+    , _react2.default.createElement(_Appjsx2.default, null )
+  )
+);
+
+  });
+
+  try {
+    __requireModule("/src/main.jsx");
+  } catch (err) {
+    var entryMsg = (err && typeof err.message === 'string') ? err.message : String(err);
+    if (entryMsg.indexOf('[入口] ') !== 0) {
+      var target = (err && typeof err === 'object') ? err : new Error(String(err));
+      target.message = '[入口] ' + "/src/main.jsx" + ': ' + entryMsg;
+      err = target;
+    }
+    setTimeout(function () { throw err; }, 0);
+  }
+})();
+</script>
+</body>
+</html>
