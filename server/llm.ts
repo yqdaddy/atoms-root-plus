@@ -20,6 +20,8 @@ import {
 } from './multiFileParser.js';
 import { classifyIntent, INTENT_LABELS, type IntentResult, type IntentType } from './intentClassifier.js';
 import { buildIterationSummary, estimateSummaryTokens } from './utils/iterationSummary.js';
+import { buildScaffoldDocs, parseBlueprint } from './utils/scaffoldDocs.js';
+import { validateProject, type ValidationIssue } from './utils/projectValidator.js';
 import { withRetry, DegradationTriggeredError, type RetryProgressEvent } from './utils/retry.js';
 import {
   trimContext,
@@ -1141,6 +1143,8 @@ export async function continueAfterApproval(
     let multiFileOutput: MultiFileOutput | undefined;
     let rescueNotice: string | null = null;
     let rescuedPaths: string[] = [];
+    // 结构校验最终失败时的问题清单（降级交付不阻塞 done，见循环后处理）
+    let validationIssues: ValidationIssue[] = [];
 
     // 解析格式重试：最多 3 次尝试（首次 + 格式提示重试 + 策略切换重试）
     const MAX_PARSE_ATTEMPTS = 3;
@@ -1413,6 +1417,54 @@ export async function continueAfterApproval(
         }
       }
 
+      // 三件套注入 + 确定性结构校验（P0 M4）：解析成功后执行
+      if (parseSuccess) {
+        // 统一解析产物为 finalFiles 候选（含合并基准），供注入与校验。
+        // 每次尝试都从最新 multiFileOutput 重建，避免上一轮校验失败后的
+        // 旧产物残留导致重试结果被忽略、校验永远命中同一批 stale 文件。
+        // diff 模式不经过此处（finalFiles 直接赋值，multiFileOutput 保持 undefined）。
+        if (multiFileOutput) {
+          const mergeBase = isIteration && session.originalFiles ? session.originalFiles : currentFiles;
+          finalFiles = isIteration && mergeBase
+            ? toFileNodeRecord(multiFileOutput, mergeBase)
+            : toFileNodeRecord(multiFileOutput);
+        }
+        if (finalFiles) {
+          // 三件套注入：仅 create 全量流水线（modify/diff 不注入）；
+          // LLM 已生成同名非空文件时不覆盖（尊重模型产出）
+          if (!useDiffMode && !isIteration) {
+            const blueprint = parseBlueprint(session.features);
+            const scaffold = buildScaffoldDocs(blueprint, Object.keys(finalFiles), framework);
+            for (const [scaffoldPath, scaffoldFile] of scaffold) {
+              const existing = finalFiles[scaffoldPath];
+              if (!existing || existing.content.trim().length === 0) {
+                finalFiles[scaffoldPath] = { ...scaffoldFile, updatedAt: new Date().toISOString() };
+              }
+            }
+          }
+          // 确定性结构校验：注入保证类规则仅在 create 全量流水线强制，
+          // modify/diff 仅查入口（P0 之前存量项目无 README/注册约定，不误报）
+          const enforceP0 = !useDiffMode && !isIteration;
+          const validation = validateProject(finalFiles, framework, {
+            enforceScaffold: enforceP0,
+            enforceGlobalReg: enforceP0,
+          });
+          if (validation.errors.length > 0) {
+            const errorSummary = validation.errors.map((e) => `${e.file} ${e.message}`).join('；');
+            console.warn('[continueAfterApproval] 结构校验失败:', errorSummary);
+            if (retryCount < MAX_PARSE_ATTEMPTS - 1) {
+              // 复用格式重试通道：带错误清单再来一次
+              parseSuccess = false;
+              shouldRetry = true;
+              formatErrorHint = `项目结构不完整（${errorSummary}）。请修正后重新输出完整文件`;
+            } else {
+              // 重试额度耗尽：降级交付，记录问题清单
+              validationIssues = validation.errors;
+            }
+          }
+        }
+      }
+
       // 如果解析成功或不需要重试，跳出循环
       if (parseSuccess || !shouldRetry) {
         break;
@@ -1434,6 +1486,18 @@ export async function continueAfterApproval(
       pendingSessions.delete(sessionId);
       onEvent({ type: 'error', payload: { message: `生成结果格式不符合要求，已自动重试 ${MAX_PARSE_ATTEMPTS - 1} 次仍未成功。请点击重试或换一种描述方式。` } });
       return;
+    }
+
+    if (validationIssues.length > 0) {
+      // 结构校验重试耗尽：降级交付不阻塞 done，经既有 delta 通道给一句人话提示（不新建前端 UI）
+      const firstIssue = validationIssues[0]!;
+      const notice = `提示：自动重试后仍有 ${validationIssues.length} 处结构问题（如：${firstIssue.message}），本次按现状交付；应用可继续使用，也可点击重试重新生成。`;
+      console.warn(
+        '[continueAfterApproval] 降级交付，结构问题:',
+        validationIssues.map((e) => `${e.code}:${e.file}`).join('; ')
+      );
+      onEvent({ type: 'warning', payload: { message: notice } });
+      onEvent({ type: 'delta', payload: { text: `\n${notice}\n`, phase: 'generate' } });
     }
 
     if (rescueNotice) {
