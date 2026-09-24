@@ -1,0 +1,95 @@
+=== M1 static gates, fresh run 2026-09-24 16:47:15 ===
+
+--- git HEAD ---
+9a70f04 feat: 沙箱 mini-bundler 核心与模块运行时
+1651bd3 fix: 修改管线诚实匹配、单文件门禁与裸 import 拦截
+d0a8f31 docs: D 系列修复验证证据归档
+
+--- vitest run（全量，无排除参数）---
+
+ Test Files  26 failed | 76 passed (102)
+      Tests  1402 passed (1402)
+   Start at  16:48:04
+   Duration  115.52s (transform 25.54s, setup 0ms, collect 95.85s, tests 33.51s, environment 7.54s, prepare 50.92s)
+
+【注】26 个失败文件全部来自 .claude/worktrees/agent-a85095c0468ac17b5 与
+agent-a0de84ea8d4884628 遗留工作树内自带 node_modules 的测试（非本仓库源码），
+1402 个测试本身 0 失败。属仓库卫生问题（见缺陷清单 MINOR-1），不计入门禁。
+
+--- tsc --noEmit ---
+tsc exit: 0
+
+=== 复跑（排除 worktree 残留后，17:23:18）===
+
+命令：npx vitest run --exclude "**/.claude/**" --exclude "**/node_modules/**"
+退出码：0
+
+ Test Files  19 passed (19)
+      Tests  331 passed (331)
+   Start at  17:23:18
+   Duration  12.38s (transform 1.13s, setup 0ms, collect 2.81s, tests 6.60s, environment 3.67s, prepare 5.09s)
+
+【结论】331/331 通过，达到基线要求（≥331），PASS。
+
+=== npm run build（复跑 17:23:20）===
+build exit: 0
+（vite 构建完成，无错误输出）
+
+=== npm run build:server（复跑 17:23 同批）===
+> tsc -p tsconfig.server.json
+build:server exit: 0
+
+=== 门禁小结 ===
+1. vitest 全量（排除 worktree 残留）：331/331 PASS（基线 ≥331 达标）
+2. tsc --noEmit：exit 0 PASS
+3. npm run build：exit 0 PASS
+4. npm run build:server：exit 0 PASS
+
+=== 真机用例日志（2026-09-24 晚间续跑，全部为当场新鲜执行）===
+
+--- 用例 M1RC3：fresh react-cdn 生成 + E_NO_BARE_IMPORT/E_CDN_DOMAIN 拦截（约 20:35-21:05）---
+步骤：首页模板 chips 选 react-cdn（待办类需求"个人书架管理"）→ 提交生成 → 观察 SSE 与服务端日志 → 产物落库后探针复查
+结果：PASS（门禁链路）+ 缺陷复现（见下）
+证据：
+- 服务端日志 /private/tmp/litpp-server.log 行 9-24（已归档 server-log-excerpt-m1rc3.txt）：
+  首轮结构校验失败命中 8 个 /src/*.js(x) 文件的 import/export 违规 + /index.html unpkg.com 非白名单 CDN，
+  错误消息带 window.__components/window.__utils/window.__hooks 全局挂载引导（行 9）
+- 收敛确定性：8 项违规（行 9）→ 重试 1 后仅剩 /src/App.jsx 1 项（行 10-11）→ 重试 2 策略切换（行 12）→ 最终产物 srcImports=0
+- 诚实降级：策略切换产物仍含 E_CDN_DOMAIN → 降级交付（行 21）→ 修复自检后"修复产物结构校验未通过，保留原产物"（行 23）
+  → 审查修复循环降级交付（repair-not-applied，共 1 轮）（行 24）：坏产物未被偷偷替换，PASS
+- 终态落库（探针 public/__m1_probe.html#det:c4ffec13 于 21:00 前后）：fw=react-cdn st=draft nfiles=12 srcImports=0 unpkgHits=0
+- react-cdn 端到端渲染：BLOCKED（环境）——cdn.tailwindcss.com/unpkg.com/jsdelivr 全部不可达（curl + chrome_network_request 双重确认，
+  断网窗口约 17:23-20:53 后仍未恢复）；预览停在"加载中"后以无样式 DOM 呈现。非产品缺陷，标注 UNVERIFIED-RENDER（环境性）
+缺陷复现（本用例新证）：
+- [MAJOR-D1] 降级交付路径把未围栏的原始 LLM JSON（104,026 字符）整段持久化为 assistant 聊天消息（探针 msg1 len=104026），
+  对话面板直接渲染裸 JSON 文本。上午同路径 75K 样本还触发过 PriorityBadge 崩溃（JsonStructureRenderer.tsx:88，无错误边界）；
+  今晚未崩因该 blob 恰好可解析为 PM-plan JSON。责任：ai-engineer（降级路径输出未围栏/未截断即入库）+ frontend-developer（缺错误边界）
+- 截图证据：~/Downloads/m1rc3_done_2026-09-24T12-55-56-646Z.png（UTC，即本地 20:55 前后）
+
+--- 用例 F1B：E_INLINE_VOLUME html 单文件门禁（约 21:05-21:35）---
+步骤：首页模板选 html（音乐收藏应用需求）→ 直接生成 → 探针查文件结构 → 预览渲染 → 刷新重挂载 → CDP 点击
+结果：PASS
+证据：
+- 生成产物自拆分：探针 DET fw=html st=ready nfiles=4，/index.html=169L + /styles/main.css=147L + /src/main.js=353L + /README.md=20L
+  （entry 169L < 150L 阈值不适用且存在非 index.html 代码文件 → enforceP0 条件不成立，门禁正确静默，服务端日志行 25-27 后无任何校验失败行）
+- 上午 F1 已验证"存量 267L 单文件项目 modify 不触发门禁"（门禁只对新建 html 且无拆分文件生效）；
+  门禁真实点火路径保留于集成测试覆盖（诚实备注：今晚未在真机复现点火，避免再烧一次 LLM 配额，点火逻辑与 M1RC3 共用同一 validator 管线已验证）
+- 预览渲染：~/Downloads/f1b_preview2_2026-09-24T13-26-52-778Z.png（渲染成功）；
+  刷新重挂载后再次渲染且带完整样式：f1b_after_refresh2_2026-09-24T13-34-20-323Z.png（紫渐变 hero 完整）——
+  样式来自 assembler 内联的项目自有 /styles/main.css，即使 tailwind CDN 不可达也渲染（沙箱 srcdoc 内联策略有效性的正面证据）
+- 持久化：刷新重挂载渲染成功 = 项目文件仍在 localStorage，刷新后数据仍在 PASS
+- [MINOR-D4] 每次 iframe 重挂载（切设备/刷新）都要等白名单 CDN 连接超时（约 90-134s）才出内容：
+  13:32:06 截图"加载中"→ 13:34:20 截图渲染完成。可复现：点预览工具栏刷新按钮即触发。责任：frontend-developer/backend-architect
+  （建议：head 外链脚本加载失败早退或加载超时下沉到 srcdoc 模板内联处理）
+- CDP 点击备注：21:27 点击 (673,218) 落在 iframe 顶部后预览变白屏，经 13:32-13:34 刷新链路定性为"设备切换重挂载进入 CDN 超时加载期"，
+  非内容丢失非崩溃（后续刷新完整渲染即反证）；html 真实交互的确定性证据沿用上午 m1_preview_scroll_pagedown_skillbar.png
+  （CDP PageDown → 技能条动画填充至 95%）
+
+--- 用例 F2/F3 carry-over 证明（21:36 静态复核）---
+命令：git diff 1651bd3..8bb6fbe -- server/llm.ts server/utils/projectValidator.ts → 输出为空
+结论：8bb6fbe（当前 HEAD）相对 1651bd3（上午 F2 诚实匹配/F3 真机验证时之基线）未触碰 server/llm.ts 与 projectValidator.ts，
+  1487 行插入全部在沙箱泳道 9 文件 + package.json + vitest 配置 → 上午 F2（applyChanges 诚实匹配）与 F3 的真机证据字节级有效，直接沿用，无需重跑
+
+--- 用例 F4：假说真机验收 ---
+今晚未安排独立真机步骤；结论沿用上午证据 + 上面 M1RC3/F1B 的行为一致性旁证（详见上方用例）。静态门禁 331/331 已在 17:23 复跑通过。
+

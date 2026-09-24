@@ -1,0 +1,24 @@
+                                <h3 class="font-bold text-lg">北京邮电大学</h3>
+                                <p class="text-gray-600">计算机科学与技术 | 本科</p>
+                            </div>
+                            <span class="text-primary font-medium">2011 - 2015</span>
+                        </div>
+                    </div>
+                </section>"
+实际: "                <section class="mb-12">"
+[continueAfterApproval] 已应用 0 处编辑，跳过 1 处
+[continueAfterApproval] diff 编辑全部未应用，转对话模式: /index.html:234
+[classifyIntent] 关键词匹配成功：create (0.850)
+[generateWithStages] 意图识别: 创建应用 (type=create, confidence=0.85) 创建关键词命中 1 次 + 空项目
+[generateWithStages] 使用用户手动选择的框架: react-cdn
+[streamChatCompletion] 检测到输出因 max_tokens 截断，finish_reason=length
+[parseOutput] 无法提取 JSON 对象，原始输出（前 1000 字符）: {
+  "files": [
+    {
+      "path": "/index.html",
+      "content": "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>个人记账数据看板</title>\n  <script src=\"https://cdn.tailwindcss.com\"></script>\n  <script crossorigin src=\"https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js\"></script>\n  <script crossorigin src=\"https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js\"></script>\n  <script src=\"https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js\"></script>\n  <link rel=\"stylesheet\" href=\"/styles/main.css\">\n</head>\n<body class=\"bg-slate-50 text-slate-800 font-sans min-h-screen\">\n  <div id=\"root\"></div>\n  <script type=\"text/babel\" src=\"/src/utils/data.js\"></script>\n  <script type=\"text/babel\" src=\"/src/hooks/useTransactions.js\"></script>\n  <script type=\"text/babel\" src=\"/src/components/StatCards.jsx\"></script>...(truncated)
+[continueAfterApproval] 多文件解析失败: 无法从输出中提取 JSON 对象
+[continueAfterApproval] 解析失败，准备重试: 无法从输出中提取 JSON 对象
+[continueAfterApproval] 格式错误重试（第 1/2 次）
+[continueAfterApproval] 结构校验失败: /index.html 引用了非白名单 CDN 域名 unpkg.com（外部资源仅允许 cdn.jsdelivr.net 与 cdn.tailwindcss.com），请改用 jsdelivr 上的等价资源；/src/utils/data.js 使用了 import/export 语句（CDN 直行模式无打包器，浏览器无法解析）。请改为全局挂载：组件在文件末尾用 window.__components.组件名 = 组件名 注册，工具函数用 window.__utils.函数名 = 函数名 或 window.__hooks.xxx = xxx 暴露，调用方直接引用全局；/src/hooks/useTransactions.js 使用了 import/export 语句（CDN 直行模式无打包器，浏览器无法解析）。请改为全局挂载：组件在文件末尾用 window.__components.组件名 = 组件名 注册，工具函数用 window.__utils.函数名 = 函数名 或 window.__hooks.xxx = xxx 暴露，调用方直接引用全局；/src/components/SummaryCards.jsx 使用了 import/export 语句（CDN 直行模式无打包器，浏览器无法解析）。请改为全局挂载：组件在文件末尾用 window.__components.组件名 = 组件名 注册，工具函数用 window.__utils.函数名 = 函数名 或 window.__hooks.xxx = xxx 暴露，调用方直接引用全局；/src/components/TrendChart.jsx 使用了 import/export 语句（CDN 直行模式无打包器，浏览器无法解析）。请改为全局挂载：组件在文件末尾用 window.__components.组件名 = 组件名 注册，工具函数用 window.__utils.函数名 = 函数名 或 window.__hooks.xxx = xxx 暴露，调用方直接引用全局；/src/components/CategoryChart.jsx 使用了 import/export 语句（CDN 直行模式无打包器，浏览器无法解析）。请改为全局挂载：组件在文件末尾用 window.__components.组件名 = 组件名 注册，工具函数用 window.__utils.函数名 = 函数名 或 window.__hooks.xxx = xxx 暴露，调用方直接引用全局；/src/components/TransactionTable.jsx 使用了 import/export 语句（CDN 直行模式无打包器，浏览器无法解析）。请改为全局挂载：组件在文件末尾用 window.__components.组件名 = 组件名 注册，工具函数用 window.__utils.函数名 = 函数名 或 window.__hooks.xxx = xxx 暴露，调用方直接引用全局；/src/App.jsx 使用了 import/export 语句（CDN 直行模式无打包器，浏览器无法解析）。请改为全局挂载：组件在文件末尾用 window.__components.组件名 = 组件名 注册，工具函数用 window.__utils.函数名 = 函数名 或 window.__hooks.xxx = xxx 暴露，调用方直接引用全局
+[continueAfterApproval] 格式错误重试（第 2/2 次），策略切换

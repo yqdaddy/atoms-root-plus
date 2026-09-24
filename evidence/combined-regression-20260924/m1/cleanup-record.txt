@@ -1,0 +1,31 @@
+清理记录（2026-09-24 21:40-21:55，M1 验证收尾）
+
+本轮 M1 验证创建的测试项目（localStorage 手术式删除，与上一轮 UI 删除方式不同，原因见下"多标签复活"）：
+- c4ffec13-3ce0-4259-aee0-ee7a871d9830（M1RC3，react-cdn 书架管理，st=draft，12 files，chat msg1=104,026 字符 blob）→ 已删
+  含 litpp:v1:projects:c4ffec13-*；无 versions key（draft 态从未写入，两次清理均未出现该 key，如实记录）
+- b1495f27-67c7-4a3b-be1d-4eb4021d6748（F1B，html 音乐收藏应用，st=ready，4 files）→ 已删
+  含 litpp:v1:projects:b1495f27-* + litpp:v1:versions:b1495f27-*
+- summaries 中两条对应表项 → 已滤除；index currentId → 置 null
+- 复查（public/__m1_probe.html#list，21:50 前后）：b1495f27 与 c4ffec13 在全部 key 与 summaries 中均 0 命中
+
+多标签复活现象（先清理被回写，二次清理才成功，已登记为缺陷证据）：
+- 第一次 #clean（21:40 前后）报告删除 3 key，但当时 6 个 localhost:5173/workspace SPA 标签页仍存活，
+  其内存中 zustand store 随后把两个项目 detail 与 summaries 原样回写进 localStorage（复查时两项目复活）
+- 处置：先关闭全部 6 个 SPA 标签 + 12 个夹具标签，再以全新标签页二次执行 #clean，删除后立即复查通过
+- 该行为本身即多标签存储竞态缺陷（MINOR-D5）的活体证据：任一存活标签可无条件覆盖回写，
+  建议后续引入 storage 事件协调或写入时间戳仲裁。责任：backend-architect
+
+临时页面清理：
+- public/__m1_probe.html → 已删除（rm，git status 复查 public/ 无残留）
+- public/__m1_open_rc.html → 已删除（同上）
+- 夹具浏览器标签页 → 全部关闭（chrome_close_tabs 按 URL 复查 0 残留）
+
+未触碰项（如实上报）：
+- e51c5695（并行会话项目， summaries 在册）→ 按"不动他人项目"原则保留，继续登记污染在案
+- 上一轮遗留的孤儿 summaries 条目（19434ed3、f5749f8f、27332747 等，detail key 已不存在）与
+  更早会话的 52 条 summaries/历史项目 → 非本轮产物，一律不动，交主 agent 裁决是否统一清理
+- localhost:5174 与 atoms.litpp.com 等其他 origin 标签页 → 不同源，未触碰
+
+验证环境快照：
+- 本轮清理执行时机：所有验证证据（截图/日志/探针输出）均已先行归档至 evidence/combined-regression-20260924/m1/ 与 ~/Downloads/ 后才执行删除
+- 删除后探针输出存档：/tmp/final_list.txt（会话临时文件，关键结论已转录至本记录）

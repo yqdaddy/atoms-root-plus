@@ -1,0 +1,33 @@
+# M1RC3 + F1B 服务端日志摘录（verbatim）
+# 来源: /private/tmp/litpp-server.log（tsx watch, 端口 3000, 本轮重启后新日志）
+# 捕获时间: 2026-09-24 21:35 前后（本地）; 行号 = 源文件行号
+# 行 1-5: 服务启动环境; 行 6-24: M1RC3（react-cdn, 项目 c4ffec13）门禁与降级链路; 行 25-27: F1B（html, 项目 b1495f27）生成起始（其后无任何结构校验失败日志 = html 自拆分后门禁静默）
+# 摘录时间: 2026-09-24 21:35:59 +0800
+
+1:[env] .env 已加载
+2:Server starting on port 3000...
+3:API: http://localhost:3000/api
+4:[env] LLM_API_KEY=已配置 LLM_BASE_URL=https://api.agnes-ai.cn/v1 LLM_MODEL=agnes-2.5-flash AUTH_SESSION_SECRET=已配置
+5:Server running on http://localhost:3000
+6:[classifyIntent] 关键词匹配成功：create (0.850)
+7:[generateWithStages] 意图识别: 创建应用 (type=create, confidence=0.85) 创建关键词命中 1 次 + 空项目
+8:[generateWithStages] 使用用户手动选择的框架: react-cdn
+9:[continueAfterApproval] 结构校验失败: /index.html 引用了非白名单 CDN 域名 unpkg.com（外部资源仅允许 cdn.jsdelivr.net 与 cdn.tailwindcss.com），请改用 jsdelivr 上的等价资源；/src/utils/storage.js 使用了 import/export 语句（CDN 直行模式无打包器，浏览器无法解析）。请改为全局挂载：组件在文件末尾用 window.__components.组件名 = 组件名 注册，工具函数用 window.__utils.函数名 = 函数名 或 window.__hooks.xxx = xxx 暴露，调用方直接引用全局；/src/utils/chart.js 使用了 import/export 语句（CDN 直行模式无打包器，浏览器无法解析）。请改为全局挂载：组件在文件末尾用 window.__components.组件名 = 组件名 注册，工具函数用 window.__utils.函数名 = 函数名 或 window.__hooks.xxx = xxx 暴露，调用方直接引用全局；/src/hooks/useBooks.js 使用了 import/export 语句（CDN 直行模式无打包器，浏览器无法解析）。请改为全局挂载：组件在文件末尾用 window.__components.组件名 = 组件名 注册，工具函数用 window.__utils.函数名 = 函数名 或 window.__hooks.xxx = xxx 暴露，调用方直接引用全局；/src/components/StatsChart.jsx 使用了 import/export 语句（CDN 直行模式无打包器，浏览器无法解析）。请改为全局挂载：组件在文件末尾用 window.__components.组件名 = 组件名 注册，工具函数用 window.__utils.函数名 = 函数名 或 window.__hooks.xxx = xxx 暴露，调用方直接引用全局；/src/components/BookCard.jsx 使用了 import/export 语句（CDN 直行模式无打包器，浏览器无法解析）。请改为全局挂载：组件在文件末尾用 window.__components.组件名 = 组件名 注册，工具函数用 window.__utils.函数名 = 函数名 或 window.__hooks.xxx = xxx 暴露，调用方直接引用全局；/src/components/BookForm.jsx 使用了 import/export 语句（CDN 直行模式无打包器，浏览器无法解析）。请改为全局挂载：组件在文件末尾用 window.__components.组件名 = 组件名 注册，工具函数用 window.__utils.函数名 = 函数名 或 window.__hooks.xxx = xxx 暴露，调用方直接引用全局；/src/components/Modal.jsx 使用了 import/export 语句（CDN 直行模式无打包器，浏览器无法解析）。请改为全局挂载：组件在文件末尾用 window.__components.组件名 = 组件名 注册，工具函数用 window.__utils.函数名 = 函数名 或 window.__hooks.xxx = xxx 暴露，调用方直接引用全局；/src/App.jsx 使用了 import/export 语句（CDN 直行模式无打包器，浏览器无法解析）。请改为全局挂载：组件在文件末尾用 window.__components.组件名 = 组件名 注册，工具函数用 window.__utils.函数名 = 函数名 或 window.__hooks.xxx = xxx 暴露，调用方直接引用全局
+10:[continueAfterApproval] 格式错误重试（第 1/2 次）
+11:[continueAfterApproval] 结构校验失败: /src/App.jsx 使用了 import/export 语句（CDN 直行模式无打包器，浏览器无法解析）。请改为全局挂载：组件在文件末尾用 window.__components.组件名 = 组件名 注册，工具函数用 window.__utils.函数名 = 函数名 或 window.__hooks.xxx = xxx 暴露，调用方直接引用全局
+12:[continueAfterApproval] 格式错误重试（第 2/2 次），策略切换
+13:[streamChatCompletion] 检测到输出因 max_tokens 截断，finish_reason=length
+14:[parseOutput] 无法提取 JSON 对象，原始输出（前 1000 字符）: {
+15:  "files": [
+16:    {
+17:      "path": "/index.html",
+18:      "content": "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>个人书架管理</title>\n  <script src=\"https://cdn.tailwindcss.com\"></script>\n  <script src=\"https://unpkg.com/react@18/umd/react.production.min.js\" crossorigin></script>\n  <script src=\"https://unpkg.com/react-dom@18/umd/react-dom.production.min.js\" crossorigin></script>\n  <script src=\"https://unpkg.com/@babel/standalone/babel.min.js\"></script>\n  <link rel=\"stylesheet\" href=\"/styles/main.css\">\n</head>\n<body class=\"bg-gray-50 text-gray-800 font-sans min-h-screen\">\n  <div id=\"root\"></div>\n\n  <!-- Utils -->\n  <script src=\"/src/utils/storage.js\"></script>\n  <script src=\"/src/utils/bookUtils.js\"></script>\n\n  <!-- Hooks -->\n  <script src=\"/src/hooks/useBooks.js\"></script>\n\n  <!-- Components -->\n  <script src=\"/src/components/BookCard...(truncated)
+19:[continueAfterApproval] 多文件解析失败: 无法从输出中提取 JSON 对象
+20:[continueAfterApproval] 结构校验失败: /index.html 引用了非白名单 CDN 域名 unpkg.com（外部资源仅允许 cdn.jsdelivr.net 与 cdn.tailwindcss.com），请改用 jsdelivr 上的等价资源
+21:[continueAfterApproval] 降级交付，结构问题: E_CDN_DOMAIN:/index.html
+22:[continueAfterApproval] 修复自检通过（0 项已修复）: 已创建App.js主组件，集成删除确认功能、添加/编辑模态框状态管理，并正确渲染所有组件
+23:[continueAfterApproval] 修复产物结构校验未通过，保留原产物: E_CDN_DOMAIN:/index.html
+24:[continueAfterApproval] 审查修复循环降级交付（repair-not-applied，共 1 轮）
+25:[classifyIntent] 关键词匹配成功：create (0.850)
+26:[generateWithStages] 意图识别: 创建应用 (type=create, confidence=0.85) 创建关键词命中 1 次 + 空项目
+27:[generateWithStages] 使用用户手动选择的框架: html
