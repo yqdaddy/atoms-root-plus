@@ -17,8 +17,9 @@ import type {
 import { ENTRY_FILE_PATH, CURRENT_SCHEMA_VERSION } from './types.js';
 
 // 确定 data 目录路径
+// ATOMS_DATA_DIR 仅供测试隔离使用：路由级测试指向临时目录，避免触碰真实 data/atoms.db
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = join(__dirname, '..', 'data');
+const DATA_DIR = process.env.ATOMS_DATA_DIR ?? join(__dirname, '..', 'data');
 const DB_PATH = join(DATA_DIR, 'atoms.db');
 
 // 确保 data 目录存在
@@ -123,6 +124,7 @@ function toSummary(project: Project): ProjectSummary {
     id: project.id,
     name: project.name,
     status: project.status,
+    framework: project.framework,
     updatedAt: project.updatedAt,
     entryBytes: new Blob([entryContent]).size,
   };

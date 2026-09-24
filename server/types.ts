@@ -7,6 +7,18 @@ export type IsoDateTime = string;
 
 export type ProjectStatus = 'draft' | 'generating' | 'ready' | 'error';
 
+/**
+ * 生成代码的目标框架，与前端 src/types/project.ts 的 ProjectFramework 保持一致。
+ * 缺省（undefined）视为 html：存量项目不补写，前端按 framework ?? 'html' 缺省。
+ */
+export type ProjectFramework = 'html' | 'react-cdn' | 'vue-cdn';
+
+export const FRAMEWORK_VALUES: readonly ProjectFramework[] = [
+  'html',
+  'react-cdn',
+  'vue-cdn',
+];
+
 export type FileLanguage = 'html' | 'css' | 'javascript' | 'json' | 'text';
 
 export const ENTRY_FILE_PATH = '/index.html';
@@ -37,6 +49,8 @@ export interface Project {
   name: string;
   description: string;
   status: ProjectStatus;
+  /** 生成代码的目标框架；路由层负责非法值回退 html（FINAL-1） */
+  framework?: ProjectFramework;
   files: Record<string, FileNode>;
   chat: ChatMessage[];
   preview: PreviewConfig;
@@ -48,6 +62,8 @@ export interface ProjectSummary {
   id: string;
   name: string;
   status: ProjectStatus;
+  /** 框架标签，列表页展示用；存量项目可能缺省 */
+  framework?: ProjectFramework;
   updatedAt: IsoDateTime;
   entryBytes: number;
 }

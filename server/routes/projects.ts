@@ -7,8 +7,8 @@ import { Hono } from 'hono';
 import { optionalAuth } from '../auth.js';
 import * as db from '../db.js';
 import { cleanupProjectDeployment } from './deploy.js';
-import type { Project, ProjectStatus, AppEnv } from '../types.js';
-import { ENTRY_FILE_PATH, UUID_PATTERN } from '../types.js';
+import type { Project, ProjectStatus, ProjectFramework, AppEnv } from '../types.js';
+import { ENTRY_FILE_PATH, UUID_PATTERN, FRAMEWORK_VALUES } from '../types.js';
 
 export const projectsRouter = new Hono<AppEnv>();
 
@@ -52,6 +52,22 @@ interface CreateProjectBody {
   id?: unknown;
   name?: unknown;
   description?: unknown;
+  framework?: unknown;
+}
+
+/**
+ * 归一化 framework 入参（FINAL-1）：
+ * - 未提供（undefined）→ undefined：不写入字段，保持存量缺省语义（前端按 html 处理）
+ * - 合法值（html | react-cdn | vue-cdn）→ 原样保留
+ * - 非法值 → 防御性回退 'html'，不报错（framework 字段异常不应阻塞整包同步）
+ */
+function normalizeFramework(v: unknown): ProjectFramework | undefined {
+  if (v === undefined) {
+    return undefined;
+  }
+  return (FRAMEWORK_VALUES as readonly string[]).includes(v as string)
+    ? (v as ProjectFramework)
+    : 'html';
 }
 
 const STATUS_VALUES: readonly ProjectStatus[] = [
@@ -91,6 +107,7 @@ projectsRouter.post('/', async (c) => {
     description:
       typeof body.description === 'string' ? body.description : '',
     status: 'draft',
+    framework: normalizeFramework(body.framework),
     files: {
       [ENTRY_FILE_PATH]: {
         path: ENTRY_FILE_PATH,
@@ -130,6 +147,7 @@ interface UpdateProjectBody {
   name?: unknown;
   description?: unknown;
   status?: unknown;
+  framework?: unknown;
   files?: unknown;
   chat?: unknown;
   preview?: unknown;
@@ -213,6 +231,11 @@ projectsRouter.put('/:id', async (c) => {
       (STATUS_VALUES as readonly string[]).includes(body.status)
         ? (body.status as ProjectStatus)
         : current.status,
+    // framework：请求未携带时保持库内现值（存量项目可能无该字段）；携带时经归一化（非法回退 html）
+    framework:
+      body.framework === undefined
+        ? current.framework
+        : normalizeFramework(body.framework),
     files: body.files !== undefined
       ? (body.files as Project['files'])
       : current.files,
