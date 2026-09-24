@@ -1,0 +1,24 @@
+=== 浏览器实测（vite :5173 + API :3000，未重启） ===
+
+场景 1 react 计算器（项目 bb96ef9d，已清理）：
+  文件树 10 文件：/index.html /src/main.jsx /src/App.jsx /src/components/Calculator.jsx /src/hooks/useCalculation.js /src/utils/calculation.js /styles/main.css + README.md/DESIGN.md/package.json（三件套平台注入）
+  Calculator.jsx 236 行，含 window.__components 注册（2 处）；main.jsx 含 createRoot + 注册引用
+  缺陷 D-3（major）：Calculator.jsx 第 10 行悬空 const（const 空行 + const currentResult），语法错误导致 Babel 编译失败、预览白屏。审查者第 8 轮维度已检出（工程化 pass:false + repairInstructions 指明第 11 行语法错误），但 server 侧无 repairInstructions 消费逻辑（审查 fail 直接交付），最终产物未修复。属既有管线缺口而非 P0 接线回归，但验收点"预览可交互"未达成。
+
+场景 2 html 待办清单（项目 5825ff82，已清理）：
+  文件 6 个：/index.html /styles/main.css /src/utils.js /src/hooks.js /src/main.js /README.md —— html 框架仅注入 README，符合宣称分支
+  审查 8 维度全 pass（含工程化：三层分离清晰、单文件行数适中）
+  预览可交互：点击筛选按钮"未完成"，选中态由"全部"切换为"未完成"（React 状态响应正常）
+  滚动纪律：main.css 无 overflow:hidden、无 body 高度锁定（唯一 height:1.25rem 为图标），内容流自然滚动成立；键盘输入受测试工具限制（chrome_keyboard 在 iframe 与宿主均无效），10+ 条目实测未执行，以代码审查佐证
+  缺陷 D-4（minor）：确认删除对话框平铺显示在空状态区（modal 未隐藏），模型生成质量问题
+
+场景 3 modify（对待办清单项目发"把标题颜色改一下"）：
+  diff 模式生效：changes 清单含 /index.html line14 灰改蓝 replace，"变更已应用（diff 模式跳过审查）"，预览标题实时变蓝
+  修改前后对比：文件数 6→6，文件列表相同，README 长度 511→511（未重生成），无 DESIGN.md/package.json 新增，index.html 含 text-blue-600 落盘
+
+场景 4 存量旧项目（计算器1，a8785848）：
+  打开正常渲染计算器界面，点击 7/8/6 显示 786（交互真实），无报错
+  文件保持 3 个（/index.html /styles/main.css /src/main.js），无三件套回填
+
+=== 观察项（非本轮改动引入，前端文件本轮未修改） ===
+  生成过程中出现多次 React "Maximum update depth exceeded" 错误（stage 事件期间）；done 处理、文件落盘、消息显示均正常，建议后续定位

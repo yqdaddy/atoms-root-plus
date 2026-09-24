@@ -1,0 +1,8 @@
+验证时间: 2026-09-24 09:21:41 CST（开始 08:45）
+基线：工作区未提交改动（server/utils/scaffoldDocs.ts、projectValidator.ts、server/llm.ts、server/prompts-v2.ts 及 3 个测试文件为新增）
+
+=== 静态门禁（本机实测） ===
+npm run build:server  退出码 0（tsc -p tsconfig.server.json 无输出）
+npm run typecheck     退出码 0（tsc --noEmit 无输出）
+npm test              退出码 0，Test Files 12 passed, Tests 190 passed（161 基线 + scaffoldDocs 13 + projectValidator 12 + scaffoldWiring 4）
+npm run build         退出码 0（vite build 成功）
