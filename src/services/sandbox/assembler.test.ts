@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assembleFiles, Assembler } from './assembler';
+import { assembleFiles, assembleProjectFiles, Assembler } from './assembler';
 import type { FileNode } from '../../types/project';
 
 describe('Assembler', () => {
@@ -524,5 +524,314 @@ function App() {
       const result = assembleFiles(files, '/index.html', 'react-cdn');
       expect(result.html).toContain('"inline-jsx"');
     });
+  });
+});
+
+describe('assembleProjectFiles - mini-bundler 集成（P1 批次 2）', () => {
+  /** 真实 import 多文件项目的标准文件集 */
+  function buildRealImportProject() {
+    const files: Record<string, FileNode> = {
+      '/index.html': {
+        content: `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Bundled App</title>
+  <link rel="stylesheet" href="/styles/main.css">
+</head>
+<body>
+  <div id="root"></div>
+  <script src="/src/App.jsx"></script>
+  <script src="/src/main.jsx"></script>
+</body>
+</html>`,
+      },
+      '/styles/main.css': { content: '.app { color: red; }' },
+      '/styles/theme.css': { content: '.theme { margin: 0; }' },
+      '/src/main.jsx': {
+        content: `import { createRoot } from 'react-dom/client';
+import App from './App.jsx';
+import './styles/theme.css';
+createRoot(document.getElementById('root')).render(<App />);`,
+      },
+      '/src/App.jsx': {
+        content: `import { greet } from './utils/greet';
+export default function App() {
+  return <div className="app">{greet('litpp')}</div>;
+}`,
+      },
+      '/src/utils/greet.js': {
+        content: `export function greet(name) {
+  return 'hello ' + name;
+}`,
+      },
+    };
+    return files;
+  }
+
+  it('真实 import 项目：打包为单一脚本注入，不再逐文件 __compileAndRun 包装', async () => {
+    const files = buildRealImportProject();
+    const result = await assembleProjectFiles(files, '/index.html', 'react-cdn');
+
+    // 单一打包脚本：模块注册与入口启动均在产物中
+    expect(result.html).toContain('__defineModule("/src/utils/greet.js"');
+    expect(result.html).toContain('__defineModule("/src/App.jsx"');
+    expect(result.html).toContain('__defineModule("/src/main.jsx"');
+    expect(result.html).toContain('__requireModule("/src/main.jsx")');
+
+    // 模块注册为拓扑序（依赖在前）
+    const greetIdx = result.html.indexOf('__defineModule("/src/utils/greet.js"');
+    const appIdx = result.html.indexOf('__defineModule("/src/App.jsx"');
+    const mainIdx = result.html.indexOf('__defineModule("/src/main.jsx"');
+    expect(greetIdx).toBeLessThan(appIdx);
+    expect(appIdx).toBeLessThan(mainIdx);
+
+    // 不再逐文件包装（运行时定义 window.__compileAndRun = function 除外）
+    expect(result.html).not.toContain('__compileAndRun("');
+    expect(result.html).not.toContain('"inline-jsx"');
+
+    // 源码 ESM 语句不再出现，require 已改写为绝对路径（证明走了编译打包）
+    expect(result.html).not.toContain("import App from './App.jsx'");
+    expect(result.html).toContain('require("/src/App.jsx")');
+
+    // 打包脚本占用首个引用槽位，后续槽位替换为并入注释
+    expect(result.html).toContain('已并入模块打包脚本');
+
+    // CSS link 内联不受影响；JS 里的 css import 不破坏打包
+    expect(result.html).toContain('<style>');
+    expect(result.html).toContain('.app { color: red; }');
+
+    // 统计：两个 script 槽位都被处理（首个注入 bundle，后续并入注释）
+    expect(result.stats.inlinedCss).toBe(1);
+    expect(result.stats.inlinedJs).toBe(2);
+
+    // 平台 React 运行时注入保持不变，且先于打包脚本执行（文档序）
+    expect(result.html).toContain('https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js');
+    expect(result.html.indexOf('window.React = window.React || React')).toBeLessThan(
+      result.html.indexOf('__defineModule(')
+    );
+
+    // 无回退告警；依赖图可达但未被 HTML 直接引用的文件不产生未引用告警
+    expect(result.warnings.some((w) => w.includes('模块打包失败'))).toBe(false);
+    expect(result.warnings.some((w) => w.includes('已回退'))).toBe(false);
+    expect(result.warnings.some((w) => w.includes('未被入口 HTML 引用'))).toBe(false);
+
+    // bundler 自身警告经既有 warning 通道透出（App.jsx 缺 React import 被自动注入）
+    expect(result.warnings.some((w) => w.includes('已自动注入 import React: /src/App.jsx'))).toBe(true);
+  });
+
+  it('入口 HTML 无打包模块 script 槽位时，bundle 追加到 body 末尾', async () => {
+    const files = buildRealImportProject();
+    // 去掉两个 script 标签，模拟 import 驱动、HTML 无脚本引用的项目
+    files['/index.html'] = {
+      content: `<!DOCTYPE html>
+<html lang="zh-CN">
+<head><title>No Script Refs</title></head>
+<body><div id="root"></div></body>
+</html>`,
+    };
+
+    const result = await assembleProjectFiles(files, '/index.html', 'react-cdn');
+
+    expect(result.html).toContain('__defineModule("/src/main.jsx"');
+    const bundleIdx = result.html.indexOf('__defineModule(');
+    const bodyEndIdx = result.html.indexOf('</body>');
+    expect(bundleIdx).toBeGreaterThan(-1);
+    expect(bundleIdx).toBeLessThan(bodyEndIdx);
+    expect(result.stats.inlinedJs).toBe(1);
+    expect(result.warnings.some((w) => w.includes('模块打包失败'))).toBe(false);
+  });
+
+  it('bundler 失败（MODULE_NOT_FOUND）：回退产物与现状逐字节一致，附打包失败警告', async () => {
+    const files: Record<string, FileNode> = {
+      '/index.html': {
+        content: '<!DOCTYPE html><html><body><div id="root"></div><script src="/src/main.jsx"></script></body></html>',
+      },
+      '/src/main.jsx': {
+        content: `import { helper } from './lib/missing.js';
+console.log(helper);`,
+      },
+    };
+
+    const legacy = assembleFiles(files, '/index.html', 'react-cdn');
+    const result = await assembleProjectFiles(files, '/index.html', 'react-cdn');
+
+    expect(result.html).toBe(legacy.html);
+    expect(result.warnings.length).toBe(legacy.warnings.length + 1);
+    expect(result.warnings[0]).toContain('模块打包失败');
+    expect(result.warnings[0]).toContain('MODULE_NOT_FOUND');
+    expect(result.warnings[0]).toContain("./lib/missing.js");
+    expect(result.warnings[0]).toContain('从 /src/main.jsx 解析');
+    // 回退产物保留逐文件包装特征
+    expect(result.html).toContain('__compileAndRun("');
+  });
+
+  it('bundler 失败（UNKNOWN_BARE_IMPORT）：白名单外依赖回退逐文件内联', async () => {
+    const files: Record<string, FileNode> = {
+      '/index.html': {
+        content: '<!DOCTYPE html><html><body><div id="root"></div><script src="/src/main.jsx"></script></body></html>',
+      },
+      '/src/main.jsx': {
+        content: `import dayjs from 'dayjs';
+console.log(dayjs);`,
+      },
+    };
+
+    const legacy = assembleFiles(files, '/index.html', 'react-cdn');
+    const result = await assembleProjectFiles(files, '/index.html', 'react-cdn');
+
+    expect(result.html).toBe(legacy.html);
+    expect(result.warnings[0]).toContain('模块打包失败');
+    expect(result.warnings[0]).toContain('UNKNOWN_BARE_IMPORT');
+    expect(result.warnings[0]).toContain('dayjs');
+  });
+
+  it('bundler 失败（ENTRY_MISSING）：无 /src/main.jsx 时回退且不漏现状告警', async () => {
+    const files: Record<string, FileNode> = {
+      '/index.html': {
+        content: '<!DOCTYPE html><html><body><div id="root"></div><script src="/src/App.jsx"></script></body></html>',
+      },
+      '/src/App.jsx': {
+        content: `import { greet } from './greet.js';
+export default function App() { return greet('x'); }`,
+      },
+      '/src/greet.js': { content: `export function greet(name) { return 'hi ' + name; }` },
+    };
+
+    const legacy = assembleFiles(files, '/index.html', 'react-cdn');
+    const result = await assembleProjectFiles(files, '/index.html', 'react-cdn');
+
+    expect(result.html).toBe(legacy.html);
+    expect(result.warnings.length).toBe(legacy.warnings.length + 1);
+    expect(result.warnings[0]).toContain('模块打包失败');
+    expect(result.warnings[0]).toContain('ENTRY_MISSING');
+    // 现状链路的未引用告警在回退产物中原样保留（greet.js 未被 HTML 引用）
+    expect(result.warnings.some((w) => w.includes('未被入口 HTML 引用') && w.includes('/src/greet.js'))).toBe(true);
+  });
+
+  it('混合项目：入口 HTML 引用文件不在依赖图中，回退以保证其执行语义', async () => {
+    const files: Record<string, FileNode> = {
+      '/index.html': {
+        content: `<!DOCTYPE html><html><body><div id="root"></div>
+<script src="/src/components/Counter.jsx"></script>
+<script src="/src/main.jsx"></script>
+</body></html>`,
+      },
+      '/src/main.jsx': {
+        content: `import { mount } from './boot.js';
+mount();`,
+      },
+      '/src/boot.js': { content: `export function mount() { console.log('booted'); }` },
+      '/src/components/Counter.jsx': {
+        content: `function Counter() { return <div>0</div>; }
+window.__components = window.__components || {};
+window.__components.Counter = Counter;`,
+      },
+    };
+
+    const legacy = assembleFiles(files, '/index.html', 'react-cdn');
+    const result = await assembleProjectFiles(files, '/index.html', 'react-cdn');
+
+    expect(result.html).toBe(legacy.html);
+    expect(result.warnings[0]).toContain('不在 import 依赖图中');
+    expect(result.warnings[0]).toContain('已回退');
+    expect(result.warnings[0]).toContain('/src/components/Counter.jsx');
+    // Counter.jsx 在回退产物中按现状原样内联执行
+    expect(result.html).toContain('window.__components.Counter = Counter');
+  });
+
+  it('P0 注册约定项目（无 import）：不尝试打包，产物与告警与现状一致', async () => {
+    const files: Record<string, FileNode> = {
+      '/index.html': {
+        content: `<!DOCTYPE html><html><body><div id="root"></div>
+<script src="/src/components/Counter.jsx"></script>
+<script src="/src/main.jsx"></script>
+</body></html>`,
+      },
+      '/src/main.jsx': {
+        content: `const App = window.__components.Counter;
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);`,
+      },
+      '/src/components/Counter.jsx': {
+        content: `function Counter() {
+  const [n, setN] = React.useState(0);
+  return <button onClick={() => setN(n + 1)}>{n}</button>;
+}
+window.__components = window.__components || {};
+window.__components.Counter = Counter;`,
+      },
+    };
+
+    const legacy = assembleFiles(files, '/index.html', 'react-cdn');
+    const result = await assembleProjectFiles(files, '/index.html', 'react-cdn');
+
+    expect(result.html).toBe(legacy.html);
+    expect(result.warnings).toEqual(legacy.warnings);
+    expect(result.warnings.some((w) => w.includes('模块打包'))).toBe(false);
+    expect(result.html).toContain('__compileAndRun("');
+  });
+
+  it('html 框架：assembleProjectFiles 与现状 assembleFiles 完全一致（回归）', async () => {
+    const files: Record<string, FileNode> = {
+      '/index.html': {
+        content: '<!DOCTYPE html><html><head><link rel="stylesheet" href="/styles/main.css"></head><body><script src="/src/main.js"></script></body></html>',
+      },
+      '/styles/main.css': { content: 'body { margin: 0; }' },
+      '/src/main.js': { content: "document.getElementById('app').textContent = 'ok';" },
+    };
+
+    const legacy = assembleFiles(files, '/index.html', 'html');
+    const result = await assembleProjectFiles(files, '/index.html', 'html');
+
+    expect(result.html).toBe(legacy.html);
+    expect(result.warnings).toEqual(legacy.warnings);
+    expect(result.stats).toEqual(legacy.stats);
+  });
+
+  it('react-cdn 单文件项目（无 /src 模块文件）：与现状完全一致（回归）', async () => {
+    const files: Record<string, FileNode> = {
+      '/index.html': {
+        content: `<!DOCTYPE html><html><body><div id="root"></div><script>
+function App() { return <div>Hello</div>; }
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script></body></html>`,
+      },
+    };
+
+    const legacy = assembleFiles(files, '/index.html', 'react-cdn');
+    const result = await assembleProjectFiles(files, '/index.html', 'react-cdn');
+
+    expect(result.html).toBe(legacy.html);
+    expect(result.warnings).toEqual(legacy.warnings);
+    expect(result.html).toContain('"inline-jsx"');
+  });
+
+  it('含 CSS import 的项目：css import 改写为 no-op，不破坏打包与样式内联', async () => {
+    const files: Record<string, FileNode> = {
+      '/index.html': {
+        content: '<!DOCTYPE html><html><head><link rel="stylesheet" href="/styles/main.css"></head><body><div id="root"></div><script src="/src/main.jsx"></script></body></html>',
+      },
+      '/styles/main.css': { content: 'body { background: #fff; }' },
+      '/src/main.jsx': {
+        content: `import './styles/only-imported.css';
+import { title } from './title.js';
+document.title = title;`,
+      },
+      '/src/title.js': { content: `export const title = 'bundled';` },
+      // only-imported.css 未通过 link 引用，仅被 JS import（运行时 no-op，样式不生效属现状语义）
+      '/src/styles/only-imported.css': { content: '.x { color: blue; }' },
+    };
+
+    const result = await assembleProjectFiles(files, '/index.html', 'react-cdn');
+
+    // 打包成功（无回退），css import 不触发 ModuleNotFound / UnknownBareImport
+    expect(result.warnings.some((w) => w.includes('模块打包失败'))).toBe(false);
+    expect(result.html).toContain('__defineModule("/src/main.jsx"');
+    expect(result.html).toContain('__defineModule("/src/title.js"');
+    // css 哨兵 require 出现在产物中（运行时返回空对象）
+    expect(result.html).toContain('require("__css_module__")');
+    // link 引用的样式仍照现状内联
+    expect(result.html).toContain('<style>');
+    expect(result.html).toContain('body { background: #fff; }');
   });
 });

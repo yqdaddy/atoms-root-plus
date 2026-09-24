@@ -7,8 +7,13 @@
  * 3. 内联所有本地 JS 引用（src 支持 "./xxx"、"../xxx" 与根相对 "/xxx"）
  * 4. 验证无遗漏的外部引用
  * 5. React CDN 模式：注入 React/Sucrase 运行时，浏览器内编译执行 JSX
+ * 6. React CDN 模式（P1 批次 2）：真实 import 项目走 mini-bundler 打包为
+ *    单一脚本注入（assembleProjectFiles），打包失败或项目不符合打包条件时
+ *    逐字节回退到上述逐文件链路（回退产物与现状完全一致）
  *
- * 设计文档：docs/tech-multi-file-generation.md 第 5.3 节
+ * 设计文档：docs/tech-multi-file-generation.md 第 5.3 节、
+ * docs/engineering-grade-generation-plan.md 3.3 与 7、
+ * docs/preview-runtime-assessment.md 3.2（路线 B）
  */
 
 import type { FileNode, ProjectFramework } from '../../types/project';
@@ -27,6 +32,18 @@ import {
   generateVueAppBootstrap,
   wrapVueSfc,
 } from './vueCompiler';
+import { tryBundleModules } from './moduleBundler';
+import type { BundleModuleFile, BundleSuccess } from './bundlerTypes';
+import { scanImportSpecifiers } from './importScanner';
+
+/**
+ * react-cdn mini-bundler 固定入口（工程化文件清单约定，
+ * 见 docs/engineering-grade-generation-plan.md 2.2）
+ */
+const SRC_MODULE_ENTRY_PATH = '/src/main.jsx';
+
+/** /src 下参与模块打包的源码文件（.js/.jsx） */
+const SRC_MODULE_FILE_PATTERN = /^\/src\/.+\.(js|jsx)$/i;
 
 /** 组装器配置 */
 export interface AssemblerConfig {
@@ -60,6 +77,24 @@ export class AssemblerError extends Error {
   }
 }
 
+/** 打包脚本注入状态（inlineJsScripts 与 assembleBundled 之间传递） */
+interface BundleInjectionState {
+  /** 打包脚本是否已进入产物 HTML（槽位注入或 body 末尾追加） */
+  placed: boolean;
+  /** 是否已占用一个 script 槽位（多个槽位只注入一次，其余替换为注释） */
+  slotUsed: boolean;
+}
+
+/** inlineJsScripts 的打包注入参数 */
+interface BundleInjection {
+  /** mini-bundler 产物（自包含 IIFE，可直接放入 script 标签） */
+  script: string;
+  /** 打包覆盖的模块路径集合 */
+  bundledPaths: ReadonlySet<string>;
+  /** 注入状态（跨多个 script 标签共享） */
+  injectionState: BundleInjectionState;
+}
+
 /**
  * 文件组装器：将多文件合成为单文件 HTML
  */
@@ -76,12 +111,7 @@ export class Assembler {
     let inlinedJs = 0;
 
     // 1. 获取入口 HTML
-    const entryNode = this.config.files[this.config.entryPath];
-    if (!entryNode) {
-      throw new AssemblerError(`入口文件不存在: ${this.config.entryPath}`);
-    }
-
-    let html = entryNode.content;
+    let html = this.readEntryHtml();
     const framework = this.config.framework ?? 'html';
 
     // react-cdn 组件注册（window.__components）依赖入口 HTML 按序引用源码文件，
@@ -122,6 +152,150 @@ export class Assembler {
         inlinedJs,
       },
     };
+  }
+
+  /**
+   * P1 批次 2：react-cdn 框架 mini-bundler 集成组装（异步）。
+   *
+   * 决策链（回退链路行为不变是硬要求）：
+   * 1. /src 下无 .js/.jsx 文件，或全部源码不含 import 说明符（P0 组件注册
+   *    约定项目）→ 直接走同步逐文件链路，行为与现状逐字节一致
+   * 2. tryBundleModules 打包失败（入口缺失、模块断链、白名单外依赖等）→
+   *    走同步逐文件链路 + 一条打包失败警告（html 与现状一致）
+   * 3. 打包成功但入口 HTML 引用的 /src 文件不在依赖图中（P0/ESM 混合项目，
+   *    依赖图不会执行它们）→ 回退逐文件链路，保证这些文件的执行语义不变
+   * 4. 打包成功且覆盖完整 → 打包脚本作为单一内联 script 注入，替代这些
+   *    文件的逐文件 __compileAndRun 包装
+   *
+   * @throws AssemblerError 入口文件不存在时抛出
+   */
+  async assembleWithModuleBundle(): Promise<AssembledResult> {
+    const moduleFiles = this.collectSrcModuleFiles();
+    const hasImportSpecifier = moduleFiles.some((file) => scanImportSpecifiers(file.content).length > 0);
+    if (moduleFiles.length === 0 || !hasImportSpecifier) {
+      // 无模块文件或 P0 注册约定项目：mini-bundler 无收益，走现状链路
+      return this.assemble();
+    }
+
+    const bundle = await tryBundleModules(moduleFiles, SRC_MODULE_ENTRY_PATH);
+    if (!bundle.ok) {
+      const result = this.assemble();
+      result.warnings.unshift(
+        `模块打包失败（${bundle.error.code}），已回退逐文件顺序内联: ${bundle.error.message}`
+      );
+      return result;
+    }
+
+    // 覆盖性检查：现状链路会执行入口 HTML 引用的每个 /src 文件，
+    // 打包链路只执行依赖图可达文件。引用文件若不在依赖图中（只能来自
+    // HTML script 标签而非 import），回退才能保住其执行语义
+    const referenced = this.collectReferencedPaths(this.readEntryHtml());
+    const uncovered = Array.from(referenced).filter(
+      (path) => SRC_MODULE_FILE_PATTERN.test(path) && !bundle.modulePaths.includes(path)
+    );
+    if (uncovered.length > 0) {
+      const result = this.assemble();
+      result.warnings.unshift(
+        `以下入口 HTML 引用的源码文件不在 import 依赖图中，已回退逐文件顺序内联以保证其执行: ${uncovered.join(', ')}`
+      );
+      return result;
+    }
+
+    return this.assembleBundled(bundle, moduleFiles);
+  }
+
+  /**
+   * 打包成功路径：bundle 脚本作为单一内联 script 注入。
+   * 注入位置取入口 HTML 中第一个引用打包模块的 script 槽位
+   * （模块 require 为惰性语义，槽位顺序不影响正确性），
+   * 其余打包模块的槽位替换为注释；HTML 无打包模块引用时追加到 body 末尾。
+   */
+  private assembleBundled(bundle: BundleSuccess, moduleFiles: readonly BundleModuleFile[]): AssembledResult {
+    const warnings: string[] = [...bundle.warnings];
+    const bundledPaths = new Set<string>(bundle.modulePaths);
+    const injectionState: BundleInjectionState = { placed: false, slotUsed: false };
+
+    let html = this.readEntryHtml();
+
+    // CSS 引用处理与现状一致（CSS 不参与模块系统，import css 已被 bundler
+    // 改写为运行时 no-op 哨兵，样式仍靠入口 HTML 的 link 内联）
+    const cssResult = this.inlineCssLinks(html, warnings);
+    html = cssResult.html;
+    const inlinedCss = cssResult.count;
+
+    const jsResult = this.inlineJsScripts(html, warnings, 'react-cdn', {
+      script: bundle.script,
+      bundledPaths,
+      injectionState,
+    });
+    html = jsResult.html;
+    let inlinedJs = jsResult.count;
+
+    // 兜底：入口 HTML 没有引用任何打包模块的 script 槽位（import 驱动项目），
+    // 追加到 body 末尾，保证入口仍被执行
+    if (!injectionState.placed) {
+      const bundleTag = `<script>\n${bundle.script}\n</script>`;
+      if (html.includes('</body>')) {
+        html = html.replace('</body>', `${bundleTag}\n</body>`);
+      } else {
+        html = `${html}\n${bundleTag}`;
+      }
+      injectionState.placed = true;
+      inlinedJs += 1;
+    }
+
+    this.validateNoExternalRefs(html, warnings);
+
+    // React CDN 运行时注入逻辑保持不变：React UMD 在 head 先于 body 中的
+    // bundle 脚本执行，require('react') shim 依赖的 window.React 保证就绪
+    html = this.injectReactRuntime(html, warnings);
+
+    // 未执行文件告警改用依赖图判据：打包链路的执行集 = modulePaths，
+    // 依赖图可达但未被 HTML 直接引用的文件（如组件）已正常执行，不再误报；
+    // 依赖图之外且无 HTML 引用的文件与现状一样不会执行，仍需告警
+    const unexecuted = moduleFiles
+      .map((file) => file.path)
+      .filter((path) => path !== SRC_MODULE_ENTRY_PATH && !bundledPaths.has(path));
+    if (unexecuted.length > 0) {
+      warnings.push(
+        `以下源码文件未被引用（不在入口 ${SRC_MODULE_ENTRY_PATH} 的 import 依赖图中），将不会执行: ${unexecuted.join(', ')}`
+      );
+    }
+
+    return {
+      html,
+      warnings,
+      stats: {
+        totalFiles: Object.keys(this.config.files).length,
+        inlinedCss,
+        inlinedJs,
+      },
+    };
+  }
+
+  /**
+   * 读取入口 HTML 内容
+   * @throws AssemblerError 入口文件不存在时抛出
+   */
+  private readEntryHtml(): string {
+    const entryNode = this.config.files[this.config.entryPath];
+    if (!entryNode) {
+      throw new AssemblerError(`入口文件不存在: ${this.config.entryPath}`);
+    }
+    return entryNode.content;
+  }
+
+  /**
+   * 收集 /src 下的 .js/.jsx 模块文件（路径升序，保证打包输入确定）
+   */
+  private collectSrcModuleFiles(): BundleModuleFile[] {
+    return Object.keys(this.config.files)
+      .filter((path) => SRC_MODULE_FILE_PATTERN.test(path))
+      .sort()
+      .map((path) => {
+        const fileNode = this.config.files[path];
+        return { path, content: fileNode?.content ?? '' };
+      });
   }
 
   /**
@@ -175,12 +349,14 @@ export class Assembler {
    * 内联 JS script 标签
    * 匹配格式：<script src="./src/xxx.js"></script>、<script src="../src/xxx.js"></script>
    * 或根相对 <script src="/src/xxx.js"></script>（模型两种引用形态都出现，D-10）
-   * React CDN 模式下，含 JSX 语法的文件被包装为浏览器内编译执行脚本块
+   * React CDN 模式下，含 JSX 语法的文件被包装为浏览器内编译执行脚本块；
+   * 传入 bundle 时，打包覆盖的模块槽位改为注入单一打包脚本（P1 批次 2）
    */
   private inlineJsScripts(
     html: string,
     warnings: string[],
-    framework: ProjectFramework = 'html'
+    framework: ProjectFramework = 'html',
+    bundle?: BundleInjection
   ): { html: string; count: number } {
     let count = 0;
 
@@ -212,6 +388,22 @@ export class Assembler {
       }
 
       count++;
+
+      // 打包路径：命中打包覆盖的模块时，首个槽位注入单一打包脚本，
+      // 其余槽位替换为注释（模块已在打包脚本内，逐文件加载被整体替代）
+      if (
+        framework === 'react-cdn' &&
+        bundle &&
+        SRC_MODULE_FILE_PATTERN.test(absolutePath) &&
+        bundle.bundledPaths.has(absolutePath)
+      ) {
+        bundle.injectionState.placed = true;
+        if (!bundle.injectionState.slotUsed) {
+          bundle.injectionState.slotUsed = true;
+          return `<script>\n${bundle.script}\n</script>`;
+        }
+        return `<!-- 已并入模块打包脚本: ${relativePath} -->`;
+      }
 
       // React CDN 模式：JSX 文件包装为编译执行脚本块
       // .jsx 扩展名直接视为 JSX（启发式 containsJsx 对 return ( 换行标签等形态可能漏判，
@@ -390,14 +582,24 @@ export class Assembler {
   }
 
   /**
-   * 检查 react-cdn 模式下 /src 源码文件是否被入口 HTML 引用
-   * 组件注册约定（window.__components）依赖脚本按序加载，漏引用会导致运行时读取 undefined
+   * 收集入口 HTML 引用的本地路径集合（src/href 属性，经 resolvePath 归一）
+   * 供未引用告警（现状链路）与打包覆盖性检查（打包链路）共用
    */
-  private warnUnreferencedSourceFiles(html: string, warnings: string[]): void {
+  private collectReferencedPaths(html: string): Set<string> {
     const referenced = new Set<string>();
     for (const m of html.matchAll(/(?:src|href)\s*=\s*["']([^"']+)["']/gi)) {
       if (m[1]) referenced.add(this.resolvePath(m[1]));
     }
+    return referenced;
+  }
+
+  /**
+   * 检查 react-cdn 模式下 /src 源码文件是否被入口 HTML 引用
+   * 组件注册约定（window.__components）依赖脚本按序加载，漏引用会导致运行时读取 undefined
+   * 仅用于现状逐文件链路；打包链路的执行集由依赖图决定，见 assembleBundled
+   */
+  private warnUnreferencedSourceFiles(html: string, warnings: string[]): void {
+    const referenced = this.collectReferencedPaths(html);
     const unreferenced = Object.keys(this.config.files).filter(
       (p) => /^\/src\/.+\.(jsx|js)$/.test(p) && p !== '/src/main.jsx' && !referenced.has(p)
     );
@@ -448,6 +650,31 @@ export function assembleFiles(
 ): AssembledResult {
   const assembler = new Assembler({ entryPath, files, framework });
   return assembler.assemble();
+}
+
+/**
+ * 便捷函数（P1 批次 2）：mini-bundler 集成的项目组装（异步）。
+ *
+ * 与 assembleFiles 的关系：
+ * - html / vue-cdn 框架：内部直接走 assembleFiles 同步链路，行为完全一致
+ * - react-cdn 框架：真实 import 项目打包为单一脚本注入（见
+ *   Assembler.assembleWithModuleBundle 的决策链）；任何打包失败或
+ *   覆盖性不满足都逐字节回退到 assembleFiles 的产物
+ *
+ * 接入说明：SandboxFrame 当前在 useMemo 中同步调用 assembleFiles（本批次
+ * 边界内不改该文件），切换到本函数即启用打包链路；因 tryBundleModules
+ * 动态加载 Sucrase，本函数必须被 await。
+ */
+export async function assembleProjectFiles(
+  files: Record<string, FileNode>,
+  entryPath: string = '/index.html',
+  framework: ProjectFramework = 'html'
+): Promise<AssembledResult> {
+  const assembler = new Assembler({ entryPath, files, framework });
+  if (framework !== 'react-cdn') {
+    return assembler.assemble();
+  }
+  return assembler.assembleWithModuleBundle();
 }
 
 /**
