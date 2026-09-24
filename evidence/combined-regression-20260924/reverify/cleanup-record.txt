@@ -1,0 +1,26 @@
+# 复验轮清理记录
+
+时间：2026-09-24 UTC 16:34-16:37（本地 00:34-00:37）
+
+## 浏览器侧
+- rc_reverify_e2e 经 UI「退出登录」退出（跳转 /login），避免开窗同步覆盖 API 删除
+
+## API 删除（DELETE /api/projects/:id，均返回 {"success":true}）
+- rc_reverify_e2e：
+  - e7e86567-97b0-4649-9919-1da7aab50f70（rc复验待办，react-cdn）
+  - 96e28543-8672-4317-a77a-489da7f66b31（html 落地页）
+  - 删除后 GET /api/projects = []
+- rc_final_gate（重新登录获取 jar）：
+  - 561a22e5-0973-42a1-9bb7-f86cf6e3d345（未命名项目，存量无 framework）
+  - 删除后 GET /api/projects = []
+
+## 归一化探针项目（final1-api-probes.txt 第 7 步）
+- 66f8bce5（probe-a）与 probe-b 均已删除，list = []
+
+## 账号（无删除 API，按约定记录）
+- users 表仍存 rc_final_gate、rc_reverify_e2e 两行，仅凭证失效途径为服务端会话过期；
+  交主 agent 裁决是否需要手工清库
+
+## /tmp 夹具
+- 本轮：/tmp/rc_rev_e2e.jar、/tmp/rc_fg_cleanup.jar、/tmp/rc_rev_project_put_inner.json 已删
+- 上轮遗留（含明文测试口令）：/tmp/rc-final-*.sh/.log/.mts/.txt/.pid、/tmp/rc-pw/ 已一并删除

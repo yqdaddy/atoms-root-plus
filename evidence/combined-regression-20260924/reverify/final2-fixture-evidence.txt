@@ -1,0 +1,40 @@
+# FINAL-2 复验证据：冗余 React/ReactDOM/Babel 外链剥离 + 沙箱就绪三线并发
+
+执行轮次：返工后发布前最小复验（2026-09-24 本地 23:46 至 09-25 00:40，UTC 15:46-16:40）
+环境：vite dev @5173 + backend @3000，mainline HEAD = c10d328（冻结工作区）
+外部网络：unpkg.com / cdn.jsdelivr.net 黑洞不可达（真实浏览器环境）
+
+## 夹具构造（真实用户数据路径）
+- 账号 rc_reverify_e2e，react-cdn 项目（待办清单模板生成，id e7e86567）
+- 经 PUT /api/projects/:id 向库内 /index.html 注入 4 条 defer 外链：
+  - unpkg.com/react@18/umd/react.production.min.js
+  - unpkg.com/react-dom@18/umd/react-dom.production.min.js
+  - cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js
+  - cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js（对照组，必须保留）
+- 注入方式注意点：打开的工作区标签页会以 last-write-wins 覆盖 API 写入，
+  故先导航离开工作区 → API PUT → 整页刷新 + 点击“我的项目”触发 initializeSync 后重开项目
+
+## 沙箱就绪计时（window.__fw2 持久监听：MutationObserver iframe[srcdoc] + message[ready/from:guest]）
+- SPA 重开项目后首个 ready 信号：+216.6ms（远小于 3s 强制上限）
+- 遮罩（加载中）随 ready 解除，应用内容可见
+- 截图：reverify-21-final2-app-visible（16:06:45）、reverify-22-final2-interactive（16:10:45）
+
+## 组装产物（srcdoc）剖析（32,016 字符）
+- unpkg.com react/react-dom script 标签数：0（已剥离）
+- @babel/standalone script 标签数：0（已剥离）
+- 剥离注释标记数：3，样例：
+  <!-- 平台已剥离冗余 React 外链（模型重复引入，与内置运行时重复）：https://unpkg.com/react@18/umd/react.production.min.js -->
+- chart.js script 标签数：1（保留，未误伤）
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js" defer>
+
+## 交互性验证（跨域 sandbox iframe，CDP 点击）
+- 已完成/未完成 tab 切换生效，状态文本随点击变化（非静态展示）
+- 截图：reverify-22-final2-interactive
+
+## 代码存在性（git show c10d328 复核）
+- src/services/sandbox/assembler.ts：REDUNDANT_REACT_CDN_SRC_PATTERNS（5 条正则）、
+  isRedundantReactCdnScriptSrc（仅 http/https/协议相对 src）、stripRedundantReactCdnScripts
+  （替换为 HTML 注释 + warnings.push，仅 injectReactRuntime 且 react-cdn 时执行）
+- src/components/SandboxFrame.tsx：READY_FORCED_SIGNAL_MS=3000；
+  buildBridgeScript 三线就绪（readystatechange→interactive / DOMContentLoaded / 3s 强制）；
+  sendReady 幂等；mask = isLoading && 加载中层（约 425-429 行）

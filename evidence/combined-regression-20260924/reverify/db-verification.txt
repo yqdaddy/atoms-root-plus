@@ -1,0 +1,25 @@
+# DB 层验证（data/atoms.db，python3 sqlite3 只读查询）
+
+查询时间：2026-09-24T16:17:19Z / 16:23-16:33 / 16:35（清理后复查）
+
+## 1) e7e86567-97b0-4649-9919-1da7aab50f70（rc复验待办，rc_reverify_e2e）
+- framework: react-cdn（经 创建POST → 生成 → 两次修改PUT 全链路后仍保持）
+- updatedAt: 2026-09-24T16:12:34.756Z；files: 16；chat: 5 条
+- /index.html：<title> 已更新为「rc复验待办清单」（修改落库成功）
+- 注意：可见 H1 标题未变，因修改仅落在 /index.html 与 /DESIGN.md，
+  可见标题来自 /src/App.jsx（模型改错层，AI 修改质量问题；平台落库与渲染均正确）
+
+## 2) 96e28543-8672-4317-a77a-489da7f66b31（html 落地页回归项目）
+- framework: html（已落库）；updatedAt: 2026-09-24T16:23:43.183Z
+- files: /index.html(11497, 含 FlowTask 内容) + /README.md(760)
+- chat 仅 1 条（user）；修复循环流式输出的 assistant 消息未持久化（见缺陷 OBS-3）
+
+## 3) 存量项目 framework 缺省语义
+- 全库 132 个项目中除本轮 2 个外 framework 均为 None（存量缺省，前端按 html 处理）
+- rc_final_gate 的存量项目 561a22e5 framework 缺失（修复前创建），符合“未提供→不写字段”语义
+
+## 4) 清理终态（16:35 后）
+- DELETE /api/projects/ 对两测试账号全部项目执行成功（success:true）
+- projects 表中两账号项目数 = 0；总项目数回到存量
+- users 表保留 rc_final_gate(创建于14:37)、rc_reverify_e2e(创建于15:49)，
+  无账号删除 API，按约定记录不处理

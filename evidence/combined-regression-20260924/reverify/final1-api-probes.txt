@@ -1,0 +1,32 @@
+# FINAL-1 API 归一化探针（新鲜重跑归档）
+执行时间: 2026-09-24T16:37:01Z  环境: backend http://localhost:3000 (mainline HEAD c10d328 冻结工作区)
+
+## 1) 登录测试账号 rc_final_gate（该账号项目已清空，仅用作探针载体）
+login OK
+
+## 2) POST 不带 framework → 期待字段缺失（ABSENT）
+resp: {"id":"66f8bce5-e038-4548-a860-e1141f6d7a01"}
+
+## 3) PUT framework=react-cdn → 期待原样保留
+{"success":true}
+GET 校验:
+framework = react-cdn
+
+## 4) PUT framework=invalid-value → 期待回退 html
+{"success":true}
+GET 校验:
+framework = html
+
+## 5) PUT 不带 framework 键 → 期待保持现值 html
+{"success":true}
+GET 校验:
+framework = html name = probe-a-renamed
+
+## 6) POST 直接带非法 framework → 期待回退 html
+framework = html
+
+## 7) 清理探针项目
+{"success":true}
+{"success":true}
+list after cleanup:
+[]

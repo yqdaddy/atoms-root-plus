@@ -1,0 +1,28 @@
+2026-09-24T16:17:45Z
+ ✓ src/components/MessageErrorBoundary.test.tsx (14 tests) 624ms
+stderr | src/components/SandboxFrame.test.tsx > SandboxFrame - 打包链路激活（P1 批次 2） > 竞态防护：挂起中的旧项目请求在切换后被丢弃，只显示新项目产物
+[SandboxFrame] 组装警告: [ [32m'以下源码文件未被入口 HTML 引用，将不会执行（react-cdn 组件注册依赖脚本加载顺序）: /src/App.jsx'[39m ]
+
+stderr | src/components/SandboxFrame.test.tsx > SandboxFrame - 打包链路激活（P1 批次 2） > 竞态防护：已显示的旧项目打包产物在切换后的首帧立即被替换
+[SandboxFrame] 组装警告: [ [32m'以下源码文件未被入口 HTML 引用，将不会执行（react-cdn 组件注册依赖脚本加载顺序）: /src/App.jsx'[39m ]
+
+ ✓ src/hooks/useKeybinding.test.ts (20 tests) 61ms
+stderr | src/components/SandboxFrame.test.tsx > SandboxFrame - 打包链路激活（P1 批次 2） > 组装失败：回退现状链路产物，不白屏不崩溃
+[SandboxFrame] 组装警告: [ [32m'以下源码文件未被入口 HTML 引用，将不会执行（react-cdn 组件注册依赖脚本加载顺序）: /src/App.jsx'[39m ]
+
+stderr | src/components/SandboxFrame.test.tsx > SandboxFrame - 打包链路激活（P1 批次 2） > 组装失败：回退现状链路产物，不白屏不崩溃
+[SandboxFrame] 组装警告: [ [32m'以下源码文件未被入口 HTML 引用，将不会执行（react-cdn 组件注册依赖脚本加载顺序）: /src/App.jsx'[39m ]
+
+ ✓ src/components/SandboxFrame.test.tsx (9 tests) 2314ms
+   ✓ SandboxFrame - 打包链路激活（P1 批次 2） > 真实 import 项目：首帧为同步逐文件产物，防抖后升级为单一打包产物  464ms
+   ✓ SandboxFrame - 打包链路激活（P1 批次 2） > 无 import 存量项目：升级产物与首帧同步产物逐字节一致（零行为变化）  304ms
+   ✓ SandboxFrame - 打包链路激活（P1 批次 2） > 竞态防护：已显示的旧项目打包产物在切换后的首帧立即被替换  549ms
+   ✓ SandboxFrame - 打包链路激活（P1 批次 2） > html 框架多文件项目：不触发异步打包请求  419ms
+
+ Test Files  29 passed (29)
+      Tests  505 passed (505)
+   Start at  00:17:48
+   Duration  14.02s (transform 2.46s, setup 0ms, collect 7.48s, tests 9.56s, environment 5.46s, prepare 5.49s)
+
+
+[exited with code 0]

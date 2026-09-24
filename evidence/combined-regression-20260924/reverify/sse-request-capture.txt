@@ -1,0 +1,19 @@
+# SSE 请求体捕获（window.fetch 猴子补丁钩子，MAIN world 注入）
+
+## 1) react-cdn 项目第二次迭代（标题修改），16:12 前后
+{"url":"/api/llm/generate","method":"POST","bodyLen":21475,
+ "parsed":{"promptHead":"把应用标题从我的待办清单改为rc复验待办清单",
+           "framework":"react-cdn",
+           "hasCurrentFiles":true,"currentFileCount":16,
+           "hasCurrentHtml":true,"chatTurns":3}}
+结论：SSE 请求携带 options.framework="react-cdn"，随 16 个 currentFiles 完整上送 →
+服务端/组装链据此走 react-cdn 打包路径（FINAL-1 全链路的请求侧证据）。
+
+## 2) html 模式新鲜生成（落地页 chip），2026-09-24T16:18:53.519Z
+[{"url":"/api/llm/generate","method":"POST","bodyLen":82,
+  "parsed":{"promptHead":"做一个产品落地页，展示产品特性",
+            "framework":"html",
+            "hasCurrentFiles":false,"currentFileCount":0},
+  "ts":"2026-09-24T16:18:53.519Z"}]
+结论：html 模式请求 framework="html"，新建项目不带 currentFiles（正常）。
+截图佐证：reverify-27/28/29 底部绿色钩子输出可见 framework":"html"。
