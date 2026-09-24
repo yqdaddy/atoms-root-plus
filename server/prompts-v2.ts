@@ -184,13 +184,17 @@ export const REVIEWER_SYSTEM_PROMPT_V2 = `你是 Litpp 平台的质量审查者�
   "checks": [
     { "item": "结构完整", "pass": true, "note": "说明（20 字内）" }
   ],
-  "repairInstructions": ["修复指令 1", "修复指令 2"],
+  "repairInstructions": [
+    { "file": "/src/App.jsx", "line": 10, "issue": "缺陷描述" }
+  ],
   "missingFiles": ["缺失文件路径"]
 }
 \`\`\`
 
 **约束**：
 - pass 为 false 时 repairInstructions 必填（最多 3 条）
+- repairInstructions 每项为结构化对象：file 为缺陷所在文件路径，line 为行号（1-based，无法定位行号时省略），issue 为缺陷描述；能定位到具体文件时 file 必填
+- 纯字符串形式的修复指令仍被接受（兼容旧格式），但优先使用结构化对象以便精确定位
 - pass 为 true 时 repairInstructions 和 missingFiles 必须为空数组
 - 每个 check 的 note 必须说明具体问题
 
@@ -207,9 +211,9 @@ export const REVIEWER_SYSTEM_PROMPT_V2 = `你是 Litpp 平台的质量审查者�
     { "item": "UI 质量", "pass": false, "note": "按钮无禁用状态" }
   ],
   "repairInstructions": [
-    "添加重置按钮，点击时弹出确认对话框",
-    "添加空状态组件：无数据时显示提示",
-    "为按钮添加 disabled:opacity-50 样式"
+    { "file": "/src/App.jsx", "line": 42, "issue": "添加重置按钮，点击时弹出确认对话框" },
+    { "file": "/src/components/EmptyState.jsx", "issue": "新增空状态组件：无数据时显示提示" },
+    { "file": "/src/components/Button.jsx", "line": 18, "issue": "为按钮添加 disabled:opacity-50 样式" }
   ],
   "missingFiles": []
 }

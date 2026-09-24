@@ -119,6 +119,104 @@ describe('validateProject：整体行为', () => {
   });
 });
 
+describe('validateProject：E_CDN_DOMAIN（D-8 资源域白名单）', () => {
+  it('script src 引用 unpkg 报 E_CDN_DOMAIN，带文件与域名', () => {
+    const project = {
+      ...HTML_PROJECT,
+      '/index.html': {
+        path: '/index.html',
+        content: '<!DOCTYPE html><html><head><script src="https://unpkg.com/react@18/umd/react.production.min.js"></script></head><body>hi</body></html>',
+      },
+    };
+    const result = validateProject(project, 'html');
+    const issue = result.errors.find((e) => e.code === 'E_CDN_DOMAIN');
+    expect(issue).toBeDefined();
+    expect(issue!.file).toBe('/index.html');
+    expect(issue!.message).toContain('unpkg.com');
+    expect(issue!.message).toContain('cdn.jsdelivr.net');
+  });
+
+  it('jsdelivr 与 tailwindcss 白名单域名通过，不报错', () => {
+    const project = {
+      ...HTML_PROJECT,
+      '/index.html': {
+        path: '/index.html',
+        content: '<!DOCTYPE html><html><head>'
+          + '<script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>'
+          + '<script src="https://cdn.tailwindcss.com"></script>'
+          + '<link href="https://cdn.jsdelivr.net/npm/bootstrap@5/dist/css.min.css" rel="stylesheet">'
+          + '</head><body>hi</body></html>',
+      },
+    };
+    expect(validateProject(project, 'html').errors.some((e) => e.code === 'E_CDN_DOMAIN')).toBe(false);
+  });
+
+  it('CSS @import 非白名单域名同样命中', () => {
+    const project = {
+      ...HTML_PROJECT,
+      '/index.html': {
+        path: '/index.html',
+        content: '<!DOCTYPE html><html><head><style>@import url("https://fonts.googleapis.com/css2?family=X");</style></head><body>hi</body></html>',
+      },
+    };
+    const issue = validateProject(project, 'html').errors.find((e) => e.code === 'E_CDN_DOMAIN');
+    expect(issue).toBeDefined();
+    expect(issue!.message).toContain('fonts.googleapis.com');
+  });
+
+  it('误报面控制：相对路径、锚点、data URI、代码内普通字符串不报错', () => {
+    const project = {
+      ...HTML_PROJECT,
+      '/index.html': {
+        path: '/index.html',
+        content: '<!DOCTYPE html><html><head>'
+          + '<link rel="icon" href="/favicon.ico">'
+          + '<script src="./app.js"></script>'
+          + '</head><body><a href="#top">top</a>'
+          + '<script>const apiDocs = "https://unpkg.com/just-a-string-not-a-ref";</script>'
+          + '</body></html>',
+      },
+    };
+    expect(validateProject(project, 'html').errors.some((e) => e.code === 'E_CDN_DOMAIN')).toBe(false);
+  });
+
+  it('协议相对 //host 形态视为外部引用并命中白名单检查', () => {
+    const project = {
+      ...HTML_PROJECT,
+      '/index.html': {
+        path: '/index.html',
+        content: '<!DOCTYPE html><html><head><script src="//unpkg.com/react@18/umd/react.min.js"></script></head><body>hi</body></html>',
+      },
+    };
+    const issue = validateProject(project, 'html').errors.find((e) => e.code === 'E_CDN_DOMAIN');
+    expect(issue).toBeDefined();
+    expect(issue!.message).toContain('unpkg.com');
+  });
+
+  it('cdnScanPaths 限定扫描范围：存量文件的历史引用不阻塞本次产出校验', () => {
+    const legacy = {
+      path: '/legacy.html',
+      content: '<!DOCTYPE html><html><head><script src="https://unpkg.com/old-lib.js"></script></head><body>old</body></html>',
+    };
+    const fresh = {
+      path: '/index.html',
+      content: '<!DOCTYPE html><html><head><script src="https://cdn.jsdelivr.net/npm/x/index.js"></script></head><body>hi</body></html>',
+    };
+    // 只扫本次产出的 /index.html：存量 /legacy.html 的 unpkg 引用不报
+    const scoped = validateProject(
+      { '/index.html': fresh, '/legacy.html': legacy },
+      'html',
+      { cdnScanPaths: ['/index.html'] },
+    );
+    expect(scoped.errors.some((e) => e.code === 'E_CDN_DOMAIN')).toBe(false);
+
+    // 不传 cdnScanPaths：全量扫描，存量引用命中
+    const full = validateProject({ '/index.html': fresh, '/legacy.html': legacy }, 'html');
+    const issue = full.errors.find((e) => e.code === 'E_CDN_DOMAIN');
+    expect(issue?.file).toBe('/legacy.html');
+  });
+});
+
 describe('componentName', () => {
   it('从路径提取 PascalCase 组件名', () => {
     expect(componentName('/src/components/Counter.jsx')).toBe('Counter');

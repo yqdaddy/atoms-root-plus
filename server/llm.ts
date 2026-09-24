@@ -1141,6 +1141,12 @@ export async function continueAfterApproval(
     let finalFiles: Record<string, { path: string; content: string; language: FileLanguage; updatedAt: string }> | undefined;
     let changeList: ChangeList | undefined;
     let multiFileOutput: MultiFileOutput | undefined;
+    // 本次 LLM 实际触碰（生成/修改）的文件路径，E_CDN_DOMAIN 扫描范围（D-8/D-9）。
+    // diff 与 changes 容错路径设置为此轮变更实际声明的文件集合（multiFileOutput
+    // 在这两条路径上是合并后的全量文件或保持 undefined，不能作为扫描范围，
+    // 否则存量项目的历史外域引用会误报）；纯 files 生成路径保持 undefined，
+    // 由校验点回退为 multiFileOutput 全部路径。每轮尝试开始时重置，防上一轮残留。
+    let cdnTouchedPaths: string[] | undefined;
     let rescueNotice: string | null = null;
     let rescuedPaths: string[] = [];
     // 结构校验最终失败时的问题清单（降级交付不阻塞 done，见循环后处理）
@@ -1150,10 +1156,16 @@ export async function continueAfterApproval(
     const MAX_PARSE_ATTEMPTS = 3;
     // 重试循环
     for (let attempt = 0; attempt < MAX_PARSE_ATTEMPTS; attempt++) {
+      // 每轮尝试重置触碰集，防止上一轮失败尝试的残留污染本轮扫描范围
+      cdnTouchedPaths = undefined;
       // 重试时在提示词中强调格式要求，并向前端广播重试进度（retry 事件 + generate 阶段 delta）
       const retryMessages: ChatMessage[] = [...generateMessages];
       if (retryCount > 0 && formatErrorHint) {
         const isFinalStrategySwitch = retryCount >= MAX_PARSE_ATTEMPTS - 1;
+        // 重试原因区分：结构校验失败（hint 由 validateProject 接线写入，前缀固定）
+        // 与输出格式/解析失败，用户可见文案按来源显示，不再一律说"格式不符合要求"
+        const isStructureRetry = formatErrorHint.startsWith('项目结构不完整');
+        const retryReasonText = isStructureRetry ? '项目结构不完整' : '输出格式不符合要求';
         // 策略切换：两次格式纠正仍失败时，放弃"纠正"改用最强指令——
         // 给出最小正确的 JSON 结构示例，要求模型忽略增量修改思路、从零输出完整项目
         const strategySwitch = isFinalStrategySwitch
@@ -1162,7 +1174,7 @@ export async function continueAfterApproval(
         const originalUserMsg = retryMessages[1]!.content;
         retryMessages[1] = {
           role: 'user',
-          content: `${originalUserMsg}\n\n【重要】上次输出格式错误：${formatErrorHint}\n\n请确保输出格式正确：${useDiffMode ? 'diff 模式必须输出 { "changes": [...] } 格式，包含 file、edits、summary 字段' : '必须输出 { "files": [...] } 格式，每个文件包含 path、content、language 字段；禁止输出 { "changes": [...] } 变更清单格式'}${strategySwitch}`,
+          content: `${originalUserMsg}\n\n【重要】${isStructureRetry ? `上次输出存在结构问题：${formatErrorHint}` : `上次输出格式错误：${formatErrorHint}`}\n\n请确保输出格式正确：${useDiffMode ? 'diff 模式必须输出 { "changes": [...] } 格式，包含 file、edits、summary 字段' : '必须输出 { "files": [...] } 格式，每个文件包含 path、content、language 字段；禁止输出 { "changes": [...] } 变更清单格式'}${strategySwitch}`,
         };
         // 前端可见的重试进度：协议 retry 事件（liveEngine 在思考区渲染）+ 聊天区 delta 文本
         onEvent({
@@ -1172,14 +1184,14 @@ export async function continueAfterApproval(
               attempt: retryCount,
               maxRetries: MAX_PARSE_ATTEMPTS - 1,
               delayMs: 0,
-              errorMessage: '输出格式不符合要求',
+              errorMessage: retryReasonText,
             },
           },
         });
         onEvent({
           type: 'delta',
           payload: {
-            text: `\n[输出格式不符合要求，自动重试中（第 ${retryCount}/${MAX_PARSE_ATTEMPTS - 1} 次）${isFinalStrategySwitch ? '，已切换为完整重生成策略' : ''}]\n`,
+            text: `\n[${retryReasonText}，自动重试中（第 ${retryCount}/${MAX_PARSE_ATTEMPTS - 1} 次）${isFinalStrategySwitch ? '，已切换为完整重生成策略' : ''}]\n`,
             phase: 'generate',
           },
         });
@@ -1246,6 +1258,8 @@ export async function continueAfterApproval(
           console.info(`[continueAfterApproval] 已应用 ${appliedCount} 处编辑`);
 
           const now = new Date().toISOString();
+          // CDN 扫描范围 = 本轮变更实际声明的文件（finalFiles 是合并后的全量，不能作范围）
+          cdnTouchedPaths = changeList.changes.map((c) => c.file);
           finalFiles = {};
           for (const [path, file] of Object.entries(newFiles)) {
             finalFiles[path] = {
@@ -1260,52 +1274,58 @@ export async function continueAfterApproval(
           console.error('[continueAfterApproval] diff 解析失败:', errorMsg);
           changeList = undefined;
 
-          // 检测是否应该重试
-          shouldRetry = retryCount < MAX_PARSE_ATTEMPTS - 1 && (errorMsg.includes('格式') || generatedOutput.includes('"files"'));
-
-          // 如果不重试，尝试降级为多文件解析
-          if (!shouldRetry) {
-            try {
-              const parseResult = parseOutput(generatedOutput);
-              if (parseResult.type === 'conversation') {
+          // 降级判别（顺序即优先级）：
+          // 1) parseOutput：模型误输出全量 files JSON → 直接采用；纯文本 → 转对话
+          // 2) parseOutput 失败 → 截断抢救；抢救也失败 → 一律进入重试判定。
+          //    解析失败不设错误类型门槛：上游产出损坏（截断/非法 JSON/字段级
+          //    格式错，含 changes 的 edits.type 非法等）本就属于该重试的生成故障，
+          //    仅受 MAX_PARSE_ATTEMPTS 上限约束；原"errorMsg 含'格式'才重试"
+          //    的收窄判定会让多数解析失败零重试直接终局，与终局文案
+          //    "已自动重试 2 次"不符（用户报障根因）。
+          //    注：changes 格式在此不再走 convertChangesToFiles（它无文件上下文，
+          //    modify 明明有 currentFiles 却抛"需要现有文件"，属误导性死路）；
+          //    坏 changes 的自愈路径 = 带错误清单重试（模型按 hint 修正字段），
+          //    非 diff 迭代的 changes 容错（带 currentFiles 的 applyChanges）
+          //    已在下方 else 分支独立存在。
+          try {
+            const parseResult = parseOutput(generatedOutput);
+            if (parseResult.type === 'conversation') {
+              pendingSessions.delete(sessionId);
+              onEvent({ type: 'delta', payload: { text: parseResult.content || '', phase: 'generate' } });
+              onEvent({
+                type: 'done',
+                payload: {
+                  html: '',
+                  files: {},
+                  analysis: parseResult.content,
+                  stats: result.usage ? {
+                    inputTokens: result.usage.prompt_tokens,
+                    outputTokens: result.usage.completion_tokens,
+                  } : undefined,
+                },
+              });
+              return;
+            }
+            multiFileOutput = { files: parseResult.files! };
+            parseSuccess = true;
+          } catch {
+            const rescued = repairTruncatedMultiFileOutput(generatedOutput);
+            if (!rescued) {
+              if (retryCount < MAX_PARSE_ATTEMPTS - 1) {
+                // 预算内一律重试
+                shouldRetry = true;
+                formatErrorHint = errorMsg;
+              } else {
                 pendingSessions.delete(sessionId);
-                onEvent({ type: 'delta', payload: { text: parseResult.content || '', phase: 'generate' } });
-                onEvent({
-                  type: 'done',
-                  payload: {
-                    html: '',
-                    files: {},
-                    analysis: parseResult.content,
-                    stats: result.usage ? {
-                      inputTokens: result.usage.prompt_tokens,
-                      outputTokens: result.usage.completion_tokens,
-                    } : undefined,
-                  },
-                });
+                onEvent({ type: 'error', payload: { message: buildFinalParseErrorMessage(retryCount) } });
                 return;
               }
-              multiFileOutput = { files: parseResult.files! };
-              parseSuccess = true;
-            } catch (parseError) {
-              const parseErrorMsg = parseError instanceof Error ? parseError.message : '输出解析失败';
-              const rescued = repairTruncatedMultiFileOutput(generatedOutput);
-              if (!rescued) {
-                pendingSessions.delete(sessionId);
-                // 最终失败：给用户明确说明与重试指引，技术细节只留服务端日志
-                onEvent({
-                  type: 'error',
-                  payload: { message: `生成结果格式不符合要求，已自动重试 ${MAX_PARSE_ATTEMPTS - 1} 次仍未成功。请点击重试再次生成，或换一种描述方式（例如注明"重新生成完整页面"）。` },
-                });
-                return;
-              }
+            } else {
               rescuedPaths = rescued.files.map(f => f.path);
               rescueNotice = `输出因长度限制被截断，已恢复 ${rescuedPaths.length} 个已完成文件`;
               multiFileOutput = rescued;
               parseSuccess = true;
             }
-          } else {
-            // 设置重试提示
-            formatErrorHint = errorMsg;
           }
         }
       } else {
@@ -1372,6 +1392,8 @@ export async function continueAfterApproval(
                 changeList = toleratedList;
                 // 全量文件走正常交付流程（后续审查、finalFiles 组装与 diff 模式共用）
                 multiFileOutput = { files: Object.values(newFiles) };
+                // CDN 扫描范围 = 本轮变更实际声明的文件（newFiles 是合并后的全量，不能作范围）
+                cdnTouchedPaths = toleratedList.changes.map((c) => c.file);
                 parseSuccess = true;
                 console.info(
                   `[continueAfterApproval] changes 格式容错成功: 应用 ${appliedCount} 处编辑，交付 ${Object.keys(newFiles).length} 个文件`
@@ -1387,20 +1409,23 @@ export async function continueAfterApproval(
           }
 
           if (!parseSuccess) {
-            // 检测是否是格式错误（files vs changes）
-            const isFormatError = errorMsg.includes('输出格式错误') ||
-                                 (generatedOutput.includes('"changes"') && !generatedOutput.includes('"files"'));
-            shouldRetry = retryCount < MAX_PARSE_ATTEMPTS - 1 && isFormatError;
-
-            if (!shouldRetry) {
-              // 不重试，尝试抢救
+            // 解析失败一律进入重试判定（conversation 已在 try 内提前返回），
+            // 仅受 MAX_PARSE_ATTEMPTS 上限约束。原 isFormatError 门槛（仅
+            // "输出格式错误"消息可重试）导致截断/非法 JSON/文件级格式错误
+            // 零重试直接终局，却谎报"已自动重试 2 次"（用户报障根因）。
+            // 抢救延后为最后手段：预算内先重试（成功率高），耗尽才抢救。
+            if (retryCount < MAX_PARSE_ATTEMPTS - 1) {
+              shouldRetry = true;
+              formatErrorHint = errorMsg;
+              console.log('[continueAfterApproval] 解析失败，准备重试:', errorMsg);
+            } else {
               const rescued = repairTruncatedMultiFileOutput(generatedOutput);
               if (!rescued) {
                 pendingSessions.delete(sessionId);
-                // 最终失败：给用户明确说明与重试指引，技术细节只留服务端日志
+                // 最终失败：文案与真实重试次数一致，技术细节只留服务端日志
                 onEvent({
                   type: 'error',
-                  payload: { message: `生成结果格式不符合要求，已自动重试 ${MAX_PARSE_ATTEMPTS - 1} 次仍未成功。请点击重试再次生成，或换一种描述方式（例如注明"重新生成完整页面"）。` },
+                  payload: { message: buildFinalParseErrorMessage(retryCount) },
                 });
                 return;
               }
@@ -1408,10 +1433,6 @@ export async function continueAfterApproval(
               rescueNotice = `输出因长度限制被截断，已恢复 ${rescuedPaths.length} 个已完成文件`;
               multiFileOutput = rescued;
               parseSuccess = true;
-            } else {
-              // 设置重试提示
-              formatErrorHint = errorMsg;
-              console.log('[continueAfterApproval] 检测到格式错误，准备重试');
             }
           }
         }
@@ -1443,11 +1464,17 @@ export async function continueAfterApproval(
             }
           }
           // 确定性结构校验：注入保证类规则仅在 create 全量流水线强制，
-          // modify/diff 仅查入口（P0 之前存量项目无 README/注册约定，不误报）
+          // modify/diff 仅查入口（P0 之前存量项目无 README/注册约定，不误报）；
+          // CDN 域白名单仅扫本次 LLM 实际触碰的文件（D-9）：diff/容错路径用
+          // 变更声明的文件集合，纯 files 生成路径回退为 multiFileOutput 全部
+          // 路径——存量项目的历史外部引用两种路径下都不误报
           const enforceP0 = !useDiffMode && !isIteration;
           const validation = validateProject(finalFiles, framework, {
             enforceScaffold: enforceP0,
             enforceGlobalReg: enforceP0,
+            cdnScanPaths: multiFileOutput
+              ? (cdnTouchedPaths ?? multiFileOutput.files.map((f) => f.path))
+              : cdnTouchedPaths,
           });
           if (validation.errors.length > 0) {
             const errorSummary = validation.errors.map((e) => `${e.file} ${e.message}`).join('；');
@@ -1481,10 +1508,11 @@ export async function continueAfterApproval(
         : toFileNodeRecord(multiFileOutput);
     }
 
-    // 如果仍然没有 finalFiles，说明解析失败且重试耗尽
+    // 如果仍然没有 finalFiles，说明解析失败且重试耗尽（此时 retryCount 已
+    // 递增至 MAX_PARSE_ATTEMPTS，实际消耗重试次数 = MAX_PARSE_ATTEMPTS - 1）
     if (!finalFiles) {
       pendingSessions.delete(sessionId);
-      onEvent({ type: 'error', payload: { message: `生成结果格式不符合要求，已自动重试 ${MAX_PARSE_ATTEMPTS - 1} 次仍未成功。请点击重试或换一种描述方式。` } });
+      onEvent({ type: 'error', payload: { message: buildFinalParseErrorMessage(MAX_PARSE_ATTEMPTS - 1) } });
       return;
     }
 
@@ -1509,6 +1537,8 @@ export async function continueAfterApproval(
 
     // 收集审查阶段的 usage（如果有）
     let reviewUsage: LLMUsage | undefined;
+    let repairUsage: LLMUsage | undefined;
+    let reReviewUsage: LLMUsage | undefined;
 
     // 阶段 3：审查（diff 模式跳过审查，非 diff 模式可配置跳过）
     if (useDiffMode) {
@@ -1531,6 +1561,187 @@ export async function continueAfterApproval(
         { onRetry: forwardRetry }
       );
       reviewUsage = reviewResult.usage;
+
+      // ── 审查修复循环（第 3 层质量闸门，D-6 扩展为多轮 + 行级定位 + 修复自检）──
+      // 三层自愈机制按序触发、按阶段互斥（第 1/2 层只发生在工程师阶段，本层只在
+      // 审查阶段之后），预算互相独立，避免叠罗汉式重试打爆 token。
+      // 单次生成的模型调用预算封顶表：
+      //   分析师        1 次（固定）
+      //   工程师       ≤3 次（与第 1 层格式重试 / 第 2 层结构重试共享预算，MAX_PARSE_ATTEMPTS=3）
+      //   审查者        1 次（固定；diff 模式 0 次）
+      //   修复工程师   ≤2 次（MAX_REPAIR_ROUNDS=2，每轮 1 次）
+      //   复审         ≤2 次（每轮修复应用后 1 次，与修复轮数一一对应）
+      //   ─────────────────────────────────
+      //   总计         ≤9 次（非 diff 全链路极限；正常收敛流程 3-5 次）
+      // 能进入审查说明前两层已收敛（格式合法、结构规则通过），本层只处理
+      // 模型可自修的质量缺陷（如悬空语法、功能缺失），不与前两层叠加触发。
+      // 降级铁律：任何一轮失败（网络 / 解析 / 校验）都保留已有产物按现状交付，
+      // 绝不让修复循环把 done 变成 error。
+      const MAX_REPAIR_ROUNDS = 2;
+      let currentVerdict = parseReviewVerdict(reviewResult.content);
+      let repairRound = 0;
+      // 循环终态：converged=复审通过或无修复轮发生（默认值，D-7 修复：首审直接
+      // 通过 / fail 无指令时循环不进入，必须视为正常交付而非降级）；
+      // network-failed=复审网络失败；repair-not-applied=修复未应用（调用失败/
+      // 不可解析/校验不过）；still-failing=轮数耗尽仍不过。
+      // 循环内每条退出路径都会显式赋值，初值只在"零修复轮"时生效。
+      let loopOutcome: 'converged' | 'network-failed' | 'repair-not-applied' | 'still-failing' = 'converged';
+
+      while (
+        repairRound < MAX_REPAIR_ROUNDS &&
+        currentVerdict && !currentVerdict.pass && currentVerdict.repairInstructions.length > 0
+      ) {
+        repairRound += 1;
+        onEvent({ type: 'delta', payload: { text: `\n[审查未通过，自动修复中（第 ${repairRound}/${MAX_REPAIR_ROUNDS} 轮）]\n`, phase: 'review' } });
+
+        // 行级定位渲染（D-6）：结构化指令输出"文件 第 N 行：缺陷"，
+        // 旧格式纯字符串原样带序号，工程师获得精确定位上下文
+        const repairInstructionList = currentVerdict.repairInstructions
+          .map((r, i) => `${i + 1}. ${r.file ? `${r.file}${r.line ? ` 第 ${r.line} 行` : ''}：` : ''}${r.issue}`)
+          .join('\n');
+        const repairFilesJson = JSON.stringify({
+          files: Object.values(finalFiles).map(({ path, content, language }) => ({ path, content, language })),
+        });
+        const repairMessages: ChatMessage[] = [
+          { role: 'system', content: buildEngineerSystemPrompt(framework) },
+          { role: 'user', content: `## 功能清单\n${featureListStr}\n\n## 当前项目文件\n${repairFilesJson}\n\n## 审查发现的缺陷（修复指令）\n${repairInstructionList}\n\n请针对以上缺陷修复项目，输出修复后的**全部文件**（未修改的文件原样保留）。输出格式与生成阶段一致：{"files":[{"path":"/index.html","content":"...","language":"html"}],"selfCheck":{"fixed":[已修复的指令序号],"unfixed":[未能修复的序号],"summary":"一句话修复说明"}}，其中 selfCheck 为修复自检声明（逐条核对上述指令后如实填写），禁止输出其他文字。` },
+        ];
+
+        let repairApplied = false;
+        let repairIsValid = false;
+        try {
+          const repairResult = await streamChatCompletionWithUsage(
+            repairMessages,
+            (text) => onEvent({ type: 'delta', payload: { text, phase: 'review' } }),
+            combinedSignal,
+            { onRetry: forwardRetry }
+          );
+          repairUsage = addUsage(repairUsage, repairResult.usage);
+
+          // 修复输出解析：正常 parseOutput 优先，截断时抢救一次；不再套格式重试
+          // 循环（第 1 层预算不叠加），解析失败则放弃修复保留原产物
+          const parsedRepair = parseOutput(repairResult.content);
+          const repairedFiles = parsedRepair.type !== 'conversation' && parsedRepair.files && parsedRepair.files.length > 0
+            ? parsedRepair.files
+            : repairTruncatedMultiFileOutput(repairResult.content)?.files;
+
+          // 修复自检（D-6）：覆盖面参考而非硬闸门；未声明（旧格式）容忍，
+          // 声明未修复项时以 warning 通道如实告知用户，不阻塞交付
+          const selfCheck = parseSelfCheck(repairResult.content);
+          if (selfCheck && selfCheck.unfixed.length > 0) {
+            console.warn(`[continueAfterApproval] 修复自检声明 ${selfCheck.unfixed.length} 项缺陷未修复:`, selfCheck.summary || '(无说明)');
+            onEvent({ type: 'warning', payload: { message: `提示：工程师自检声明仍有 ${selfCheck.unfixed.length} 项缺陷未能修复${selfCheck.summary ? `（${selfCheck.summary}）` : ''}。` } });
+          } else if (selfCheck) {
+            console.info(`[continueAfterApproval] 修复自检通过（${selfCheck.fixed.length} 项已修复）:`, selfCheck.summary);
+          }
+
+          if (repairedFiles && repairedFiles.length > 0) {
+            const mergeBase = isIteration && session.originalFiles ? session.originalFiles : currentFiles;
+            const repairedRecord = isIteration && mergeBase
+              ? toFileNodeRecord({ files: repairedFiles }, mergeBase)
+              : toFileNodeRecord({ files: repairedFiles });
+            // 修复产物可能丢失平台注入文档：仅缺空时补齐（与首生成同一约定）
+            if (!useDiffMode && !isIteration) {
+              const blueprint = parseBlueprint(session.features);
+              const scaffold = buildScaffoldDocs(blueprint, Object.keys(repairedRecord), framework);
+              for (const [scaffoldPath, scaffoldFile] of scaffold) {
+                const existing = repairedRecord[scaffoldPath];
+                if (!existing || existing.content.trim().length === 0) {
+                  repairedRecord[scaffoldPath] = { ...scaffoldFile, updatedAt: new Date().toISOString() };
+                }
+              }
+            }
+            // 修复产物先过确定性结构校验（与首生成同一作用域）：校验不过不替换，
+            // 宁可保留原产物降级，也不用带硬伤的产物换掉可展示的产物
+            const enforceP0 = !useDiffMode && !isIteration;
+            const revalidation = validateProject(repairedRecord, framework, {
+              enforceScaffold: enforceP0,
+              enforceGlobalReg: enforceP0,
+              // 修复输出是全量文件（含原样保留的存量文件），CDN 扫描同样只看
+              // 本次会话实际触碰的文件集合（D-9 同类防线）
+              cdnScanPaths: cdnTouchedPaths ?? repairedFiles.map((f) => f.path),
+            });
+            repairApplied = true;
+            repairIsValid = revalidation.errors.length === 0;
+            if (repairIsValid) {
+              finalFiles = repairedRecord;
+              console.info(`[continueAfterApproval] 审查修复应用（第 ${repairRound} 轮）: ${repairedFiles.length} 个文件，结构校验通过`);
+            } else {
+              console.warn('[continueAfterApproval] 修复产物结构校验未通过，保留原产物:', revalidation.errors.map((e) => `${e.code}:${e.file}`).join('; '));
+            }
+          } else {
+            console.warn('[continueAfterApproval] 修复输出不可解析，保留原产物');
+          }
+        } catch (repairError) {
+          // 修复调用失败（网络等）：不传播到外层 catch（避免毁掉已有合格产物），
+          // 按原样降级交付
+          console.warn('[continueAfterApproval] 修复调用失败，保留原产物:', repairError instanceof Error ? repairError.message : repairError);
+        }
+
+        if (repairApplied && repairIsValid) {
+          // 复审一次（输入与首审同构），通过则收敛交付。
+          // D-5：复审调用与修复调用同构的降级保护——网络失败不穿透外层 catch
+          // （否则已过结构校验的修复产物随 error 事件整次丢失）；保留修复产物，
+          // 按现状降级交付。
+          const reReviewFilesJson = JSON.stringify({
+            files: Object.values(finalFiles).map(({ path, content, language }) => ({ path, content, language })),
+          }, null, 2);
+          const reReviewMessages: ChatMessage[] = [
+            { role: 'system', content: REVIEWER_SYSTEM_PROMPT },
+            { role: 'user', content: `## 功能清单\n${featureListStr}\n\n## 待审查的项目文件（修复后）\n${reReviewFilesJson}\n\n请审查这个多文件项目。` },
+          ];
+          try {
+            const reReviewResult = await streamChatCompletionWithUsage(
+              reReviewMessages,
+              (text) => onEvent({ type: 'delta', payload: { text, phase: 'review' } }),
+              combinedSignal,
+              { onRetry: forwardRetry }
+            );
+            reReviewUsage = addUsage(reReviewUsage, reReviewResult.usage);
+            const reVerdict = parseReviewVerdict(reReviewResult.content);
+            if (reVerdict && reVerdict.pass) {
+              loopOutcome = 'converged';
+              break;
+            }
+            // 未通过（含裁决不可解析）：携带新一轮修复指令进入下一轮
+            //（裁决不可解析时 currentVerdict 置 null，循环条件自然终止 → 降级）
+            currentVerdict = reVerdict;
+            loopOutcome = 'still-failing';
+          } catch (reReviewError) {
+            console.warn('[continueAfterApproval] 复审调用失败，保留修复产物按现状交付:', reReviewError instanceof Error ? reReviewError.message : reReviewError);
+            loopOutcome = 'network-failed';
+            break;
+          }
+        } else {
+          // 修复未应用（调用失败 / 输出不可解析 / 产物校验不过）：按现状降级，
+          // 对未变更的产物复审没有意义，直接结束循环
+          loopOutcome = 'repair-not-applied';
+          break;
+        }
+      }
+
+      // 首审 fail 但无修复指令（或裁决可解析但指令为空）：零修复轮发生，
+      // 不进入上面的降级 gate；给一句如实提示，文案不得声称做过修复（D-7）
+      if (repairRound === 0 && currentVerdict && !currentVerdict.pass) {
+        const notice = '提示：审查发现部分问题但未提供修复指令，本次按现状交付；如仍有问题可点击重试重新生成。';
+        console.warn('[continueAfterApproval] 审查发现缺陷但无修复指令，按现状交付');
+        onEvent({ type: 'warning', payload: { message: notice } });
+        onEvent({ type: 'delta', payload: { text: `\n${notice}\n`, phase: 'review' } });
+      }
+
+      if (loopOutcome !== 'converged') {
+        // 提示按失败环节区分（O-4）：复审网络失败 ≠ 审查未通过 ≠ 修复未应用，
+        // 三者不得混用同一措辞误导用户；"仍未全部解决"只用于修复真实应用过
+        // 且复审仍不通过的场合
+        const notice = loopOutcome === 'network-failed'
+          ? '提示：自动修复已完成，但复审因网络问题未能完成，本次按修复后版本交付；如仍有问题可点击重试重新生成。'
+          : loopOutcome === 'repair-not-applied'
+            ? '提示：自动修复未能应用，本次按现状交付；应用可能存在缺陷，可点击重试重新生成。'
+            : `提示：审查发现的问题自动修复${repairRound > 1 ? ` ${repairRound} 轮` : ''}后仍未全部解决，本次按现状交付；应用可能存在缺陷，可点击重试重新生成。`;
+        console.warn(`[continueAfterApproval] 审查修复循环降级交付（${loopOutcome}，共 ${repairRound} 轮）`);
+        onEvent({ type: 'warning', payload: { message: notice } });
+        onEvent({ type: 'delta', payload: { text: `\n${notice}\n`, phase: 'review' } });
+      }
     } else {
       // 轻量级审查：仅发送确认
       onEvent({ type: 'stage', payload: { phase: 'review', ...(intent ? { intent } : {}) } });
@@ -1564,14 +1775,16 @@ export async function continueAfterApproval(
       }
     }
 
-    // 计算 token 统计：累加分析、工程师和审查阶段的 usage
+    // 计算 token 统计：累加分析、工程师和审查阶段的 usage（含修复循环）
     const totalStats = (() => {
       const analysisUsage = session.analysisUsage;
       const genUsage = generateResult?.usage;
-      if (!analysisUsage && !genUsage && !reviewUsage) return undefined;
+      if (!analysisUsage && !genUsage && !reviewUsage && !repairUsage && !reReviewUsage) return undefined;
       return {
-        inputTokens: (analysisUsage?.prompt_tokens ?? 0) + (genUsage?.prompt_tokens ?? 0) + (reviewUsage?.prompt_tokens ?? 0),
-        outputTokens: (analysisUsage?.completion_tokens ?? 0) + (genUsage?.completion_tokens ?? 0) + (reviewUsage?.completion_tokens ?? 0),
+        inputTokens: (analysisUsage?.prompt_tokens ?? 0) + (genUsage?.prompt_tokens ?? 0) + (reviewUsage?.prompt_tokens ?? 0)
+          + (repairUsage?.prompt_tokens ?? 0) + (reReviewUsage?.prompt_tokens ?? 0),
+        outputTokens: (analysisUsage?.completion_tokens ?? 0) + (genUsage?.completion_tokens ?? 0) + (reviewUsage?.completion_tokens ?? 0)
+          + (repairUsage?.completion_tokens ?? 0) + (reReviewUsage?.completion_tokens ?? 0),
       };
     })();
 
@@ -1958,6 +2171,132 @@ export async function runDirectModifyPipeline({
  */
 function escapeRegExp(string: string): string {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * 终局解析失败文案（与真实重试次数一致，禁止谎报）。
+ * @param retryCountUsed 实际已消耗的重试次数（0 = 一次都没重试过）
+ */
+export function buildFinalParseErrorMessage(retryCountUsed: number): string {
+  if (retryCountUsed <= 0) {
+    return '输出未能解析为有效的项目文件，请点击重试再次生成，或换一种描述方式（例如注明"重新生成完整页面"）。';
+  }
+  return `生成结果格式不符合要求，已自动重试 ${retryCountUsed} 次仍未成功。请点击重试再次生成，或换一种描述方式（例如注明"重新生成完整页面"）。`;
+}
+
+/**
+ * 修复指令（D-6 行级定位）。
+ * 新格式为结构化对象（文件 + 行号 + 缺陷描述）；旧格式为纯字符串，
+ * 解析时统一归一化为本结构（字符串 → { issue }），新旧兼容。
+ */
+export interface RepairInstruction {
+  /** 目标文件路径（可选；缺失时作用于全项目） */
+  file?: string;
+  /** 目标行号（1-based，可选；来自审查者对源码行号的定位） */
+  line?: number;
+  /** 缺陷描述 */
+  issue: string;
+}
+
+/**
+ * 修复自检声明（D-6）：工程师修复调用需在输出顶层附带，
+ * 逐条声明指令序号的修复情况，供平台核对覆盖面。
+ */
+export interface RepairSelfCheck {
+  /** 已修复的指令序号（1-based，对应修复指令清单编号） */
+  fixed: number[];
+  /** 未能修复的指令序号 */
+  unfixed: number[];
+  /** 一句话修复说明 */
+  summary: string;
+}
+
+/** usage 累加（多轮修复循环中修复/复审调用各可能发生多次） */
+function addUsage(a: LLMUsage | undefined, b: LLMUsage | undefined): LLMUsage | undefined {
+  if (!a) return b;
+  if (!b) return a;
+  return {
+    prompt_tokens: a.prompt_tokens + b.prompt_tokens,
+    completion_tokens: a.completion_tokens + b.completion_tokens,
+    total_tokens: a.total_tokens + b.total_tokens,
+  };
+}
+
+/**
+ * 解析审查者裁决（D-3 审查修复循环；D-6 扩展行级定位）。
+ * 审查者按 REVIEWER_SYSTEM_PROMPT_V2 约定输出 JSON（可能带 ```json 围栏）：
+ * { pass, checks, repairInstructions, missingFiles }。
+ * repairInstructions 兼容两种格式（D-6）：
+ *   新格式：[{ file, line, issue }]（结构化对象，行级定位）
+ *   旧格式：["修复指令文本"]（纯字符串）
+ * 统一归一化为 RepairInstruction[]；解析失败（纯文本 / 非法 JSON / 缺 pass 字段）
+ * 返回 null，调用方按"无裁决"处理：pass=false 才触发修复，null 不触发
+ * （避免误伤正常交付）。
+ */
+export function parseReviewVerdict(raw: string): { pass: boolean; repairInstructions: RepairInstruction[] } | null {
+  try {
+    let text = raw.trim();
+    const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fence && fence[1]) text = fence[1].trim();
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start === -1 || end <= start) return null;
+    const obj = JSON.parse(text.slice(start, end + 1)) as { pass?: unknown; repairInstructions?: unknown };
+    if (typeof obj.pass !== 'boolean') return null;
+    const repairInstructions: RepairInstruction[] = Array.isArray(obj.repairInstructions)
+      ? obj.repairInstructions
+          .map((item): RepairInstruction | null => {
+            if (typeof item === 'string' && item.trim().length > 0) {
+              return { issue: item.trim() }; // 旧格式：纯字符串
+            }
+            if (typeof item === 'object' && item !== null) {
+              const r = item as { file?: unknown; line?: unknown; issue?: unknown };
+              if (typeof r.issue !== 'string' || r.issue.trim().length === 0) return null;
+              return {
+                issue: r.issue.trim(),
+                ...(typeof r.file === 'string' && r.file.trim().length > 0 ? { file: r.file.trim() } : {}),
+                ...(typeof r.line === 'number' && Number.isInteger(r.line) && r.line > 0 ? { line: r.line } : {}),
+              };
+            }
+            return null;
+          })
+          .filter((r): r is RepairInstruction => r !== null)
+      : [];
+    return { pass: obj.pass, repairInstructions };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 解析修复输出顶层的 selfCheck 自检声明（D-6）。
+ * 修复输出格式：{"files":[...],"selfCheck":{"fixed":[1],"unfixed":[],"summary":"..."}}
+ * 输出无 selfCheck 字段（旧格式）或解析失败返回 null，调用方按"未声明"处理，
+ * 不阻塞交付（自检是覆盖面参考，不是硬闸门）。
+ */
+export function parseSelfCheck(raw: string): RepairSelfCheck | null {
+  try {
+    let text = raw.trim();
+    const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fence && fence[1]) text = fence[1].trim();
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start === -1 || end <= start) return null;
+    const obj = JSON.parse(text.slice(start, end + 1)) as { selfCheck?: unknown };
+    if (typeof obj.selfCheck !== 'object' || obj.selfCheck === null) return null;
+    const s = obj.selfCheck as { fixed?: unknown; unfixed?: unknown; summary?: unknown };
+    const toIndexList = (v: unknown): number[] =>
+      Array.isArray(v)
+        ? v.filter((n): n is number => typeof n === 'number' && Number.isInteger(n) && n > 0)
+        : [];
+    return {
+      fixed: toIndexList(s.fixed),
+      unfixed: toIndexList(s.unfixed),
+      summary: typeof s.summary === 'string' ? s.summary : '',
+    };
+  } catch {
+    return null;
+  }
 }
 
 /* ============== Diff 模式：变更清单解析与应用 ============== */
