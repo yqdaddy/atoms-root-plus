@@ -74,6 +74,34 @@ async function parseSSEStream(
   let currentEventType = '';
   let currentData = '';
 
+  // 同批次 delta 合并派发：单个网络分块可能携带上百个 SSE 事件（LLM 流式高频输出，
+  // 实测单批最多 164 个）。逐个同步派发会让 React 的 useSyncExternalStore 订阅者
+  // 产生 50+ 层嵌套更新，触发 "Maximum update depth exceeded" 并沿 promise 链
+  // 炸掉整条生成管线（白屏根因）。连续同相位 delta 合并为一条，其余事件照常即时
+  // 派发；stage/done/error 等边界事件派发前先冲刷缓冲，保证事件时序不变。
+  let pendingDelta: Extract<StreamEvent, { type: 'delta' }> | null = null;
+  const flushPendingDelta = (): void => {
+    if (pendingDelta) {
+      onEvent(pendingDelta);
+      pendingDelta = null;
+    }
+  };
+  const dispatchEvent = (event: StreamEvent | null): void => {
+    if (!event) return;
+    if (event.type === 'delta') {
+      const pendingPayload = pendingDelta?.payload;
+      if (pendingPayload && pendingPayload.phase === event.payload.phase) {
+        pendingPayload.text += event.payload.text;
+      } else {
+        flushPendingDelta();
+        pendingDelta = event;
+      }
+      return;
+    }
+    flushPendingDelta();
+    onEvent(event);
+  };
+
   try {
     for (;;) {
       if (signal.aborted) {
@@ -95,8 +123,10 @@ async function parseSSEStream(
         console.log('[liveEngine] 流结束，共接收', chunkCount, '个数据块');
         // 处理最后一个事件（如果有）
         if (currentEventType && currentData) {
-          processSSEEvent(currentEventType, currentData, runId, onEvent);
+          dispatchEvent(processSSEEvent(currentEventType, currentData, runId));
         }
+        // 冲刷尾部缓冲的合并 delta，保证 done 前文本完整
+        flushPendingDelta();
         break;
       }
 
@@ -116,7 +146,7 @@ async function parseSSEStream(
         } else if (line === '') {
           // 空行表示事件结束
           if (currentEventType && currentData) {
-            processSSEEvent(currentEventType, currentData, runId, onEvent);
+            dispatchEvent(processSSEEvent(currentEventType, currentData, runId));
           }
           currentEventType = '';
           currentData = '';
@@ -129,14 +159,17 @@ async function parseSSEStream(
 }
 
 /**
- * 处理单个 SSE 事件
+ * 处理单个 SSE 事件：解析并转换为前端 StreamEvent（不派发，派发由 parseSSEStream 统一处理）。
+ */
+/**
+ * 解析单个 SSE 事件为前端 StreamEvent。
+ * 无法识别或需跳过的事件返回 null（由调用方决定派发时机，见 parseSSEStream 的合并逻辑）。
  */
 function processSSEEvent(
   eventType: string,
   eventData: string,
   runId: string,
-  onEvent: StreamEventHandler,
-): void {
+): StreamEvent | null {
   try {
     const payload = JSON.parse(eventData);
 
@@ -242,11 +275,11 @@ function processSSEEvent(
               },
             };
           } else {
-            return;
+            return null;
           }
         } else {
           console.warn('[liveEngine] retry 事件缺少 retry 字段');
-          return;
+          return null;
         }
         break;
       }
@@ -264,11 +297,12 @@ function processSSEEvent(
       }
       default:
         console.warn('[liveEngine] 未知事件类型', eventType);
-        return;
+        return null;
     }
-    onEvent(event);
+    return event;
   } catch (parseError) {
     console.warn('[liveEngine] 无法解析事件数据', eventData.slice(0, 200));
+    return null;
   }
 }
 
