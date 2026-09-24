@@ -1,13 +1,19 @@
+// @vitest-environment jsdom
 /**
  * 消息追加诊断测试
- * 验证 addMessage 后状态是否正确更新
+ * 验证 addMessage 后状态是否正确更新，以及项目详情的 localStorage 持久化。
+ *
+ * 持久化键名结构（storageKey 约定）：litpp:v1:projects:<id>
+ * 信封结构：{ schemaVersion, savedAt, data: Project }（data.chat 为消息数组）
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useProjectStore } from '../stores/projectStore';
-import type { ChatMessage } from '../types/project';
+import type { ChatMessage, Project } from '../types/project';
+import { CURRENT_SCHEMA_VERSION, type StorageEnvelope } from '../types/storage';
 
 describe('消息追加诊断', () => {
   beforeEach(() => {
+    localStorage.clear();
     // 重置 store
     useProjectStore.setState({
       currentId: null,
@@ -85,24 +91,50 @@ describe('消息追加诊断', () => {
     // 1. 创建项目
     const project = useProjectStore.getState().createProject('持久化测试');
 
-    // 2. 添加消息
+    // 2. 添加消息（addMessage 内部同步调用 persistProjectDetail）
     useProjectStore.getState().addMessage({
       role: 'user',
       content: '测试持久化',
       runId: 'run-test',
     });
 
-    // 3. 从 localStorage 读取
-    const key = `litpp:projects:${project.id}`;
+    // 3. 从 localStorage 读取项目详情
+    // 键名：storageKey('projects', id) = litpp:v1:projects:<id>（含 v1 代际段）
+    const key = `litpp:v1:projects:${project.id}`;
     const raw = localStorage.getItem(key);
-    expect(raw).toBeDefined();
+    expect(raw).not.toBeNull();
 
-    // 4. 解析并验证
-    const envelope = JSON.parse(raw as string);
-    expect(envelope.data).toBeDefined();
-    expect(envelope.data.chat).toBeDefined();
+    // 4. 解析信封并验证：{ schemaVersion, savedAt, data: Project }
+    const envelope = JSON.parse(raw as string) as StorageEnvelope<Project>;
+    expect(envelope.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+    expect(typeof envelope.savedAt).toBe('string');
+    expect(Array.isArray(envelope.data.chat)).toBe(true);
     expect(envelope.data.chat.length).toBe(1);
-    expect(envelope.data.chat[0].content).toBe('测试持久化');
+    expect(envelope.data.chat[0]?.content).toBe('测试持久化');
+    expect(envelope.data.chat[0]?.runId).toBe('run-test');
+  });
+
+  it('zustand persist 索引键不应包含 chat（详情走独立键）', () => {
+    // zustand persist 中间件写 litpp:v1:projects（无 id 段），
+    // partialize 只含 currentId/summaries/currentVersionId，不含 currentProject。
+    // 项目详情（含 chat）由 persistProjectDetail 写入 litpp:v1:projects:<id>
+    const project = useProjectStore.getState().createProject('索引分离测试');
+    useProjectStore.getState().addMessage({ role: 'user', content: '分离验证', runId: 'run-sep' });
+
+    // 索引键存在但不含 chat
+    const indexRaw = localStorage.getItem('litpp:v1:projects');
+    expect(indexRaw).not.toBeNull();
+    const indexState = JSON.parse(indexRaw as string) as { state?: Record<string, unknown> };
+    expect(indexState.state?.currentId).toBe(project.id);
+    expect(indexState.state?.currentProject).toBeUndefined();
+    expect(indexState.state?.chat).toBeUndefined();
+
+    // 详情键存在且含 chat
+    const detailRaw = localStorage.getItem(`litpp:v1:projects:${project.id}`);
+    expect(detailRaw).not.toBeNull();
+    const detail = JSON.parse(detailRaw as string) as StorageEnvelope<Project>;
+    expect(detail.data.chat.length).toBe(1);
+    expect(detail.data.chat[0]?.content).toBe('分离验证');
   });
 
   it('多次 addMessage 应该保持消息顺序', () => {
