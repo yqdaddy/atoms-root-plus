@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assembleFiles, assembleProjectFiles, Assembler } from './assembler';
+import { assembleFiles, assembleProjectFiles, Assembler, injectReactRuntime, isRedundantReactCdnScriptSrc } from './assembler';
 import type { FileNode } from '../../types/project';
 
 describe('Assembler', () => {
@@ -296,7 +296,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<Counter />);`,
       expect(result.stats.inlinedJs).toBe(0);
       expect(result.warnings.some((w) => w.includes('JS 文件不存在: /src/missing.js'))).toBe(true);
     });
-    it('项目自带 React CDN 引用时平台运行时仍注入并与用户引用并存', () => {
+    it('项目自带 React 外链时剥离冗余引用并注入平台运行时（FINAL-2）', () => {
       const files: Record<string, FileNode> = {
         '/index.html': {
           content: `<!DOCTYPE html>
@@ -334,10 +334,14 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);`,
       expect(result.html).toContain('<script src="/vendor/react.vendor.js"></script>');
       expect(result.html).toContain('<script src="/vendor/sucrase.vendor.js"></script>');
 
-      // 用户自带引用保留原样（白名单外由 CSP 拦截，白名单内后加载覆盖）
-      expect(result.html).toContain('https://unpkg.com/react@18/umd/react.production.min.js');
+      // FINAL-2：模型自带的冗余 React/ReactDOM/Babel 外链 script 被剥除（留痕注释替代）
+      expect(result.html).not.toContain('<script crossorigin src="https://unpkg.com/react@18');
+      expect(result.html).not.toContain('<script crossorigin src="https://unpkg.com/react-dom@18');
+      expect(result.html).not.toContain('<script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js">');
+      expect(result.html).toContain('平台已剥离冗余 React 外链');
+      expect(result.warnings.some((w) => w.includes('已剥离冗余 React/ReactDOM/Babel 外链'))).toBe(true);
 
-      // 告警说明与平台运行时并存
+      // 并存告警按原始 HTML 判定，语义保持
       expect(result.warnings.some((w) => w.includes('与平台运行时并存'))).toBe(true);
     });
 
@@ -523,6 +527,186 @@ function App() {
 
       const result = assembleFiles(files, '/index.html', 'react-cdn');
       expect(result.html).toContain('"inline-jsx"');
+    });
+  });
+
+  describe('FINAL-2 冗余 React 外链剥离', () => {
+    /** react-cdn P0 约定项目：模型自带 react/react-dom/babel 外链 + chart.js 白名单外链 */
+    function buildReactCdnProjectWithExternalScripts(): Record<string, FileNode> {
+      return {
+        '/index.html': {
+          content: `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Redundant React Links</title>
+  <script defer src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="./src/App.jsx"></script>
+</body>
+</html>`,
+        },
+        '/src/App.jsx': {
+          content: `function App() {
+  return <h1>Hello</h1>;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);`,
+        },
+      };
+    }
+
+    it('react-cdn 组装剥除 react/react-dom/babel 外链，chart.js 外链保留', () => {
+      const result = assembleFiles(buildReactCdnProjectWithExternalScripts(), '/index.html', 'react-cdn');
+
+      // 三类冗余外链全部剥除，留痕注释替代原标签
+      expect(result.html).not.toContain('<script defer src="https://cdn.jsdelivr.net/npm/react@18.2.0');
+      expect(result.html).not.toContain('<script defer src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0');
+      expect(result.html).not.toContain('<script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js">');
+      expect(result.html).toContain('平台已剥离冗余 React 外链');
+      expect(result.warnings.some((w) => w.includes('已剥离冗余 React/ReactDOM/Babel 外链'))).toBe(true);
+
+      // chart.js 白名单外链原样保留（剥离按库精确判定）
+      expect(result.html).toContain('<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>');
+
+      // 平台 /vendor/ 运行时照常注入
+      expect(result.html).toContain('<script src="/vendor/react.vendor.js"></script>');
+      expect(result.html).toContain('<script src="/vendor/sucrase.vendor.js"></script>');
+
+      // 本地 JSX 文件照常包装
+      expect(result.html).toContain('"./src/App.jsx"');
+    });
+
+    it('打包链路（assembleProjectFiles）同样剥除冗余外链', async () => {
+      const files: Record<string, FileNode> = {
+        '/index.html': {
+          content: `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <title>Bundled With Redundant Links</title>
+  <script defer src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="/src/App.jsx"></script>
+  <script src="/src/main.jsx"></script>
+</body>
+</html>`,
+        },
+        '/src/main.jsx': {
+          content: `import App from './App.jsx';
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);`,
+        },
+        '/src/App.jsx': {
+          content: `export default function App() {
+  return <h1>Hello</h1>;
+}`,
+        },
+      };
+
+      const result = await assembleProjectFiles(files, '/index.html', 'react-cdn');
+
+      // 确认走的是打包链路（而非回退逐文件链路）
+      expect(result.html).toContain('__defineModule("/src/main.jsx"');
+      expect(result.html).toContain('__requireModule("/src/main.jsx")');
+
+      // 冗余 react 外链剥除（留痕注释替代）
+      expect(result.html).not.toContain('<script defer src="https://cdn.jsdelivr.net/npm/react@18.2.0');
+      expect(result.html).toContain('平台已剥离冗余 React 外链');
+      // chart.js 白名单外链保留
+      expect(result.html).toContain('https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js');
+    });
+
+    it('单文件模式（injectReactRuntime）同样剥除冗余外链', () => {
+      const singleFileHtml = `<!DOCTYPE html><html><head>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+</head><body><div id="root"></div><script>
+function App() { return <div>Hi</div>; }
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script></body></html>`;
+
+      const result = injectReactRuntime(singleFileHtml);
+
+      expect(result).not.toContain('<script src="https://unpkg.com/react@18');
+      expect(result).toContain('平台已剥离冗余 React 外链');
+      expect(result).toContain('<script src="/vendor/react.vendor.js"></script>');
+    });
+
+    it('html 框架产物不含剥离逻辑：react 外链原样保留', () => {
+      const files: Record<string, FileNode> = {
+        '/index.html': {
+          content: `<!DOCTYPE html><html><head>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+</head><body><div id="app"></div><script src="/src/main.js"></script></body></html>`,
+        },
+        '/src/main.js': { content: "document.getElementById('app').textContent = 'ok';" },
+      };
+
+      const result = assembleFiles(files, '/index.html', 'html');
+
+      // html 框架无平台 React 运行时，外链不冗余，原样保留
+      expect(result.html).toContain('<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>');
+      expect(result.html).not.toContain('平台已剥离冗余 React 外链');
+      expect(result.warnings.some((w) => w.includes('已剥离冗余'))).toBe(false);
+    });
+
+    it('vue-cdn 产物不含剥离逻辑：vue 外链与无关外链原样保留', () => {
+      const files: Record<string, FileNode> = {
+        '/index.html': {
+          content: `<!DOCTYPE html><html><head>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+</head><body><div id="app"></div></body></html>`,
+        },
+      };
+
+      const result = assembleFiles(files, '/index.html', 'vue-cdn');
+
+      expect(result.html).toContain('<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>');
+      expect(result.html).toContain('https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js');
+      expect(result.html).not.toContain('平台已剥离冗余 React 外链');
+      expect(result.warnings.some((w) => w.includes('已剥离冗余'))).toBe(false);
+    });
+
+    it('isRedundantReactCdnScriptSrc 按库精确判定', () => {
+      // 命中：react / react-dom / babel 的主流 CDN 形态
+      const redundant = [
+        'https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js',
+        'https://unpkg.com/react@18/umd/react.production.min.js',
+        'https://unpkg.com/react/umd/react.production.min.js',
+        'https://unpkg.com/react-dom@18/umd/react-dom.production.min.js',
+        'https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js',
+        'https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js',
+        'https://cdn.jsdelivr.net/npm/babel-standalone@6.26.0/babel.min.js',
+        'https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js',
+        'https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js',
+        'https://esm.sh/react@18?dev',
+        '//cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js',
+      ];
+      for (const src of redundant) {
+        expect(isRedundantReactCdnScriptSrc(src), src).toBe(true);
+      }
+
+      // 不误伤：衍生包、其他库、本地路径
+      const kept = [
+        'https://cdn.jsdelivr.net/npm/react-router-dom@6.21.0/dist/react-router-dom.production.min.js',
+        'https://cdn.jsdelivr.net/npm/react-redux@8/dist/react-redux.js',
+        'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js',
+        'https://cdn.tailwindcss.com',
+        'https://example.com/app.js',
+        'https://unpkg.com/vue@3/dist/vue.global.prod.js',
+        '/vendor/react.vendor.js',
+        './src/react.js',
+        '/src/main.jsx',
+      ];
+      for (const src of kept) {
+        expect(isRedundantReactCdnScriptSrc(src), src).toBe(false);
+      }
     });
   });
 });

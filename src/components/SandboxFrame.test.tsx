@@ -15,7 +15,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
-import SandboxFrame from './SandboxFrame';
+import SandboxFrame, { buildBridgeScript } from './SandboxFrame';
 import { assembleProjectFiles } from '../services/sandbox/assembler';
 import type { FileNode } from '../types/project';
 
@@ -243,5 +243,113 @@ describe('SandboxFrame - 打包链路激活（P1 批次 2）', () => {
 
     expect(assembleProjectFiles).not.toHaveBeenCalled();
     expect(getSrcdoc()).toContain("document.title = 'html-project';");
+  });
+});
+
+/**
+ * 桥接 ready 加固（FINAL-2）行为级测试。
+ * jsdom 不执行 srcdoc 内脚本，因此直接提取桥接 IIFE 脚本体在 jsdom 全局求值，
+ * 用 postMessage 侦测 ready 上报时机。三线并发语义：
+ * 1. readyState 已是 interactive/complete：求值后立即上报
+ * 2. loading 状态：readystatechange 到 interactive 时上报（先于 defer 外链执行）
+ * 3. loading 状态：3 秒超时强制上报（解析被同步慢外链阻塞的兜底）
+ * 且 ready 幂等：三线先到先发，只上报一次。
+ */
+describe('SandboxFrame - 桥接 ready 加固（FINAL-2）', () => {
+  const CONSOLE_LEVELS = ['log', 'info', 'warn', 'error'] as const;
+  let originalConsole: Record<string, unknown>;
+
+  beforeEach(() => {
+    originalConsole = {};
+    for (const level of CONSOLE_LEVELS) {
+      originalConsole[level] = console[level];
+    }
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    for (const level of CONSOLE_LEVELS) {
+      console[level] = originalConsole[level] as typeof console.log;
+    }
+    // 撤销测试中对 document.readyState 的实例覆盖，恢复原型 getter
+    delete (document as unknown as { readyState?: unknown }).readyState;
+  });
+
+  /** 提取桥接脚本体并在 jsdom 全局求值，返回 postMessage 捕获到的消息列表 */
+  function evalBridge(sessionId: string): Array<Record<string, unknown>> {
+    const html = buildBridgeScript(sessionId);
+    const blocks = Array.from(html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)).map((m) => m[1]);
+    const body = blocks[0];
+    if (!body) {
+      throw new Error('buildBridgeScript 产物中未找到桥接脚本体');
+    }
+    const sent: Array<Record<string, unknown>> = [];
+    vi.spyOn(window, 'postMessage').mockImplementation(((data: unknown) => {
+      sent.push(data as Record<string, unknown>);
+    }) as typeof window.postMessage);
+    // 桥接脚本的自由标识符（window/document/console/setTimeout）均由 jsdom 全局提供
+    new Function(body)();
+    return sent;
+  }
+
+  function forceReadyState(state: 'loading' | 'interactive' | 'complete'): void {
+    Object.defineProperty(document, 'readyState', {
+      value: state,
+      configurable: true,
+    });
+  }
+
+  it('readyState 已完成时求值后立即上报 ready，且后续事件不重复上报', () => {
+    const sent = evalBridge('session-ready-immediate');
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].type).toBe('ready');
+    expect(sent[0].from).toBe('guest');
+    expect(sent[0].protocol).toBe(1);
+    const payload = sent[0].payload as { documentHeight: number };
+    expect(typeof payload.documentHeight).toBe('number');
+    expect(payload.documentHeight).toBeGreaterThanOrEqual(0);
+
+    // 幂等：DOMContentLoaded 再到不重复上报
+    document.dispatchEvent(new Event('DOMContentLoaded'));
+    expect(sent).toHaveLength(1);
+  });
+
+  it('loading 状态：readystatechange 到 interactive 即上报，先于 defer 外链阻塞的 DOMContentLoaded', () => {
+    vi.useFakeTimers();
+    forceReadyState('loading');
+
+    const sent = evalBridge('session-ready-interactive');
+    // 解析未完成、超时未到：不上报
+    expect(sent).toHaveLength(0);
+
+    // HTML 解析完成（defer 外链尚未执行）：
+    forceReadyState('interactive');
+    document.dispatchEvent(new Event('readystatechange'));
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].type).toBe('ready');
+
+    // 幂等：DOMContentLoaded 与超时随后到达不重复上报
+    document.dispatchEvent(new Event('DOMContentLoaded'));
+    vi.advanceTimersByTime(5000);
+    expect(sent).toHaveLength(1);
+  });
+
+  it('loading 状态：解析被同步慢外链阻塞时，3 秒超时强制上报', () => {
+    vi.useFakeTimers();
+    forceReadyState('loading');
+
+    const sent = evalBridge('session-ready-timeout');
+    expect(sent).toHaveLength(0);
+
+    // 3 秒窗口内仍被阻塞（无 readystatechange）：强制上报
+    vi.advanceTimersByTime(2999);
+    expect(sent).toHaveLength(0);
+    vi.advanceTimersByTime(1);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].type).toBe('ready');
   });
 });

@@ -10,6 +10,10 @@
  * 6. React CDN 模式（P1 批次 2）：真实 import 项目走 mini-bundler 打包为
  *    单一脚本注入（assembleProjectFiles），打包失败或项目不符合打包条件时
  *    逐字节回退到上述逐文件链路（回退产物与现状完全一致）
+ * 7. React CDN 模式（FINAL-2）：剥离模型 index.html 自带的 react / react-dom /
+ *    babel 冗余外链 script（平台 /vendor/ 运行时已提供等价能力，且外网不可达时
+ *    defer 外链阻塞 DOMContentLoaded 拖慢 ready 握手）；chart.js 等其他白名单
+ *    外链不受影响，html / vue-cdn 产物不含剥离逻辑
  *
  * 设计文档：docs/tech-multi-file-generation.md 第 5.3 节、
  * docs/engineering-grade-generation-plan.md 3.3 与 7、
@@ -44,6 +48,46 @@ const SRC_MODULE_ENTRY_PATH = '/src/main.jsx';
 
 /** /src 下参与模块打包的源码文件（.js/.jsx） */
 const SRC_MODULE_FILE_PATTERN = /^\/src\/.+\.(js|jsx)$/i;
+
+/**
+ * react-cdn 冗余外链剥离（FINAL-2）。
+ *
+ * 机理：模型生成的 index.html 常自带指向 react / react-dom / babel 的外链
+ * script（模板规则已禁止但模型不守规，校验器白名单也放行 jsdelivr）。平台
+ * 组装时已注入同源 /vendor/ 运行时（React/ReactDOM/Sucrase 等价能力），
+ * 这些外链纯冗余；外网不可达时 defer 外链会阻塞 DOMContentLoaded 达 17-20 秒，
+ * 拖慢沙箱 ready 握手，加载遮罩顶住已挂载的应用。
+ *
+ * 剥离按 script src 指向的库精确判定，只限 react-cdn 框架产物（在
+ * injectReactRuntime 内执行，html / vue-cdn 产物不含此逻辑）；
+ * chart.js 等其他白名单外链不匹配，原样保留。
+ */
+
+/** 冗余外链 src 判定模式：URL 路径指向 react / react-dom / babel 库 */
+const REDUNDANT_REACT_CDN_SRC_PATTERNS: readonly RegExp[] = [
+  // 包名路径段：react@18 / react-dom@18 / babel-standalone@6（jsdelivr、unpkg、esm.sh 形态）
+  // 不匹配 react-router-dom、react-redux 等衍生包（要求 react 后紧跟 @、/、?、# 或结尾）
+  /(?:^|\/)(?:npm\/)?(?:react|react-dom|babel-standalone)(?:@[\w.-]+)?(?:[/?#]|$)/i,
+  // 作用域包：@babel/standalone 等
+  /(?:^|\/)@babel\/[\w.-]+(?:@[\w.-]+)?(?:[/?#]|$)/i,
+  // cdnjs 形态：/ajax/libs/react/<ver>/、/ajax/libs/babel-standalone/<ver>/
+  /(?:^|\/)ajax\/libs\/(?:react|react-dom|babel-standalone)(?:[/?#]|$)/i,
+  // 文件名兜底：react.production.min.js / react-dom.development.js（镜像路径形态）
+  /(?:^|\/)react(?:-dom)?\.(?:development|production)(?:\.min)?\.js(?:[?#].*)?$/i,
+  // babel 文件名：babel.min.js / babel.js / babel-standalone.js
+  /(?:^|\/)babel(?:-standalone|\.min)?\.js(?:[?#].*)?$/i,
+];
+
+/**
+ * 判定 script src 是否指向 react / react-dom / babel（平台运行时已提供等价能力的冗余外链）
+ * 仅外部 URL（http/https/协议相对）参与判定；本地路径由内联链路处理，不在此列
+ */
+export function isRedundantReactCdnScriptSrc(src: string): boolean {
+  if (!/^(?:https?:)?\/\//i.test(src)) {
+    return false;
+  }
+  return REDUNDANT_REACT_CDN_SRC_PATTERNS.some((pattern) => pattern.test(src));
+}
 
 /** 组装器配置 */
 export interface AssemblerConfig {
@@ -433,6 +477,32 @@ export class Assembler {
   }
 
   /**
+   * 剥离模型 index.html 中指向 react / react-dom / babel 的外链 script 标签（FINAL-2）。
+   * 剥离对象仅限外部 URL 且按库精确判定（isRedundantReactCdnScriptSrc），
+   * chart.js 等其他白名单外链原样保留；剥离处替换为注释留痕，并汇总一条组装警告
+   * （warnings 走 console 通道，不产生用户可见错误）
+   */
+  private stripRedundantReactCdnScripts(html: string, warnings: string[]): string {
+    const strippedUrls: string[] = [];
+    const result = html.replace(
+      /<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>\s*<\/script>/gi,
+      (match, src: string) => {
+        if (!isRedundantReactCdnScriptSrc(src)) {
+          return match;
+        }
+        strippedUrls.push(src);
+        return `<!-- 平台已剥离冗余 React 外链（/vendor/ 运行时已提供等价能力）: ${src} -->`;
+      }
+    );
+    if (strippedUrls.length > 0) {
+      warnings.push(
+        `已剥离冗余 React/ReactDOM/Babel 外链 script（平台 /vendor/ 运行时已提供等价能力）: ${strippedUrls.join(', ')}`
+      );
+    }
+    return result;
+  }
+
+  /**
    * 注入 React CDN 运行时（同源 vendor 的 React/ReactDOM + Sucrase 编译器）
    * 同时处理无 src 的内联 <script> 中出现的 JSX 代码
    *
@@ -443,14 +513,19 @@ export class Assembler {
    * 保证 React/ReactDOM/Sucrase 可用。
    */
   injectReactRuntime(html: string, warnings: string[]): string {
+    // 并存告警按原始 HTML 判定（既有语义不变）；剥离在其后执行
     if (html.includes('react@') || html.includes('react-dom@') || html.includes('unpkg.com/react') || html.includes('cdn.jsdelivr.net/npm/react')) {
       warnings.push('HTML 已包含 React 引用，与平台运行时并存（白名单外的引用会被 CSP 拦截）');
     }
 
+    // FINAL-2：剥离模型自带的冗余 React/ReactDOM/Babel 外链 script。
+    // 平台组装时已注入同源 /vendor/ 运行时（等价能力），模型不守规带出的外链
+    // 纯冗余；外网不可达时 defer 外链阻塞 DOMContentLoaded 17-20 秒，拖慢 ready 握手。
+    // 剥离只发生在 react-cdn 运行时注入内（html / vue-cdn 产物不含此逻辑）
+    let finalHtml = this.stripRedundantReactCdnScripts(html, warnings);
+
     const runtime = generateReactCdnRuntime() + '\n' + generateSucraseRuntime();
     const rootDiv = generateReactAppBootstrap();
-
-    let finalHtml = html;
 
     // 确保 React 挂载点存在（id 固定为 root）
     if (!/id=["']root["']/.test(finalHtml)) {

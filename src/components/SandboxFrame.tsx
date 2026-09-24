@@ -49,18 +49,19 @@ function generateSessionId(): string {
   return `session-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
 
-/** 组装完整的预览 HTML，注入 CSP 和消息桥接脚本 */
-function assemblePreviewHtml(
-  userHtml: string,
-  sessionId: string,
-  cdnHosts: readonly string[],
-  evalAllowed: boolean = false,
-  selfOrigin?: string
-): string {
-  const csp = buildPreviewCsp(cdnHosts, evalAllowed, selfOrigin);
+/**
+ * ready 强制上报窗口（FINAL-2）：桥接 ready 不再严格依赖 DOMContentLoaded。
+ * 模型残留的慢外链（defer script）在外网不可达时会阻塞 DOMContentLoaded
+ * 17-20 秒，而应用本体约 2 秒已挂载；该窗口保证遮罩最迟在此时间后解除。
+ */
+const READY_FORCED_SIGNAL_MS = 3000;
 
-  // 注入消息桥接脚本（监听错误、日志、resize）
-  const bridgeScript = `
+/**
+ * 生成沙箱消息桥接脚本（监听错误、日志、resize 上报与 ready 握手）。
+ * 独立导出便于对 ready 加固逻辑做行为级单测（jsdom 内求值验证）。
+ */
+export function buildBridgeScript(sessionId: string): string {
+  return `
 <script>
 (function() {
   const sessionId = "${sessionId}";
@@ -71,10 +72,31 @@ function assemblePreviewHtml(
     window.parent.postMessage({ protocol, from: "guest", sessionId, seq: seq++, type, payload }, "*");
   }
 
-  // ready 消息
-  window.addEventListener("DOMContentLoaded", function() {
+  // ready 消息（FINAL-2 加固）：三线并发、先到先发（幂等），不再严格依赖
+  // DOMContentLoaded。模型残留的慢外链（defer script）在外网不可达时会阻塞
+  // DOMContentLoaded 达 17-20 秒，而应用本体约 2 秒已挂载，遮罩会顶住已渲染的应用：
+  // 1. readystatechange 到 interactive/complete：HTML 解析完成即上报，
+  //    先于 defer 脚本执行（defer 外链不再拖慢 ready）
+  // 2. DOMContentLoaded：常规兜底（与历史行为一致）
+  // 3. ${READY_FORCED_SIGNAL_MS}ms 超时：解析仍被同步慢外链阻塞时强制上报，
+  //    遮罩不被慢外链长时间顶住（代价是极端场景下提前露出半成品页面，可接受）
+  let readySent = false;
+  function sendReady() {
+    if (readySent) return;
+    readySent = true;
     send("ready", { documentHeight: document.documentElement.scrollHeight });
-  });
+  }
+  if (document.readyState === "interactive" || document.readyState === "complete") {
+    sendReady();
+  } else {
+    document.addEventListener("readystatechange", function() {
+      if (document.readyState === "interactive" || document.readyState === "complete") {
+        sendReady();
+      }
+    });
+  }
+  document.addEventListener("DOMContentLoaded", sendReady);
+  setTimeout(sendReady, ${READY_FORCED_SIGNAL_MS});
 
   // 错误监听
   window.addEventListener("error", function(e) {
@@ -109,6 +131,18 @@ function assemblePreviewHtml(
   });
 })();
 </script>`;
+}
+
+/** 组装完整的预览 HTML，注入 CSP 和消息桥接脚本 */
+function assemblePreviewHtml(
+  userHtml: string,
+  sessionId: string,
+  cdnHosts: readonly string[],
+  evalAllowed: boolean = false,
+  selfOrigin?: string
+): string {
+  const csp = buildPreviewCsp(cdnHosts, evalAllowed, selfOrigin);
+  const bridgeScript = buildBridgeScript(sessionId);
 
   // 在 <head> 中注入 CSP meta 标签
   const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
