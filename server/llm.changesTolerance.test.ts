@@ -106,6 +106,14 @@ function makeSequentialFetch(responses: string[]): {
   return { fetchMock, requestBodies };
 }
 
+/** 拼接全部 delta 文本（用于断言重试进度文案） */
+function joinedDeltaText(events: LLMEvent[]): string {
+  return events
+    .filter((e) => e.type === 'delta')
+    .map((e) => e.payload.text ?? '')
+    .join('');
+}
+
 /** 阶段 1：跑分析师拿到批准会话 */
 async function runAnalysisStage(options: {
   prompt: string;
@@ -199,5 +207,75 @@ describe('非 diff 模式 changes 格式容错', () => {
     expect(retryUserMsg!.content).toContain('上次输出格式错误');
     expect(retryUserMsg!.content).toContain('禁止输出 { "changes"');
     expect(retryUserMsg!.content).toContain('做一个科学计算器');
+  });
+
+  it('场景 3 前两次重试仍失败：第三次策略切换（含最小 JSON 示例）后交付', async () => {
+    // 调用序：分析师 → 工程师×2（changes，纠正失败） → 工程师第 3 次（策略切换，files 成功） → 审查者
+    const { fetchMock, requestBodies } = makeSequentialFetch([
+      FEATURES_JSON,
+      CHANGES_OUTPUT,
+      CHANGES_OUTPUT,
+      FILES_OUTPUT,
+      '审查通过',
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const sessionId = await runAnalysisStage({ prompt: '做一个科学计算器' });
+
+    const stage2Events: LLMEvent[] = [];
+    await continueAfterApproval(sessionId, (e) => stage2Events.push(e), new AbortController().signal);
+
+    expect(stage2Events.find((e) => e.type === 'error')).toBeUndefined();
+
+    // 第三次策略切换后正常交付
+    const done = stage2Events.find((e) => e.type === 'done');
+    expect(done).toBeDefined();
+    expect(done!.payload.files?.['/index.html']?.content).toContain('科学计算器');
+
+    // 共 5 次调用：分析师 + 工程师×3 + 审查者
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+
+    // 第 4 次调用（工程师第 3 次）携带策略切换指令：最小 files JSON 示例 + 强制重新输出
+    const strategyRequest = JSON.parse(requestBodies[3]) as { messages: Array<{ role: string; content: string }> };
+    const strategyUserMsg = strategyRequest.messages.find((m) => m.role === 'user');
+    expect(strategyUserMsg).toBeDefined();
+    expect(strategyUserMsg!.content).toContain('最后一次尝试');
+    expect(strategyUserMsg!.content).toContain('忽略之前');
+    expect(strategyUserMsg!.content).toContain('完整文件内容');
+
+    // 聊天区展示自动重试进度（两次重试 + 策略切换标记）
+    const deltaText = joinedDeltaText(stage2Events);
+    expect(deltaText).toContain('自动重试中');
+    expect(deltaText).toContain('第 2/2 次');
+    expect(deltaText).toContain('完整重生成策略');
+  });
+
+  it('场景 4 三次尝试全部失败：报用户可读的错误文案，不泄露裸技术错误', async () => {
+    // 调用序：分析师 → 工程师×3（全部 changes）→ 无审查者（未到达）
+    const { fetchMock } = makeSequentialFetch([
+      FEATURES_JSON,
+      CHANGES_OUTPUT,
+      CHANGES_OUTPUT,
+      CHANGES_OUTPUT,
+    ]);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const sessionId = await runAnalysisStage({ prompt: '做一个科学计算器' });
+
+    const stage2Events: LLMEvent[] = [];
+    await continueAfterApproval(sessionId, (e) => stage2Events.push(e), new AbortController().signal);
+
+    // 恰好 4 次调用：分析师 + 工程师×3，无审查者
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+
+    // 错误事件存在且文案面向用户：说明已自动重试并给出指引
+    const error = stage2Events.find((e) => e.type === 'error');
+    expect(error).toBeDefined();
+    expect(error!.payload.message).toContain('已自动重试 2 次');
+    expect(error!.payload.message).toContain('重试');
+    expect(error!.payload.message).toContain('换一种描述方式');
+    // 不把模型原始输出（changes JSON 片段）抛给用户
+    expect(error!.payload.message).not.toContain('"edits"');
+    expect(error!.payload.message).not.toContain('期望包含 files 数组的对象');
   });
 });

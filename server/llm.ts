@@ -1142,17 +1142,44 @@ export async function continueAfterApproval(
     let rescueNotice: string | null = null;
     let rescuedPaths: string[] = [];
 
+    // 解析格式重试：最多 3 次尝试（首次 + 格式提示重试 + 策略切换重试）
+    const MAX_PARSE_ATTEMPTS = 3;
     // 重试循环
-    for (let attempt = 0; attempt < 2; attempt++) {
-      // 重试时在提示词中强调格式要求
+    for (let attempt = 0; attempt < MAX_PARSE_ATTEMPTS; attempt++) {
+      // 重试时在提示词中强调格式要求，并向前端广播重试进度（retry 事件 + generate 阶段 delta）
       const retryMessages: ChatMessage[] = [...generateMessages];
       if (retryCount > 0 && formatErrorHint) {
+        const isFinalStrategySwitch = retryCount >= MAX_PARSE_ATTEMPTS - 1;
+        // 策略切换：两次格式纠正仍失败时，放弃"纠正"改用最强指令——
+        // 给出最小正确的 JSON 结构示例，要求模型忽略增量修改思路、从零输出完整项目
+        const strategySwitch = isFinalStrategySwitch
+          ? `\n\n【最后一次尝试】请忽略之前"增量修改/变更清单"的思路，从零重新输出完整项目。格式必须严格为如下 JSON 结构（示例）：\n${useDiffMode ? '{ "changes": [ { "file": "/index.html", "edits": [ { "line": 3, "old": "旧行内容", "new": "新行内容", "type": "replace" } ], "summary": "变更摘要" } ] }' : '{ "files": [ { "path": "/index.html", "content": "<!DOCTYPE html><html>...完整文件内容...</html>", "language": "html" } ] }'}\n除该 JSON 外不要输出任何其他内容。`
+          : '';
         const originalUserMsg = retryMessages[1]!.content;
         retryMessages[1] = {
           role: 'user',
-          content: `${originalUserMsg}\n\n【重要】上次输出格式错误：${formatErrorHint}\n\n请确保输出格式正确：${useDiffMode ? 'diff 模式必须输出 { "changes": [...] } 格式，包含 file、edits、summary 字段' : '必须输出 { "files": [...] } 格式，每个文件包含 path、content、language 字段；禁止输出 { "changes": [...] } 变更清单格式'}`,
+          content: `${originalUserMsg}\n\n【重要】上次输出格式错误：${formatErrorHint}\n\n请确保输出格式正确：${useDiffMode ? 'diff 模式必须输出 { "changes": [...] } 格式，包含 file、edits、summary 字段' : '必须输出 { "files": [...] } 格式，每个文件包含 path、content、language 字段；禁止输出 { "changes": [...] } 变更清单格式'}${strategySwitch}`,
         };
-        console.log('[continueAfterApproval] 格式错误重试，添加格式强调');
+        // 前端可见的重试进度：协议 retry 事件（liveEngine 在思考区渲染）+ 聊天区 delta 文本
+        onEvent({
+          type: 'retry',
+          payload: {
+            retry: {
+              attempt: retryCount,
+              maxRetries: MAX_PARSE_ATTEMPTS - 1,
+              delayMs: 0,
+              errorMessage: '输出格式不符合要求',
+            },
+          },
+        });
+        onEvent({
+          type: 'delta',
+          payload: {
+            text: `\n[输出格式不符合要求，自动重试中（第 ${retryCount}/${MAX_PARSE_ATTEMPTS - 1} 次）${isFinalStrategySwitch ? '，已切换为完整重生成策略' : ''}]\n`,
+            phase: 'generate',
+          },
+        });
+        console.log(`[continueAfterApproval] 格式错误重试（第 ${retryCount}/${MAX_PARSE_ATTEMPTS - 1} 次）${isFinalStrategySwitch ? '，策略切换' : ''}`);
       }
 
       // 执行生成
@@ -1230,7 +1257,7 @@ export async function continueAfterApproval(
           changeList = undefined;
 
           // 检测是否应该重试
-          shouldRetry = retryCount === 0 && (errorMsg.includes('格式') || generatedOutput.includes('"files"'));
+          shouldRetry = retryCount < MAX_PARSE_ATTEMPTS - 1 && (errorMsg.includes('格式') || generatedOutput.includes('"files"'));
 
           // 如果不重试，尝试降级为多文件解析
           if (!shouldRetry) {
@@ -1260,7 +1287,11 @@ export async function continueAfterApproval(
               const rescued = repairTruncatedMultiFileOutput(generatedOutput);
               if (!rescued) {
                 pendingSessions.delete(sessionId);
-                onEvent({ type: 'error', payload: { message: `生成输出格式错误: ${parseErrorMsg}` } });
+                // 最终失败：给用户明确说明与重试指引，技术细节只留服务端日志
+                onEvent({
+                  type: 'error',
+                  payload: { message: `生成结果格式不符合要求，已自动重试 ${MAX_PARSE_ATTEMPTS - 1} 次仍未成功。请点击重试再次生成，或换一种描述方式（例如注明"重新生成完整页面"）。` },
+                });
                 return;
               }
               rescuedPaths = rescued.files.map(f => f.path);
@@ -1355,14 +1386,18 @@ export async function continueAfterApproval(
             // 检测是否是格式错误（files vs changes）
             const isFormatError = errorMsg.includes('输出格式错误') ||
                                  (generatedOutput.includes('"changes"') && !generatedOutput.includes('"files"'));
-            shouldRetry = retryCount === 0 && isFormatError;
+            shouldRetry = retryCount < MAX_PARSE_ATTEMPTS - 1 && isFormatError;
 
             if (!shouldRetry) {
               // 不重试，尝试抢救
               const rescued = repairTruncatedMultiFileOutput(generatedOutput);
               if (!rescued) {
                 pendingSessions.delete(sessionId);
-                onEvent({ type: 'error', payload: { message: `生成输出格式错误: ${errorMsg}` } });
+                // 最终失败：给用户明确说明与重试指引，技术细节只留服务端日志
+                onEvent({
+                  type: 'error',
+                  payload: { message: `生成结果格式不符合要求，已自动重试 ${MAX_PARSE_ATTEMPTS - 1} 次仍未成功。请点击重试再次生成，或换一种描述方式（例如注明"重新生成完整页面"）。` },
+                });
                 return;
               }
               rescuedPaths = rescued.files.map(f => f.path);
@@ -1397,7 +1432,7 @@ export async function continueAfterApproval(
     // 如果仍然没有 finalFiles，说明解析失败且重试耗尽
     if (!finalFiles) {
       pendingSessions.delete(sessionId);
-      onEvent({ type: 'error', payload: { message: '生成输出格式错误：重试后仍无法解析，请重新描述需求' } });
+      onEvent({ type: 'error', payload: { message: `生成结果格式不符合要求，已自动重试 ${MAX_PARSE_ATTEMPTS - 1} 次仍未成功。请点击重试或换一种描述方式。` } });
       return;
     }
 
