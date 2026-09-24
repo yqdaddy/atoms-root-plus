@@ -21,6 +21,7 @@ import { loadMemoryForGeneration, isRecallQuery, generateRecallResponse, extract
 import { toast } from '../components/Toast';
 import { HomeAuthControls } from '../components/AuthControls';
 import SandboxFrame from '../components/SandboxFrame';
+import ExportZipButton, { useZipExport } from '../components/ExportZipButton';
 import { FileTreePanel, type TreeNode, buildTree } from '../components/FileTree';
 import { RequirementPanel } from '../components/RequirementPanel';
 import { VersionHistory } from '../components/VersionHistory';
@@ -267,8 +268,6 @@ export default function HomePage() {
   // 新项目的目标框架：仅在首条消息创建项目时生效，默认 html
   const [selectedFramework, setSelectedFramework] = useState<ProjectFramework>('html');
   const [isGenerating, setIsGenerating] = useState(false);
-  // ZIP 导出进行中标记（防重复点击）
-  const [isExporting, setIsExporting] = useState(false);
   const [viewTab, setViewTab] = useState<'preview' | 'code'>('preview');
   // deviceMode 已移至 SandboxFrame 组件（通过 useSettingsStore）
   const [showConsole, setShowConsole] = useState(false);
@@ -392,6 +391,9 @@ export default function HomePage() {
   const currentProject = useProjectStore((state) => state.currentProject);
   const updateProjectName = useProjectStore((state) => state.updateProjectName);
   const generatedHtml = currentProject?.files[ENTRY_FILE_PATH]?.content ?? '';
+
+  // ZIP 导出流程（按钮与 Ctrl+E 快捷键共享同一实例，防重复点击）
+  const { isExporting, exportNow: exportProjectZip } = useZipExport(currentProject);
 
   // 项目总数（用于项目列表入口的数字徽章）
   const projectCount = useProjectStore((state) => state.summaries.length);
@@ -986,19 +988,8 @@ export default function HomePage() {
           navigate('/projects');
         },
         exportProject: async () => {
-          // 导出项目
-          if (!currentProject) {
-            toast.error('没有可导出的项目');
-            return;
-          }
-          try {
-            const { exportProjectAsZip } = await import('../services/export/zipExporter');
-            await exportProjectAsZip(currentProject);
-            toast.success('ZIP 包已开始下载');
-          } catch (error) {
-            const msg = error instanceof Error ? error.message : '导出失败，请稍后重试';
-            toast.error(msg);
-          }
+          // 导出项目（与工具栏按钮、快捷键共用同一导出流程）
+          await exportProjectZip();
         },
         showToast: (message, type = 'info') => {
           if (type === 'success') toast.success(message);
@@ -1160,24 +1151,14 @@ export default function HomePage() {
     toast.success('已创建新项目');
   }, [isGenerating, navigate]);
 
-  const handleExport = useCallback(async () => {
-    if (!currentProject) {
-      toast.error('没有可导出的项目');
+  const handleExport = useCallback(() => {
+    // 生成进行中禁用导出：产物尚不稳定，物化 dist 没有意义
+    if (isGenerating) {
+      toast.info('生成进行中，请等待完成后再导出');
       return;
     }
-    if (isExporting) return;
-    setIsExporting(true);
-    try {
-      const { exportProjectAsZip } = await import('../services/export/zipExporter');
-      await exportProjectAsZip(currentProject);
-      toast.success('ZIP 包已开始下载');
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : '导出失败，请稍后重试';
-      toast.error(msg);
-    } finally {
-      setIsExporting(false);
-    }
-  }, [currentProject, isExporting]);
+    void exportProjectZip();
+  }, [isGenerating, exportProjectZip]);
 
   // 注册全局快捷键
   useKeybinding([
@@ -1964,33 +1945,11 @@ export default function HomePage() {
 
               {/* Export ZIP */}
               {generatedHtml && currentProject && (
-                <button
-                  onClick={async () => {
-                    if (isExporting) return;
-                    setIsExporting(true);
-                    try {
-                      // 动态导入：仅在导出时加载 jszip（约 95KB）
-                      const { exportProjectAsZip } = await import('../services/export/zipExporter');
-                      await exportProjectAsZip(currentProject);
-                      toast.success('ZIP 包已开始下载');
-                    } catch (error) {
-                      const msg = error instanceof Error ? error.message : '导出失败，请稍后重试';
-                      toast.error(msg);
-                    } finally {
-                      setIsExporting(false);
-                    }
-                  }}
-                  disabled={isExporting}
-                  className="p-1.5 rounded text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] disabled:opacity-50 transition-colors"
-                  title={isExporting ? '正在打包下载...' : '导出代码为 ZIP'}
-                >
-                  <Icon
-                    icon={isExporting ? 'lucide:loader-circle' : 'lucide:download'}
-                    width={16}
-                    height={16}
-                    className={isExporting ? 'animate-spin' : ''}
-                  />
-                </button>
+                <ExportZipButton
+                  isExporting={isExporting}
+                  disabled={isGenerating}
+                  onExport={handleExport}
+                />
               )}
 
               {/* Deploy to server：功能代码保留，入口当前关闭（上线时把 DEPLOY_ENABLED 改为 true） */}

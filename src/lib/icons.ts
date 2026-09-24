@@ -23,7 +23,7 @@ import code from '../../assets/icons/lucide/code.svg?raw';
 import code2 from '../../assets/icons/lucide/code-2.svg?raw';
 import copy from '../../assets/icons/lucide/copy.svg?raw';
 import database from '../../assets/icons/lucide/database.svg?raw';
-// import download from '../../assets/icons/lucide/download.svg?raw';
+import download from '../../assets/icons/lucide/download.svg?raw';
 import eye from '../../assets/icons/lucide/eye.svg?raw';
 import eyeOff from '../../assets/icons/lucide/eye-off.svg?raw';
 import file from '../../assets/icons/lucide/file.svg?raw';
@@ -99,7 +99,7 @@ const LOCAL_ICONS: Record<string, string> = {
   'code-2': code2,
   copy,
   database,
-  // download,
+  download,
   eye,
   'eye-off': eyeOff,
   file,
