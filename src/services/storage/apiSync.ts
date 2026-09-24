@@ -193,11 +193,22 @@ export function mergeProjects(
     merged.set(p.id, p);
   }
 
-  // 再用远程项目覆盖（如果更新时间更新）
+  // 再用远程项目覆盖（如果更新时间更新）。
+  // 字段级合并而非整体替换：远程胜出时以远程字段为准，但本地独有字段保留本地值。
+  // 背景：服务端 POST/PUT 契约未收录 framework 字段，远端项目天然缺失该字段；
+  // 若整体覆盖，合并结果丢失 framework 后会被 initialize() 写回 localStorage，
+  // 造成本地持久化字段丢失（D-2 脏写根因）。
+  // 合并前剥离远程的 undefined 值键：显式 undefined 与键缺失在 JSON 语义上等价，
+  // 不应覆盖本地的有效值。
   for (const remote of remoteProjects) {
     const local = merged.get(remote.id);
-    if (!local || new Date(remote.updatedAt) > new Date(local.updatedAt)) {
+    if (!local) {
       merged.set(remote.id, remote);
+    } else if (new Date(remote.updatedAt) > new Date(local.updatedAt)) {
+      const remoteClean = Object.fromEntries(
+        Object.entries(remote).filter(([, value]) => value !== undefined)
+      ) as Project;
+      merged.set(remote.id, { ...local, ...remoteClean });
     }
   }
 
