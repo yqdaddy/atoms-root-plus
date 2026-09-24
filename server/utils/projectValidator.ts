@@ -9,7 +9,7 @@
  */
 
 export interface ValidationIssue {
-  /** 规则代码：E_ENTRY / E_SCAFFOLD / E_GLOBAL_REG / E_CDN_DOMAIN（P1 扩展） */
+  /** 规则代码：E_ENTRY / E_SCAFFOLD / E_GLOBAL_REG / E_CDN_DOMAIN / E_INLINE_VOLUME / E_NO_BARE_IMPORT（P1 扩展） */
   code: string;
   /** 关联文件路径（规则级问题时为 '/'） */
   file: string;
@@ -42,6 +42,17 @@ const CDN_WHITELIST_HOSTS: ReadonlySet<string> = new Set(['cdn.jsdelivr.net', 'c
 const ATTR_REF_RE = /\b(?:src|href)\s*=\s*["']([^"']+)["']/gi;
 /** 资源引用形态二：CSS @import url("...") / @import "..."（字体与外部样式表） */
 const CSS_IMPORT_RE = /@import\s+(?:url\(\s*)?["']([^"')]+)["']/gi;
+
+/** E_INLINE_VOLUME 行阈值（F1）：与 LLM 审查维度 8"单文件超 150 行为缺陷"对齐 */
+const INLINE_VOLUME_LINE_LIMIT = 150;
+
+/** E_INLINE_VOLUME 认可的拆分代码文件后缀（存在任一即视为已拆分，不再触发） */
+const SPLIT_CODE_FILE_RE = /\.(css|mjs|jsx|ts|tsx|js)$/i;
+
+/** 行数统计：去掉末尾单个换行后按 \n 切分（trailing newline 不多算一行） */
+function countLines(content: string): number {
+  return content.replace(/\n$/, '').split('\n').length;
+}
 
 /**
  * 从资源引用值提取外部域名。
@@ -84,6 +95,54 @@ export interface ValidateOptions {
    *  迭代/修复场景应传入本次 LLM 实际产出的路径，避免存量项目的
    *  历史外部引用阻塞每次重试（误报面控制，D-8） */
   cdnScanPaths?: string[];
+  /** 强制 E_INLINE_VOLUME（F1，html 单文件体量）：与 scaffold 同属注入保证类
+   *  规则，仅 create 全量流水线强制；存量单文件项目 modify 不误报 */
+  enforceInlineVolume?: boolean;
+}
+
+// ═══ E_NO_BARE_IMPORT（P0 过渡规则，一键移除区开始）═══
+//
+// 【存在理由】CDN 直行模式没有打包器，浏览器无法解析裸 ESM import/export；
+// P0 约定是全局挂载（组件 window.__components.组件名 = 组件名，工具函数
+// window.__hooks.xxx / window.__utils.xxx）。模型幻觉出 import/export 时
+// 必须确定性打回（LLM 审查对这类硬伤不稳定），走既有校验重试通道自愈。
+//
+// 【作用域论证（为何不挂 enforceP0、diff 路径纳入）】
+// 1. P0 过渡期内所有平台生成项目（含 modify 的存量项目）均无 import——
+//    平台从未产出过带 import 的项目，常开无误报面；
+// 2. diff 行级编辑恰是 import 幻觉的高发入口（模型按 npm 习惯补 import），
+//    不纳入就漏掉最主要的违规面；
+// 3. 恒开让"一键移除"语义最干净：无需在调用方维护作用域开关字段。
+//
+// 【移除方式（P1 批次 2 切真实 ESM / importmap 后）】
+// 删除下方 validateNoBareImport 函数与 validateProject 内的调用块即可，
+// 无选项字段残留、无调用方改动。
+//
+// ═══ E_NO_BARE_IMPORT（一键移除区结束）═══
+
+/** 裸 ESM import/export 语句（行首，允许缩进；CDN 直行模式不可用） */
+const BARE_IMPORT_EXPORT_RE = /^[ \t]*(?:import|export)[ \t]/m;
+
+/** react-cdn /src 脚本文件（.js/.jsx/.mjs/.cjs） */
+const REACT_SRC_SCRIPT_RE = /^\/src\/.+\.(jsx?|mjs|cjs)$/i;
+
+/**
+ * 校验 react-cdn /src 脚本文件不含裸 import/export（P0 过渡规则，见上方移除区注释）。
+ */
+export function validateNoBareImport(files: Record<string, ValidatableFile>): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const [path, file] of Object.entries(files)) {
+    if (!REACT_SRC_SCRIPT_RE.test(path)) continue;
+    if (BARE_IMPORT_EXPORT_RE.test(file.content)) {
+      issues.push({
+        code: 'E_NO_BARE_IMPORT',
+        file: path,
+        message:
+          '使用了 import/export 语句（CDN 直行模式无打包器，浏览器无法解析）。请改为全局挂载：组件在文件末尾用 window.__components.组件名 = 组件名 注册，工具函数用 window.__utils.函数名 = 函数名 或 window.__hooks.xxx = xxx 暴露，调用方直接引用全局',
+      });
+    }
+  }
+  return issues;
 }
 
 /**
@@ -100,6 +159,7 @@ export function validateProject(
 ): ValidationResult {
   const enforceScaffold = options?.enforceScaffold ?? true;
   const enforceGlobalReg = options?.enforceGlobalReg ?? true;
+  const enforceInlineVolume = options?.enforceInlineVolume ?? true;
   const cdnScanPaths = options?.cdnScanPaths;
   const errors: ValidationIssue[] = [];
 
@@ -155,6 +215,34 @@ export function validateProject(
       });
     }
   }
+
+  // E_INLINE_VOLUME（F1）：html 入口单文件超行阈值且未拆分 → 确定性打回。
+  // 与 LLM 审查维度 8（单文件超 150 行为缺陷）对齐，把最典型的"全部塞进
+  // index.html"生成习惯在零 token 层拦截；真实事故样本：731 行单文件计算器。
+  // 拆分指引：样式与脚本拆出为 /styles/main.css 与 /src/main.js，入口用
+  // <link> / <script src> 引用，仅保留结构标记。已存在任一拆分代码文件时
+  // 不触发（拆分形态由审查维度把关，此处只拦"零拆分"的极端形态）
+  if (framework === 'html' && enforceInlineVolume && entry && entry.content.trim().length > 0) {
+    const hasSplitCodeFile = Object.entries(files).some(
+      ([path, file]) => path !== '/index.html' && SPLIT_CODE_FILE_RE.test(path) && file.content.trim().length > 0
+    );
+    const lineCount = countLines(entry.content);
+    if (!hasSplitCodeFile && lineCount > INLINE_VOLUME_LINE_LIMIT) {
+      errors.push({
+        code: 'E_INLINE_VOLUME',
+        file: '/index.html',
+        message: `单文件 ${lineCount} 行超过 ${INLINE_VOLUME_LINE_LIMIT} 行且未拆分：请把样式与脚本拆出为 /styles/main.css 与 /src/main.js（index.html 用 <link> 与 <script src> 引用），入口仅保留结构标记`,
+      });
+    }
+  }
+
+  // ═══ E_NO_BARE_IMPORT（P0 过渡规则，一键移除区开始）═══
+  // react-cdn 恒开（不挂 enforceP0，含 diff 路径）：作用域论证见
+  // validateNoBareImport 上方注释块。P1 批次 2 切真实 ESM 后删除本调用块。
+  if (framework === 'react-cdn') {
+    errors.push(...validateNoBareImport(files));
+  }
+  // ═══ E_NO_BARE_IMPORT（一键移除区结束）═══
 
   return { errors, warnings: [] };
 }

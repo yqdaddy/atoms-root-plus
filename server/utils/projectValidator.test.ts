@@ -223,3 +223,153 @@ describe('componentName', () => {
     expect(componentName('/src/App.jsx')).toBe('App');
   });
 });
+
+describe('validateProject：E_INLINE_VOLUME（F1 html 单文件体量）', () => {
+  /** 生成 n 行的单文件 html（真实事故样本：731 行单文件计算器，此处构造同形态） */
+  function oversizedHtml(lines: number): string {
+    const body = Array.from({ length: lines - 2 }, (_, i) => `<div class="row" data-i="${i}">${i}</div>`);
+    return ['<!DOCTYPE html>', ...body, '</html>'].join('\n');
+  }
+
+  it('超 150 行且无任何拆分代码文件 → 报 E_INLINE_VOLUME 并给拆分指引', () => {
+    const result = validateProject(
+      {
+        '/index.html': { path: '/index.html', content: oversizedHtml(160) },
+        '/README.md': { path: '/README.md', content: '# 说明' },
+      },
+      'html',
+      { enforceInlineVolume: true },
+    );
+    const issue = result.errors.find((e) => e.code === 'E_INLINE_VOLUME');
+    expect(issue).toBeDefined();
+    expect(issue?.file).toBe('/index.html');
+    expect(issue?.message).toContain('160 行');
+    expect(issue?.message).toContain('/styles/main.css');
+    expect(issue?.message).toContain('/src/main.js');
+  });
+
+  it('恰 150 行 → 通过（阈值语义为超过才触发）', () => {
+    const result = validateProject(
+      {
+        '/index.html': { path: '/index.html', content: oversizedHtml(150) },
+        '/README.md': { path: '/README.md', content: '# 说明' },
+      },
+      'html',
+      { enforceInlineVolume: true },
+    );
+    expect(result.errors.some((e) => e.code === 'E_INLINE_VOLUME')).toBe(false);
+  });
+
+  it('已拆分出 styles/main.css → 不触发（拆分形态交审查维度把关）', () => {
+    const result = validateProject(
+      {
+        '/index.html': { path: '/index.html', content: oversizedHtml(200) },
+        '/styles/main.css': { path: '/styles/main.css', content: '.row { color: red; }' },
+        '/README.md': { path: '/README.md', content: '# 说明' },
+      },
+      'html',
+      { enforceInlineVolume: true },
+    );
+    expect(result.errors.some((e) => e.code === 'E_INLINE_VOLUME')).toBe(false);
+  });
+
+  it('仅存在空内容的拆分文件 → 仍触发（空文件不算拆分）', () => {
+    const result = validateProject(
+      {
+        '/index.html': { path: '/index.html', content: oversizedHtml(200) },
+        '/src/main.js': { path: '/src/main.js', content: '   ' },
+        '/README.md': { path: '/README.md', content: '# 说明' },
+      },
+      'html',
+      { enforceInlineVolume: true },
+    );
+    expect(result.errors.some((e) => e.code === 'E_INLINE_VOLUME')).toBe(true);
+  });
+
+  it('enforceInlineVolume: false（存量 modify 作用域）→ 不触发', () => {
+    const result = validateProject(
+      {
+        '/index.html': { path: '/index.html', content: oversizedHtml(200) },
+        '/README.md': { path: '/README.md', content: '# 说明' },
+      },
+      'html',
+      { enforceInlineVolume: false },
+    );
+    expect(result.errors.some((e) => e.code === 'E_INLINE_VOLUME')).toBe(false);
+  });
+
+  it('react-cdn 框架不适用（规则仅 html）', () => {
+    const result = validateProject(
+      {
+        ...REACT_PROJECT,
+        '/index.html': { path: '/index.html', content: oversizedHtml(200) },
+      },
+      'react-cdn',
+      { enforceInlineVolume: true },
+    );
+    expect(result.errors.some((e) => e.code === 'E_INLINE_VOLUME')).toBe(false);
+  });
+});
+
+describe('validateProject：E_NO_BARE_IMPORT（P0 过渡，react-cdn 恒开）', () => {
+  it('/src 组件文件行首 import → 报 E_NO_BARE_IMPORT 并给全局挂载指引', () => {
+    const result = validateProject(
+      {
+        ...REACT_PROJECT,
+        '/src/App.jsx': {
+          path: '/src/App.jsx',
+          content: 'import { useState } from "react";\nfunction App() { return null; }\nwindow.__components = window.__components || {};\nwindow.__components.App = App;',
+        },
+      },
+      'react-cdn',
+    );
+    const issue = result.errors.find((e) => e.code === 'E_NO_BARE_IMPORT');
+    expect(issue?.file).toBe('/src/App.jsx');
+    expect(issue?.message).toContain('window.__components');
+  });
+
+  it('/src 工具文件行首 export 同样命中（含缩进）', () => {
+    const result = validateProject(
+      {
+        ...REACT_PROJECT,
+        '/src/utils.js': {
+          path: '/src/utils.js',
+          content: '  export function fmt(n) { return n; }',
+        },
+      },
+      'react-cdn',
+    );
+    expect(result.errors.some((e) => e.code === 'E_NO_BARE_IMPORT' && e.file === '/src/utils.js')).toBe(true);
+  });
+
+  it('行中出现 import 字样的代码不误报（仅行首语句命中）', () => {
+    const result = validateProject(
+      {
+        ...REACT_PROJECT,
+        '/src/data.js': {
+          path: '/src/data.js',
+          content: '// 负责数据的 import 解析\nconst importedCount = 1;\nwindow.__utils = window.__utils || {};',
+        },
+      },
+      'react-cdn',
+    );
+    expect(result.errors.some((e) => e.code === 'E_NO_BARE_IMPORT')).toBe(false);
+  });
+
+  it('html 框架不适用（规则仅 react-cdn）', () => {
+    const result = validateProject(
+      {
+        '/index.html': { path: '/index.html', content: '<!DOCTYPE html><html><body><script type="module">import x from "./a.js";</script></body></html>' },
+        '/src/main.js': { path: '/src/main.js', content: 'import a from "./a.js";' },
+        '/README.md': { path: '/README.md', content: '# 说明' },
+      },
+      'html',
+    );
+    expect(result.errors.some((e) => e.code === 'E_NO_BARE_IMPORT')).toBe(false);
+  });
+
+  it('非 /src 路径不查（入口内联脚本不受约束）', () => {
+    const result = validateProject(REACT_PROJECT, 'react-cdn');
+    expect(result.errors.some((e) => e.code === 'E_NO_BARE_IMPORT')).toBe(false);
+  });
+});

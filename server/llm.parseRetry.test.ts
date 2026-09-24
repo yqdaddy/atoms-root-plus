@@ -187,8 +187,12 @@ async function runCreateFlow(options: {
   return { events, requestBodies, fetchMock };
 }
 
-/** diff 修改流程：单阶段直通；currentFiles 可注入自定义存量项目（D-9 用） */
-async function runModifyFlow(responses: (string | Error)[], currentFiles?: typeof TEST_FILES): Promise<{
+/** diff 修改流程：单阶段直通；currentFiles 可注入自定义存量项目（D-9 用），prompt 可自定义（F4 用） */
+async function runModifyFlow(
+  responses: (string | Error)[],
+  currentFiles?: typeof TEST_FILES,
+  prompt = '把标题改成新标题',
+): Promise<{
   events: LLMEvent[];
   requestBodies: string[];
   fetchMock: ReturnType<typeof vi.fn>;
@@ -197,7 +201,7 @@ async function runModifyFlow(responses: (string | Error)[], currentFiles?: typeo
   vi.stubGlobal('fetch', fetchMock);
   const events: LLMEvent[] = [];
   await runDirectModifyPipeline({
-    prompt: '把标题改成新标题',
+    prompt,
     currentFiles: currentFiles ?? TEST_FILES,
     intent: MODIFY_INTENT,
     onEvent: (e) => events.push(e),
@@ -717,5 +721,306 @@ describe('D-9 CDN 扫描范围：diff/容错路径不误伤存量文件', () => 
     expect(deltaText).toContain('结构问题');
     const done = events.find((e) => e.type === 'done');
     expect(done).toBeDefined();
+  });
+});
+
+describe('F2 诚实匹配（集成）：diff 编辑与现有内容不符时不盲改', () => {
+  beforeEach(() => {
+    process.env.LLM_API_KEY = 'test-key';
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.LLM_API_KEY;
+  });
+
+  it('o. 全部编辑 old 不匹配 → 不交付伪修改，转对话模式明示未应用', async () => {
+    // 模型把历史摘要里的片段幻觉成现有内容写进 old（用户事故形态）
+    const MISMATCH_CHANGES_JSON = JSON.stringify({
+      changes: [
+        {
+          file: '/index.html',
+          edits: [
+            { line: 3, old: '历史摘要里幻觉出来的旧代码', new: '<body><h1>乱改后</h1></body>', type: 'replace' },
+          ],
+        },
+      ],
+      summary: '修改标题',
+    });
+
+    const { events, fetchMock } = await runModifyFlow([MISMATCH_CHANGES_JSON]);
+
+    // 修复前：按行号盲改，files 里交付被幻觉 new 覆盖的"改得很乱"内容
+    // 修复后：appliedCount 0 → 诚实转对话，无文件交付、无重试消耗
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+    expect(retryEvents(events)).toHaveLength(0);
+
+    const done = events.find((e) => e.type === 'done');
+    expect(done).toBeDefined();
+    expect(done!.payload.html).toBe('');
+    expect(done!.payload.files).toEqual({});
+    expect(done!.payload.analysis).toContain('1 处修改因与现有内容不符未应用');
+    expect(done!.payload.analysis).toContain('修改标题');
+  });
+
+  it('p. 混合编辑部分应用 → 匹配的生效，跳过的出 warning 明示数量', async () => {
+    const PARTIAL_CHANGES_JSON = JSON.stringify({
+      changes: [
+        {
+          file: '/index.html',
+          edits: [
+            // 第 4 行实际是 </html>，模型幻觉为 </body> → 应跳过
+            { line: 4, old: '</body>', new: '', type: 'replace' },
+            // 第 3 行真实匹配 → 应应用
+            { line: 3, old: '<body><h1 id="title">标题</h1></body>', new: '<body><h1 id="title">新标题</h1></body>', type: 'replace' },
+          ],
+        },
+      ],
+      summary: '修改标题并清理闭合标签',
+    });
+
+    const { events, fetchMock } = await runModifyFlow([PARTIAL_CHANGES_JSON]);
+
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // 部分应用：匹配编辑生效
+    const done = events.find((e) => e.type === 'done');
+    expect(done).toBeDefined();
+    expect(done!.payload.files?.['/index.html']?.content).toContain('新标题');
+    // 幻觉编辑未污染第 4 行
+    expect(done!.payload.files?.['/index.html']?.content).toContain('</html>');
+
+    // warning 明示跳过数量与位置
+    const warnings = events.filter((e) => e.type === 'warning');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.payload.message).toContain('1 处因与现有内容不符未应用');
+    expect(warnings[0]!.payload.message).toContain('/index.html:4');
+  });
+});
+
+describe('F1 E_INLINE_VOLUME（集成）：html 单文件超体量确定性打回重试', () => {
+  beforeEach(() => {
+    process.env.LLM_API_KEY = 'test-key';
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.LLM_API_KEY;
+  });
+
+  it('q. 160 行单文件无拆分 → 带拆分指引重试 → 拆分产物交付', async () => {
+    // 真实事故样本形态：731 行单文件计算器（此处同形态缩样为 160 行过阈值）
+    const OVERSIZED_HTML = JSON.stringify({
+      files: [
+        {
+          path: '/index.html',
+          content: [
+            '<!DOCTYPE html>',
+            ...Array.from({ length: 158 }, (_, i) => `<div class="row">${i}</div>`),
+            '</html>',
+          ].join('\n'),
+          language: 'html',
+        },
+      ],
+    });
+
+    // 拆分产物：入口仅结构 + css/js 各自承载
+    const SPLIT_FILES_JSON = JSON.stringify({
+      files: [
+        {
+          path: '/index.html',
+          content: '<!DOCTYPE html>\n<html>\n<head><link rel="stylesheet" href="/styles/main.css"></head>\n<body><div id="app"></div><script src="/src/main.js"></script></body>\n</html>',
+          language: 'html',
+        },
+        { path: '/styles/main.css', content: '.row { padding: 4px; }', language: 'css' },
+        { path: '/src/main.js', content: 'document.getElementById("app").textContent = "ok";', language: 'javascript' },
+      ],
+    });
+
+    const { events, requestBodies, fetchMock } = await runCreateFlow({
+      responses: [FEATURES_JSON, OVERSIZED_HTML, SPLIT_FILES_JSON, '审查通过'],
+    });
+
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+    // 分析师 + 工程师×2 + 审查者
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+
+    // 重试请求（index 2，分析师后第 2 次工程师调用）携带 E_INLINE_VOLUME 拆分指引
+    expect(requestBodies[2]).toContain('单文件 160 行超过 150 行');
+    expect(requestBodies[2]).toContain('/styles/main.css');
+    expect(requestBodies[2]).toContain('/src/main.js');
+
+    const done = events.find((e) => e.type === 'done');
+    expect(done).toBeDefined();
+    expect(done!.payload.files?.['/index.html']).toBeDefined();
+    expect(done!.payload.files?.['/src/main.js']).toBeDefined();
+    expect(done!.payload.files?.['/styles/main.css']).toBeDefined();
+  });
+});
+
+describe('F3 防幻觉提示词约束（diff 模式事实来源）', () => {
+  beforeEach(() => {
+    process.env.LLM_API_KEY = 'test-key';
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.LLM_API_KEY;
+  });
+
+  it('r. diff 请求系统提示与用户消息均含事实来源约束', async () => {
+    const { requestBodies } = await runModifyFlow([GOOD_CHANGES_JSON]);
+
+    const firstCall = JSON.parse(requestBodies[0]!) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    const systemContent = firstCall.messages.find((m) => m.role === 'system')!.content;
+    const userContent = firstCall.messages.find((m) => m.role === 'user')!.content;
+
+    // 系统提示：事实来源约束块 + 不匹配即跳过的诚实语义
+    expect(systemContent).toContain('唯一事实来源');
+    expect(systemContent).toContain('禁止当作');
+    expect(systemContent).toContain('不按行号盲改');
+    // 自检清单含摘抄来源确认
+    expect(systemContent).toContain('而非记忆、历史摘要或想象');
+    // 用户消息：尾行强化
+    expect(userContent).toContain('唯一事实依据');
+    // 用户消息不含历史摘要（diff 模式纯接地，防幻觉源头隔离）
+    expect(userContent).not.toContain('迭代摘要');
+  });
+});
+
+describe('F4 多文件裁剪保底（字面路径强制附带 + 未附带清单注入）', () => {
+  beforeEach(() => {
+    process.env.LLM_API_KEY = 'test-key';
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.LLM_API_KEY;
+  });
+
+  it('s. 裁剪后未附带文件 → 请求注入未附带清单，入口与匹配文件照常附带', async () => {
+    // 3 文件项目：标题在 index.html；format/chart 与需求无关，会被裁掉
+    const files = {
+      ...TEST_FILES,
+      '/src/format.js': {
+        path: '/src/format.js',
+        content: 'function formatNumber(n) {\n  return String(n);\n}',
+        language: 'javascript' as const,
+      },
+      '/src/chart.js': {
+        path: '/src/chart.js',
+        content: 'function drawChart(el) {\n  el.textContent = "chart";\n}',
+        language: 'javascript' as const,
+      },
+    };
+
+    const { events, requestBodies } = await runModifyFlow([GOOD_CHANGES_JSON], files);
+
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+    const userContent = (JSON.parse(requestBodies[0]!) as { messages: Array<{ role: string; content: string }> })
+      .messages.find((m) => m.role === 'user')!.content;
+
+    // 入口照常附带（带行号区块存在）
+    expect(userContent).toContain('当前项目文件（带行号）');
+    // 未附带清单注入：模型明确知道没看到哪些文件
+    expect(userContent).toContain('未附带内容');
+    expect(userContent).toContain('/src/format.js');
+    expect(userContent).toContain('/src/chart.js');
+    expect(userContent).toContain('禁止猜测或编造其内容');
+
+    // 交付正常（GOOD_CHANGES_JSON 应用到 index.html）
+    const done = events.find((e) => e.type === 'done');
+    expect(done).toBeDefined();
+    expect(done!.payload.files?.['/index.html']?.content).toContain('新标题');
+  });
+
+  it('t. 用户字面提及的路径强制附带（关键词匹配漏掉也不裁掉）', async () => {
+    // /src/a.js 无法被关键词匹配命中（src+js 两关键词摊薄后 0.333 < 0.35 阈值），
+    // 但 prompt 字面包含该路径 → F4 强制附带
+    const files = {
+      '/index.html': TEST_FILES['/index.html']!,
+      '/src/a.js': {
+        path: '/src/a.js',
+        content: 'const a = 1;',
+        language: 'javascript' as const,
+      },
+      '/src/chart.js': {
+        path: '/src/chart.js',
+        content: 'function drawChart(el) {\n  el.textContent = "chart";\n}',
+        language: 'javascript' as const,
+      },
+    };
+    const CHANGES = JSON.stringify({
+      changes: [
+        {
+          file: '/src/a.js',
+          edits: [{ line: 1, old: 'const a = 1;', new: 'const a = 2;', type: 'replace' }],
+        },
+      ],
+      summary: '补全常量',
+    });
+
+    const { events, requestBodies } = await runModifyFlow([CHANGES], files, '修改 /src/a.js：把内容补全');
+
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+    const userContent = (JSON.parse(requestBodies[0]!) as { messages: Array<{ role: string; content: string }> })
+      .messages.find((m) => m.role === 'user')!.content;
+
+    // 字面提及的 /src/a.js 内容确实附带（修复前会被裁掉，模型只能编造）
+    expect(userContent).toContain('const a = 1;');
+    // 无关文件照旧进未附带清单
+    expect(userContent).toContain('/src/chart.js');
+
+    const done = events.find((e) => e.type === 'done');
+    expect(done).toBeDefined();
+    expect(done!.payload.files?.['/src/a.js']?.content).toContain('const a = 2;');
+  });
+});
+
+describe('E_NO_BARE_IMPORT（集成）：react-cdn 幻觉 import 确定性打回重试', () => {
+  beforeEach(() => {
+    process.env.LLM_API_KEY = 'test-key';
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.LLM_API_KEY;
+  });
+
+  it('u. 工程师输出含裸 import → 带全局挂载指引重试 → 合规产物交付', async () => {
+    const reactApp = (withImport: boolean) => JSON.stringify({
+      files: [
+        { path: '/index.html', content: '<!DOCTYPE html><html><head></head><body><div id="root"></div></body></html>', language: 'html' },
+        { path: '/src/main.jsx', content: 'const App = window.__components.App;', language: 'javascript' },
+        {
+          path: '/src/App.jsx',
+          content: withImport
+            ? 'import { useState } from "react";\nfunction App() { return null; }\nwindow.__components = window.__components || {};\nwindow.__components.App = App;'
+            : 'function App() { return null; }\nwindow.__components = window.__components || {};\nwindow.__components.App = App;',
+          language: 'javascript',
+        },
+      ],
+    });
+
+    const { events, requestBodies, fetchMock } = await runCreateFlow({
+      framework: 'react-cdn',
+      responses: [FEATURES_JSON, reactApp(true), reactApp(false), '审查通过'],
+    });
+
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+    // 分析师 + 工程师×2 + 审查者
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+
+    // 重试请求（index 2）携带 E_NO_BARE_IMPORT 指引（全局挂载约定）
+    expect(requestBodies[2]).toContain('import/export 语句');
+    expect(requestBodies[2]).toContain('window.__components');
+
+    const done = events.find((e) => e.type === 'done');
+    expect(done).toBeDefined();
+    expect(done!.payload.files?.['/src/App.jsx']?.content).not.toContain('import');
   });
 });

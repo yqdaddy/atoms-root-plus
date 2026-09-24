@@ -229,6 +229,13 @@ const ENGINEER_DIFF_PROMPT = `你是 Litpp 平台的前端工程师，负责根�
 1. 用户的修改请求
 2. 现有文件内容（带行号标注，行号仅供定位，输出时使用去掉行号后的原文）
 
+【事实来源约束（防幻觉，最高优先级）】
+- 带行号的现有文件内容是唯一事实来源：old 只能从中逐字摘抄（去掉行号前缀，含缩进）
+- 历史对话、迭代摘要、此前生成说明仅是意图参考：其中出现的代码片段一律禁止当作
+  现有内容写进 old（真实事故：把摘要里的旧片段幻觉成现状，按行号盲改导致改坏）
+- 每条编辑落笔前，先在带行号内容中找到目标行的逐字原文；找不到逐字原文就不要输出
+  该编辑，改为输出 { "changes": [], "summary": "说明无法在现有文件中定位的原因" }
+
 【输出格式】【必须严格遵守】
 
 **重要：你必须输出 \`{ "changes": [...] }\` 格式，不是其他格式！**
@@ -275,7 +282,7 @@ const ENGINEER_DIFF_PROMPT = `你是 Litpp 平台的前端工程师，负责根�
 - delete：删除 line 指定的行，old 填该行原文，new 填空字符串
 
 【规则】
-1. old 必须精确匹配原文件中的行，包括空格和缩进；匹配失败将导致整个变更被拒绝
+1. old 必须精确匹配原文件中的行，包括空格和缩进；不匹配的编辑会被跳过（不按行号盲改），宁可少改不可错改
 2. line 是 1-indexed 的行号，基于原始文件（未应用任何编辑前）的行号
 3. 同一文件的多个编辑按行号从大到小排列（从文件末尾往前改，避免行号偏移）
 4. 每次只修改必要的行，不要重写未变更的部分
@@ -312,6 +319,7 @@ const ENGINEER_DIFF_PROMPT = `你是 Litpp 平台的前端工程师，负责根�
 
 【自检清单】
 输出前确认：
+- 每条 old 都摘自带行号文件内容的原文，而非记忆、历史摘要或想象
 - old 与原文件对应行逐字符一致（含缩进）
 - 行号基于原始文件且从大到小排列
 - 没有输出未变更的行
@@ -1111,7 +1119,7 @@ export async function continueAfterApproval(
       const numberedFiles = formatFilesWithLineNumbers(currentFiles);
       generateMessages.push({
         role: 'user',
-        content: `${preferenceSection}## 用户修改需求\n${prompt}\n\n## 当前项目文件（带行号）\n${numberedFiles}\n\n请根据修改需求输出变更清单。`,
+        content: `${preferenceSection}## 用户修改需求\n${prompt}\n\n## 当前项目文件（带行号）\n${numberedFiles}\n\n请根据修改需求输出变更清单。写每条编辑的 old 时，只以上方带行号文件内容为唯一事实依据，禁止凭记忆或对话摘要编造现有代码。`,
       });
     } else if (isIteration && currentFiles) {
       // 迭代模式（全量文件）：传递受影响文件的完整内容
@@ -1249,13 +1257,42 @@ export async function continueAfterApproval(
 
           // 应用变更
           const mergeBase = session.originalFiles ?? currentFiles ?? {};
-          const { newFiles, appliedCount, errors } = applyChanges(mergeBase, changeList.changes);
+          const { newFiles, appliedCount, skippedCount, skippedEdits, errors } = applyChanges(mergeBase, changeList.changes);
 
           if (errors.length > 0) {
             console.warn('[continueAfterApproval] 部分编辑未成功应用:', errors.join('; '));
           }
 
-          console.info(`[continueAfterApproval] 已应用 ${appliedCount} 处编辑`);
+          console.info(`[continueAfterApproval] 已应用 ${appliedCount} 处编辑，跳过 ${skippedCount} 处`);
+
+          if (appliedCount === 0) {
+            // F2 诚实路径：全部编辑因与现有内容不符未应用 → 不交付"伪修改"，
+            // 复用空变更的对话模式语义，明示未应用数量
+            console.warn('[continueAfterApproval] diff 编辑全部未应用，转对话模式:', skippedEdits.join('; '));
+            pendingSessions.delete(sessionId);
+            onEvent({
+              type: 'done',
+              payload: {
+                html: '',
+                files: {},
+                analysis: changeList.summary
+                  ? `${changeList.summary}（${skippedCount} 处修改因与现有内容不符未应用，代码未变更；请补充更具体的需求后重试。）`
+                  : `本次修改未能应用：${skippedCount} 处变更与现有代码内容不一致，已按原样保留；请补充更具体的需求后重试。`,
+                stats: result.usage ? {
+                  inputTokens: result.usage.prompt_tokens,
+                  outputTokens: result.usage.completion_tokens,
+                } : undefined,
+              },
+            });
+            return;
+          }
+
+          if (skippedCount > 0) {
+            // 部分应用：warning 明示跳过数量与位置，用户可据此决定是否重试
+            const skipNotice = `已应用 ${appliedCount} 处修改，另有 ${skippedCount} 处因与现有内容不符未应用（${skippedEdits.join('、')}）；如结果不符预期可点击重试。`;
+            console.warn('[continueAfterApproval] 部分编辑被跳过:', skipNotice);
+            onEvent({ type: 'warning', payload: { message: skipNotice } });
+          }
 
           const now = new Date().toISOString();
           // CDN 扫描范围 = 本轮变更实际声明的文件（finalFiles 是合并后的全量，不能作范围）
@@ -1384,10 +1421,16 @@ export async function continueAfterApproval(
               }
 
               const mergeBase = session.originalFiles ?? currentFiles;
-              const { newFiles, appliedCount, errors } = applyChanges(mergeBase, toleratedList.changes);
+              const { newFiles, appliedCount, skippedCount, skippedEdits, errors } = applyChanges(mergeBase, toleratedList.changes);
               if (appliedCount > 0) {
                 if (errors.length > 0) {
                   console.warn('[continueAfterApproval] changes 格式容错：部分编辑未成功应用:', errors.join('; '));
+                }
+                if (skippedCount > 0) {
+                  // F2 部分应用：warning 明示跳过数量与位置，与 diff 路径同款文案
+                  const skipNotice = `已应用 ${appliedCount} 处修改，另有 ${skippedCount} 处因与现有内容不符未应用（${skippedEdits.join('、')}）；如结果不符预期可点击重试。`;
+                  console.warn('[continueAfterApproval] changes 格式容错：部分编辑被跳过:', skipNotice);
+                  onEvent({ type: 'warning', payload: { message: skipNotice } });
                 }
                 changeList = toleratedList;
                 // 全量文件走正常交付流程（后续审查、finalFiles 组装与 diff 模式共用）
@@ -1396,10 +1439,15 @@ export async function continueAfterApproval(
                 cdnTouchedPaths = toleratedList.changes.map((c) => c.file);
                 parseSuccess = true;
                 console.info(
-                  `[continueAfterApproval] changes 格式容错成功: 应用 ${appliedCount} 处编辑，交付 ${Object.keys(newFiles).length} 个文件`
+                  `[continueAfterApproval] changes 格式容错成功: 应用 ${appliedCount} 处编辑，跳过 ${skippedCount} 处，交付 ${Object.keys(newFiles).length} 个文件`
                 );
               } else {
-                console.warn('[continueAfterApproval] changes 格式容错失败：无可用编辑，降级走重试');
+                console.warn(
+                  '[continueAfterApproval] changes 格式容错失败：无可用编辑',
+                  skippedCount > 0
+                    ? `（${skippedCount} 处编辑因与现有内容不符被跳过: ${skippedEdits.join('; ')}），降级走重试`
+                    : '，降级走重试'
+                );
               }
             } catch (tolerantError) {
               // 输出不是合法的 changes 格式（多为截断的 files 输出），继续走重试/抢救
@@ -1472,6 +1520,7 @@ export async function continueAfterApproval(
           const validation = validateProject(finalFiles, framework, {
             enforceScaffold: enforceP0,
             enforceGlobalReg: enforceP0,
+            enforceInlineVolume: enforceP0,
             cdnScanPaths: multiFileOutput
               ? (cdnTouchedPaths ?? multiFileOutput.files.map((f) => f.path))
               : cdnTouchedPaths,
@@ -1657,6 +1706,7 @@ export async function continueAfterApproval(
             const revalidation = validateProject(repairedRecord, framework, {
               enforceScaffold: enforceP0,
               enforceGlobalReg: enforceP0,
+              enforceInlineVolume: enforceP0,
               // 修复输出是全量文件（含原样保留的存量文件），CDN 扫描同样只看
               // 本次会话实际触碰的文件集合（D-9 同类防线）
               cdnScanPaths: cdnTouchedPaths ?? repairedFiles.map((f) => f.path),
@@ -2104,6 +2154,34 @@ export async function runDirectModifyPipeline({
   });
   const trimmedFilePaths = trimResult.trimmedPaths;
 
+  // F4 裁剪保底（防上下文饥饿）：
+  // 1) 用户消息中字面提及的路径强制携带——关键词/内容匹配可能漏掉精确路径
+  //    （真实事故：13 文件 react 项目裁到只剩 1 个，模型自述"内容未提供"）
+  // 2) 入口 /index.html 双保险（includeEntry 之外的兜底）
+  const forcedPaths: string[] = [];
+  const forceInclude = (p: string) => {
+    if (!trimmedFilePaths.includes(p)) {
+      trimmedFilePaths.push(p);
+      forcedPaths.push(p);
+    }
+  };
+  for (const p of allFilePaths) {
+    if (prompt.includes(p)) forceInclude(p);
+  }
+  const entryPath = allFilePaths.find((p) => p === '/index.html');
+  if (entryPath) forceInclude(entryPath);
+  if (forcedPaths.length > 0) {
+    console.info('[runDirectModifyPipeline] 裁剪保底强制附带:', forcedPaths.join(', '));
+  }
+
+  // 3) 未附带文件清单注入请求：让模型明确知道哪些文件没看到，
+  //    需要时先说明而不是凭空猜测（对"内容未提供"型饥饿的诚实出口）
+  const unattachedPaths = allFilePaths.filter((p) => !trimmedFilePaths.includes(p));
+  const effectivePrompt =
+    unattachedPaths.length > 0
+      ? `${prompt}\n\n【文件上下文说明】以下 ${unattachedPaths.length} 个文件未附带内容：${unattachedPaths.join('、')}。如需修改这些文件，请先在 summary 中说明需要哪些文件内容，禁止猜测或编造其内容。`
+      : prompt;
+
   // 输出裁剪日志
   console.info(
     '[runDirectModifyPipeline] 上下文裁剪:',
@@ -2145,7 +2223,7 @@ export async function runDirectModifyPipeline({
 
   const sessionId = crypto.randomUUID();
   pendingSessions.set(sessionId, {
-    prompt,
+    prompt: effectivePrompt, // F4：含未附带文件清单说明（features 摘要仍用原始 prompt）
     currentFiles: trimmedFiles, // 存入裁剪后的文件
     // 保留原始文件引用，用于后续合并时保留未变更文件
     originalFiles: currentFiles,
@@ -2394,13 +2472,19 @@ export function parseChangeList(output: string): ChangeList {
 /**
  * 将变更清单应用到文件集合。
  *
- * 校验规则：
- * - old 字段与实际行精确匹配（宽松模式：trim 后匹配也可接受）
- * - 行号从大到小应用（避免行号偏移）
+ * 校验规则（F2 诚实匹配，不盲改）：
+ * - replace/delete 的 old 字段必须与实际行匹配（精确或 trim 双口径），不匹配则跳过该编辑，
+ *   绝不按行号盲改（历史事故：old 来自历史摘要幻觉时按行号硬改导致"改得很乱"）
+ * - 空 old 的 replace/delete 视为不匹配（无验证锚点即不动现有内容）
+ * - insert 按行号插入、不覆盖现有行，不做内容校验（old 常为空是合法形态）
+ * - 行号从大到小应用（避免行号偏移）；被跳过的编辑不移动行，不影响其余编辑行号
  *
- * 返回 { newFiles, appliedCount, errors }：
- * - appliedCount：成功应用的编辑数
- * - errors：失败的编辑及其原因（部分失败仍返回更新后的文件）
+ * 返回 { newFiles, appliedCount, skippedCount, skippedEdits, errors }：
+ * - appliedCount：真实应用的编辑数
+ * - skippedCount：因 old 不匹配被跳过的编辑数
+ * - skippedEdits：被跳过编辑的明细（"文件:行号"）
+ * - errors：结构性错误（文件不存在、行号越界）
+ * - 单文件全部编辑被跳过时不写回该文件（不产生内容不变的"伪修改"标记）
  */
 export function applyChanges(
   files: Record<string, { path: string; content: string; language: FileLanguage }>,
@@ -2408,10 +2492,14 @@ export function applyChanges(
 ): {
   newFiles: Record<string, { path: string; content: string; language: FileLanguage }>;
   appliedCount: number;
+  skippedCount: number;
+  skippedEdits: string[];
   errors: string[];
 } {
   const newFiles = { ...files };
   let appliedCount = 0;
+  let skippedCount = 0;
+  const skippedEdits: string[] = [];
   const errors: string[] = [];
 
   for (const change of changes) {
@@ -2422,6 +2510,8 @@ export function applyChanges(
     }
 
     const lines = file.content.split('\n');
+    // 本文件是否有真实应用的编辑：全部被跳过时不写回，保持原内容
+    let fileTouched = false;
 
     // 编辑按行号从大到小应用（避免行号偏移）
     const sortedEdits = [...change.edits].sort((a, b) => b.line - a.line);
@@ -2434,14 +2524,19 @@ export function applyChanges(
         continue;
       }
 
-      // 校验 old 字段（宽松匹配：精确匹配或 trim 后匹配）
+      // F2 诚实匹配：replace/delete 覆盖或删除现有内容，old 必须与实际行匹配；
+      // 不匹配即跳过并诚实计数，绝不"信任 LLM 的定位"按行号盲改
       const actualLine = idx < lines.length ? lines[idx] : '';
-      const oldMatch = edit.old === actualLine || edit.old.trim() === actualLine.trim();
-      if (!oldMatch && edit.old.trim().length > 0) {
-        // 不匹配但 old 非空，记录警告但继续应用（信任 LLM 的定位）
-        console.warn(
-          `[applyChanges] ${change.file}:${edit.line} old 字段不匹配\n期望: "${edit.old}"\n实际: "${actualLine}"`
-        );
+      if (edit.type !== 'insert') {
+        const oldMatch = edit.old === actualLine || (edit.old.trim() === actualLine.trim() && edit.old.trim().length > 0);
+        if (!oldMatch) {
+          skippedCount++;
+          skippedEdits.push(`${change.file}:${edit.line}`);
+          console.warn(
+            `[applyChanges] ${change.file}:${edit.line} old 字段不匹配，已跳过（不盲改）\n期望: "${edit.old}"\n实际: "${actualLine}"`
+          );
+          continue;
+        }
       }
 
       if (edit.type === 'insert') {
@@ -2454,6 +2549,7 @@ export function applyChanges(
           lines.splice(idx + 1, 0, ...newLines);
         }
         appliedCount++;
+        fileTouched = true;
       } else if (edit.type === 'delete') {
         if (idx >= lines.length) {
           errors.push(`${change.file}:${edit.line} 行号超出文件范围`);
@@ -2461,6 +2557,7 @@ export function applyChanges(
         }
         lines.splice(idx, 1);
         appliedCount++;
+        fileTouched = true;
       } else {
         // replace
         if (idx >= lines.length) {
@@ -2469,14 +2566,18 @@ export function applyChanges(
         }
         lines[idx] = edit.new;
         appliedCount++;
+        fileTouched = true;
       }
     }
 
-    newFiles[change.file] = {
-      ...file,
-      content: lines.join('\n'),
-    };
+    // 全部编辑被跳过时不写回该文件（避免把未变更文件标记为已修改）
+    if (fileTouched) {
+      newFiles[change.file] = {
+        ...file,
+        content: lines.join('\n'),
+      };
+    }
   }
 
-  return { newFiles, appliedCount, errors };
+  return { newFiles, appliedCount, skippedCount, skippedEdits, errors };
 }
