@@ -13,9 +13,16 @@ import {
 } from '../types/sandbox';
 import type { SandboxAllowFlag, FileNode, ProjectFramework } from '../types/project';
 import { useSettingsStore, type DeviceMode, DEVICE_VIEWPORTS } from '../stores/settingsStore';
-import { assembleFiles, injectReactRuntime, injectVueRuntime } from '../services/sandbox/assembler';
+import { assembleFiles, assembleProjectFiles, injectReactRuntime, injectVueRuntime } from '../services/sandbox/assembler';
 import { ESM_CDN_HOST } from '../services/sandbox/jsxCompiler';
 import CodeViewer from './CodeViewer';
+
+/**
+ * 打包链路防抖窗口（P1 批次 2）。
+ * 流式生成期间输入连续变化：窗口内保持同步产物（现状链路，行为与激活前一致），
+ * 输入稳定后才升级为 mini-bundler 打包产物，避免每次流式 tick 双重 iframe 重载。
+ */
+const ASSEMBLY_DEBOUNCE_MS = 250;
 
 interface SandboxFrameProps {
   /** 生成的 HTML 代码（单文件模式，向后兼容） */
@@ -125,6 +132,14 @@ function isMultiFile(files: Record<string, FileNode> | undefined): boolean {
   return false;
 }
 
+/**
+ * 打包链路（P1 批次 2）仅作用于 react-cdn 多文件项目；
+ * 其余组合的同步产物即最终产物，无需异步升级。
+ */
+function needsModuleAssembly(files: Record<string, FileNode> | undefined, framework: ProjectFramework): boolean {
+  return framework === 'react-cdn' && isMultiFile(files);
+}
+
 /** 获取最终的预览 HTML */
 function getPreviewHtml(
   html: string | undefined,
@@ -186,11 +201,65 @@ export default function SandboxFrame({
   // 组装沙箱属性
   const sandboxAttr = useMemo(() => buildSandboxAttribute(extraSandboxFlags), [extraSandboxFlags]);
 
-  // 获取最终预览 HTML（支持多文件与 React CDN 框架）
-  const previewSourceHtml = useMemo(
+  // 同步组装产物（现状逐文件链路）：用于首帧渲染与打包链路就绪前的回退，永不空白
+  const syncAssembledHtml = useMemo(
     () => getPreviewHtml(html, files, entryFile, framework),
     [html, files, entryFile, framework]
   );
+
+  // 打包链路产物（P1 批次 2 激活）：null 表示当前以同步产物为准
+  const [bundledHtml, setBundledHtml] = useState<string | null>(null);
+
+  // 组装输入快照（引用身份）：四项输入任一变化即视为新请求
+  const assemblyInputs = useMemo(
+    () => ({ html, files, entryFile, framework }),
+    [html, files, entryFile, framework]
+  );
+
+  // 渲染期状态调整（React 认可的派生状态重置模式）：输入变化时在同一渲染帧
+  // 丢弃上一轮异步产物，立即回退同步产物，杜绝跨项目/跨版本的 stale 闪现
+  const [lastAssemblyInputs, setLastAssemblyInputs] = useState(assemblyInputs);
+  if (lastAssemblyInputs !== assemblyInputs) {
+    setLastAssemblyInputs(assemblyInputs);
+    setBundledHtml(null);
+  }
+
+  // 异步升级：react-cdn 多文件项目经 mini-bundler 打包为单一脚本。
+  // 竞态约束：只采纳最后一次请求的产物。三层防护：
+  // 1. 渲染期重置（上）保证输入变化后任何时刻 DOM 都不显示旧产物；
+  // 2. effect cleanup 的 cancelled 标志丢弃上一次请求的迟到结果；
+  // 3. 防抖窗口内输入持续变化则打包请求不发出（流式期间的现状行为不变）
+  useEffect(() => {
+    if (!needsModuleAssembly(files, framework) || !files) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      assembleProjectFiles(files, entryFile, framework)
+        .then((result) => {
+          if (!cancelled) {
+            setBundledHtml(result.html);
+          }
+        })
+        .catch(() => {
+          // 组装失败：落到现状链路重试一次（getPreviewHtml 即现状链路）；
+          // 重试再失败则保持当前显示，不出现白屏
+          try {
+            const fallbackHtml = getPreviewHtml(html, files, entryFile, framework);
+            if (!cancelled) setBundledHtml(fallbackHtml);
+          } catch (retryError) {
+            console.error('[SandboxFrame] 预览组装失败，保持最近一次可用产物:', retryError);
+          }
+        });
+    }, ASSEMBLY_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [assemblyInputs, html, files, entryFile, framework]);
+
+  // 最终预览源：打包产物就绪且对应最新输入时优先，否则同步产物。
+  // 无 import 的存量项目升级结果与同步产物逐字符串相等，
+  // previewHtml 的 useMemo 依赖 Object.is 短路，srcdoc 不变，iframe 不重载
+  const previewSourceHtml = bundledHtml ?? syncAssembledHtml;
 
   // 组装预览 HTML（注入 CSP 和桥接脚本）
   // React CDN 模式：开放 unsafe-eval（Sucrase 产物经 new Function 执行）并加白 esm.sh（Sucrase ESM 构建域）
