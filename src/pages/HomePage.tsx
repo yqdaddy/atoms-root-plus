@@ -839,7 +839,7 @@ export default function HomePage() {
       priorChatLength: priorChat.length,
       entryContentLength: entryContent.length,
       hasSubstantialContent,
-      willUseFramework: isIteration ? (project.framework ?? 'html') : selectedFramework,
+      willUseFramework: isIteration ? (project.framework ?? selectedFramework) : selectedFramework,
       runId,
       intentType,
     });
@@ -879,11 +879,17 @@ export default function HomePage() {
           ? { [ENTRY_FILE_PATH]: { path: ENTRY_FILE_PATH, content: generatedHtml, language: 'html' as const } }
           : {};
 
+      // 幻影迭代防护：有对话历史（isIteration 为真）但拿不到任何可修改文件
+      // （历史生成失败未落盘 / 文件丢失）时，必须按"全新生成"发请求。
+      // 否则服务端会以"修改现有应用"的框架提示模型，而模型看不到现有文件时
+      // 倾向输出 changes 变更清单，触发格式错误且重试也难以纠正。
+      const requestAsIteration = isIteration && Object.keys(filesToSend).length > 0;
+
       // 构建生成选项
       const baseOpts: GenerateOptions = {
         // 目标框架：首次创建用 selectedFramework，迭代修改用项目的 framework
-        framework: isIteration ? (project.framework ?? 'html') : selectedFramework,
-        ...(isIteration ? {
+        framework: (requestAsIteration || isIteration) ? (project.framework ?? selectedFramework) : selectedFramework,
+        ...(requestAsIteration ? {
           currentHtml: generatedHtml,
           currentFiles: filesToSend,
           // 最近 12 条对话（用户+助手交替），前端预裁剪每条上限 2000 字符
