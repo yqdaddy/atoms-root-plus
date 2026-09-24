@@ -3,8 +3,8 @@
  *
  * 职责：
  * 1. 读取入口 HTML 文件
- * 2. 内联所有本地 CSS 引用（<link rel="stylesheet" href="./styles/...">）
- * 3. 内联所有本地 JS 引用（<script src="./src/...">）
+ * 2. 内联所有本地 CSS 引用（href 支持 "./xxx"、"../xxx" 与根相对 "/xxx"）
+ * 3. 内联所有本地 JS 引用（src 支持 "./xxx"、"../xxx" 与根相对 "/xxx"）
  * 4. 验证无遗漏的外部引用
  * 5. React CDN 模式：注入 React/Sucrase 运行时，浏览器内编译执行 JSX
  *
@@ -82,6 +82,13 @@ export class Assembler {
     }
 
     let html = entryNode.content;
+    const framework = this.config.framework ?? 'html';
+
+    // react-cdn 组件注册（window.__components）依赖入口 HTML 按序引用源码文件，
+    // 必须在内联发生前检查原始引用完整性，内联后引用标签已被替换
+    if (framework === 'react-cdn') {
+      this.warnUnreferencedSourceFiles(html, warnings);
+    }
 
     // 2. 处理 CSS 引用
     const cssResult = this.inlineCssLinks(html, warnings);
@@ -89,7 +96,6 @@ export class Assembler {
     inlinedCss = cssResult.count;
 
     // 3. 处理 JS 引用（React CDN 模式下 JSX 文件被包装为浏览器内编译执行）
-    const framework = this.config.framework ?? 'html';
     const jsResult = this.inlineJsScripts(html, warnings, framework);
     html = jsResult.html;
     inlinedJs = jsResult.count;
@@ -120,7 +126,8 @@ export class Assembler {
 
   /**
    * 内联 CSS link 标签
-   * 匹配格式：<link rel="stylesheet" href="./styles/xxx.css"> 或 <link href="./styles/xxx.css" rel="stylesheet">
+   * 匹配格式：<link rel="stylesheet" href="./styles/xxx.css">、<link href="../styles/xxx.css">
+   * 或根相对 <link href="/styles/xxx.css">（模型两种引用形态都出现，D-10）
    */
   private inlineCssLinks(html: string, warnings: string[]): { html: string; count: number } {
     let count = 0;
@@ -134,8 +141,8 @@ export class Assembler {
         return match;
       }
 
-      // 提取 href 属性值（支持 "./xxx" 与 "../xxx" 两种相对前缀）
-      const hrefMatch = attrs.match(/href\s*=\s*["'](\.{1,2}\/[^"']+)["']/i);
+      // 提取 href 属性值：支持 "./xxx"、"../xxx" 与根相对 "/xxx"（排除协议相对 "//host/xxx"）
+      const hrefMatch = attrs.match(/href\s*=\s*["']((?:\.{1,2}\/|\/(?!\/))[^"']+)["']/i);
       const relativePath = hrefMatch?.[1];
       if (!relativePath) {
         // 外部链接或非本地路径，保持原样
@@ -143,6 +150,13 @@ export class Assembler {
       }
 
       const absolutePath = this.resolvePath(relativePath);
+
+      // 防循环：入口 HTML 自身被引用为脚本/样式时跳过内联，避免自嵌套
+      if (absolutePath === this.config.entryPath) {
+        warnings.push(`入口文件自身引用，跳过内联: ${relativePath}`);
+        return match;
+      }
+
       const fileNode = this.config.files[absolutePath];
 
       if (!fileNode) {
@@ -159,7 +173,8 @@ export class Assembler {
 
   /**
    * 内联 JS script 标签
-   * 匹配格式：<script src="./src/xxx.js"></script> 或 <script src="../src/xxx.js"></script>
+   * 匹配格式：<script src="./src/xxx.js"></script>、<script src="../src/xxx.js"></script>
+   * 或根相对 <script src="/src/xxx.js"></script>（模型两种引用形态都出现，D-10）
    * React CDN 模式下，含 JSX 语法的文件被包装为浏览器内编译执行脚本块
    */
   private inlineJsScripts(
@@ -173,8 +188,8 @@ export class Assembler {
     const scriptPattern = /<script\s+([^>]*?)>\s*<\/script>/gi;
 
     const result = html.replace(scriptPattern, (match, attrs: string) => {
-      // 提取 src 属性值（支持 "./xxx" 与 "../xxx" 两种相对前缀）
-      const srcMatch = attrs.match(/src\s*=\s*["'](\.{1,2}\/[^"']+)["']/i);
+      // 提取 src 属性值：支持 "./xxx"、"../xxx" 与根相对 "/xxx"（排除协议相对 "//host/xxx"）
+      const srcMatch = attrs.match(/src\s*=\s*["']((?:\.{1,2}\/|\/(?!\/))[^"']+)["']/i);
       const relativePath = srcMatch?.[1];
       if (!relativePath) {
         // 外部链接或非本地路径，保持原样
@@ -182,6 +197,13 @@ export class Assembler {
       }
 
       const absolutePath = this.resolvePath(relativePath);
+
+      // 防循环：入口 HTML 自身被引用为脚本/样式时跳过内联，避免自嵌套
+      if (absolutePath === this.config.entryPath) {
+        warnings.push(`入口文件自身引用，跳过内联: ${relativePath}`);
+        return match;
+      }
+
       const fileNode = this.config.files[absolutePath];
 
       if (!fileNode) {
@@ -192,7 +214,10 @@ export class Assembler {
       count++;
 
       // React CDN 模式：JSX 文件包装为编译执行脚本块
-      if (framework === 'react-cdn' && containsJsx(fileNode.content)) {
+      // .jsx 扩展名直接视为 JSX（启发式 containsJsx 对 return ( 换行标签等形态可能漏判，
+      // 漏报代价是裸 JSX 在普通 script 里语法错误、组件整文件失效）
+      const isJsxFile = relativePath.toLowerCase().endsWith('.jsx');
+      if (framework === 'react-cdn' && (isJsxFile || containsJsx(fileNode.content))) {
         return wrapJsxScript(fileNode.content, relativePath);
       }
 
@@ -203,14 +228,30 @@ export class Assembler {
   }
 
   /**
+   * 将运行时脚本注入 <head> 最前，保证先于用户脚本执行
+   */
+  private injectHead(html: string, snippet: string): string {
+    if (html.includes('<head>')) {
+      return html.replace('<head>', `<head>${snippet}`);
+    }
+    if (html.includes('<html>')) {
+      return html.replace('<html>', `<html><head>${snippet}</head>`);
+    }
+    return `<!DOCTYPE html><html><head>${snippet}</head><body>${html}</body></html>`;
+  }
+
+  /**
    * 注入 React CDN 运行时（React 18 UMD + Sucrase 编译器）
    * 同时处理无 src 的内联 <script> 中出现的 JSX 代码
+   *
+   * 无论用户 HTML 是否自带 React 引用都注入平台运行时：
+   * 沙箱 CSP 只放行白名单 CDN（docs/tech-sandbox.md 铁律 4），
+   * 模型自带的外域引用（如 unpkg.com）会被浏览器拦截导致白屏，
+   * 平台运行时固定走 jsdelivr，保证 React/ReactDOM/Sucrase 可用。
    */
   injectReactRuntime(html: string, warnings: string[]): string {
-    // 已包含 React 引用时尊重用户代码，跳过自动注入
     if (html.includes('react@') || html.includes('react-dom@') || html.includes('unpkg.com/react')) {
-      warnings.push('HTML 已包含 React CDN 引用，跳过运行时自动注入');
-      return this.processInlineJsxScripts(html);
+      warnings.push('HTML 已包含 React 引用，与平台运行时并存（白名单外的引用会被 CSP 拦截）');
     }
 
     const runtime = generateReactCdnRuntime() + '\n' + generateSucraseRuntime();
@@ -229,14 +270,8 @@ export class Assembler {
       }
     }
 
-    // 注入运行时脚本：置于 <head> 最前，保证先于用户脚本执行
-    if (finalHtml.includes('<head>')) {
-      finalHtml = finalHtml.replace('<head>', `<head>${runtime}`);
-    } else if (finalHtml.includes('<html>')) {
-      finalHtml = finalHtml.replace('<html>', `<html><head>${runtime}</head>`);
-    } else {
-      finalHtml = `<!DOCTYPE html><html><head>${runtime}</head><body>${finalHtml}</body></html>`;
-    }
+    // 注入运行时脚本（置于 head 最前，先于用户脚本执行）
+    finalHtml = this.injectHead(finalHtml, runtime);
 
     // 处理内联 JSX 脚本（<script> 无 src 但包含 JSX）
     finalHtml = this.processInlineJsxScripts(finalHtml);
@@ -274,10 +309,9 @@ export class Assembler {
    * 同时处理无 src 的内联 <script> 中出现的 Vue SFC 代码
    */
   injectVueRuntime(html: string, warnings: string[]): string {
-    // 已包含 Vue 引用时尊重用户代码，跳过自动注入
+    // 同 React：无论用户 HTML 是否自带 Vue 引用都注入平台运行时（白名单内 jsdelivr）
     if (html.includes('vue@') || html.includes('unpkg.com/vue') || html.includes('cdn.jsdelivr.net/npm/vue')) {
-      warnings.push('HTML 已包含 Vue CDN 引用，跳过运行时自动注入');
-      return this.processInlineVueScripts(html);
+      warnings.push('HTML 已包含 Vue 引用，与平台运行时并存（白名单外的引用会被 CSP 拦截）');
     }
 
     const runtime = generateVueCdnRuntime() + '\n' + generateVueSfcCompilerRuntime();
@@ -296,14 +330,8 @@ export class Assembler {
       }
     }
 
-    // 注入运行时脚本：置于 <head> 最前，保证先于用户脚本执行
-    if (finalHtml.includes('<head>')) {
-      finalHtml = finalHtml.replace('<head>', `<head>${runtime}`);
-    } else if (finalHtml.includes('<html>')) {
-      finalHtml = finalHtml.replace('<html>', `<html><head>${runtime}</head>`);
-    } else {
-      finalHtml = `<!DOCTYPE html><html><head>${runtime}</head><body>${finalHtml}</body></html>`;
-    }
+    // 注入运行时脚本（置于 head 最前，先于用户脚本执行）
+    finalHtml = this.injectHead(finalHtml, runtime);
 
     // 处理内联 Vue 脚本（<script> 无 src 但包含 Vue SFC/API）
     finalHtml = this.processInlineVueScripts(finalHtml);
@@ -359,6 +387,25 @@ export class Assembler {
     }
 
     return '/' + dirParts.join('/');
+  }
+
+  /**
+   * 检查 react-cdn 模式下 /src 源码文件是否被入口 HTML 引用
+   * 组件注册约定（window.__components）依赖脚本按序加载，漏引用会导致运行时读取 undefined
+   */
+  private warnUnreferencedSourceFiles(html: string, warnings: string[]): void {
+    const referenced = new Set<string>();
+    for (const m of html.matchAll(/(?:src|href)\s*=\s*["']([^"']+)["']/gi)) {
+      if (m[1]) referenced.add(this.resolvePath(m[1]));
+    }
+    const unreferenced = Object.keys(this.config.files).filter(
+      (p) => /^\/src\/.+\.(jsx|js)$/.test(p) && p !== '/src/main.jsx' && !referenced.has(p)
+    );
+    if (unreferenced.length > 0) {
+      warnings.push(
+        `以下源码文件未被入口 HTML 引用，将不会执行（react-cdn 组件注册依赖脚本加载顺序）: ${unreferenced.join(', ')}`
+      );
+    }
   }
 
   /**

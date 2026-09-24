@@ -40,8 +40,8 @@ export const REACT_ROOT_ID = 'root';
  */
 export function containsJsx(code: string): boolean {
   if (/<\/?\s*[A-Z][a-zA-Z0-9]*/.test(code)) return true;
-  if (/=>\s*</.test(code)) return true;
-  if (/return\s+</.test(code)) return true;
+  if (/=>\s*\(?\s*</.test(code)) return true;
+  if (/return\s*\(?\s*</.test(code)) return true;
   return false;
 }
 
