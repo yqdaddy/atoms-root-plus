@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { validateProject, componentName } from './projectValidator.js';
+import { validateProject } from './projectValidator.js';
 
-/** 合法的 react-cdn 最小项目（入口 + 组件 + 三件套，组件含注册） */
+/** 合法的 react-cdn 最小项目（入口 + 真实 import 组件链 + 三件套，P1 形态） */
 const REACT_PROJECT = {
   '/index.html': {
     path: '/index.html',
@@ -9,19 +9,23 @@ const REACT_PROJECT = {
   },
   '/src/main.jsx': {
     path: '/src/main.jsx',
-    content: 'const App = window.__components.App;\nReactDOM.createRoot(document.getElementById("root")).render(null);',
+    content:
+      "import React from 'react';\nimport App from './App.jsx';\nReactDOM.createRoot(document.getElementById('root')).render(null);",
   },
   '/src/App.jsx': {
     path: '/src/App.jsx',
-    content: 'function App() { return null; }\nwindow.__components = window.__components || {};\nwindow.__components.App = App;',
+    content: "import Counter from './components/Counter.jsx';\nfunction App() { return null; }\nexport default App;",
   },
   '/src/components/Counter.jsx': {
     path: '/src/components/Counter.jsx',
-    content: 'function Counter() { return null; }\nwindow.__components = window.__components || {};\nwindow.__components.Counter = Counter;',
+    content: "import React from 'react';\nfunction Counter() { return null; }\nexport default Counter;",
   },
   '/README.md': { path: '/README.md', content: '# 示例应用\n\n说明' },
   '/DESIGN.md': { path: '/DESIGN.md', content: '# 设计说明' },
-  '/package.json': { path: '/package.json', content: '{"name":"demo","private":true}' },
+  '/package.json': {
+    path: '/package.json',
+    content: '{"name":"demo","private":true,"dependencies":{"react":"^18","react-dom":"^18"}}',
+  },
 };
 
 /** 合法的 html 最小项目 */
@@ -77,29 +81,205 @@ describe('validateProject：E_SCAFFOLD', () => {
   });
 });
 
-describe('validateProject：E_GLOBAL_REG', () => {
-  it('react 组件缺 window.__components 注册报 E_GLOBAL_REG', () => {
+describe('validateProject：P1 真实 import（E_NO_BARE_IMPORT / E_GLOBAL_REG 已退役）', () => {
+  it('react-cdn 文件含真实 import/export 不再被打回（零 errors）', () => {
+    const result = validateProject(REACT_PROJECT, 'react-cdn');
+    expect(result.errors).toHaveLength(0);
+    expect(result.errors.some((e) => e.code === 'E_NO_BARE_IMPORT')).toBe(false);
+  });
+
+  it('组件文件无 window.__components 注册不再报 E_GLOBAL_REG（注册约定校验已由 import 存在性取代）', () => {
+    const result = validateProject(REACT_PROJECT, 'react-cdn');
+    expect(result.errors.some((e) => e.code === 'E_GLOBAL_REG')).toBe(false);
+    expect(JSON.stringify(result)).not.toContain('window.__components');
+  });
+
+  it('存量 P0 形态（全局挂载无 import）同样零误报', () => {
+    const legacy = {
+      '/index.html': REACT_PROJECT['/index.html'],
+      '/src/main.jsx': {
+        path: '/src/main.jsx',
+        content: 'const App = window.__components.App;\nReactDOM.createRoot(document.getElementById("root")).render(null);',
+      },
+      '/src/App.jsx': {
+        path: '/src/App.jsx',
+        content: 'function App() { return null; }\nwindow.__components = window.__components || {};\nwindow.__components.App = App;',
+      },
+      '/README.md': REACT_PROJECT['/README.md'],
+      '/DESIGN.md': REACT_PROJECT['/DESIGN.md'],
+      '/package.json': REACT_PROJECT['/package.json'],
+    };
+    expect(validateProject(legacy, 'react-cdn').errors).toHaveLength(0);
+  });
+});
+
+describe('validateProject：E_IMPORT_MISSING（P1 import 断链）', () => {
+  it('import 不存在的本地文件报 E_IMPORT_MISSING，带说明符与 resolve 路径及拼写指引', () => {
     const broken = {
       ...REACT_PROJECT,
-      '/src/components/Badge.jsx': {
-        path: '/src/components/Badge.jsx',
-        content: 'function Badge() { return null; }\nexport default Badge;',
+      '/src/App.jsx': {
+        path: '/src/App.jsx',
+        content: "import Counter from './components/Couter.jsx';\nfunction App() { return null; }\nexport default App;",
       },
     };
     const result = validateProject(broken, 'react-cdn');
-    const issue = result.errors.find((e) => e.code === 'E_GLOBAL_REG');
-    expect(issue?.file).toBe('/src/components/Badge.jsx');
-    expect(issue?.message).toContain('window.__components');
+    const issue = result.errors.find((e) => e.code === 'E_IMPORT_MISSING');
+    expect(issue?.file).toBe('/src/App.jsx');
+    expect(issue!.message).toContain('./components/Couter.jsx');
+    expect(issue!.message).toContain('/src/components/Couter.jsx');
+    expect(issue!.message).toContain('完全一致');
   });
 
-  it('入口 main.jsx 不要求注册', () => {
-    const result = validateProject(REACT_PROJECT, 'react-cdn');
-    expect(result.errors.some((e) => e.code === 'E_GLOBAL_REG' && e.file === '/src/main.jsx')).toBe(false);
+  it('delete 后悬空引用同形态拦截（被删文件仍被 import）', () => {
+    // 模拟 diff delete 移除 /src/components/Counter.jsx 后 App.jsx 未同步清理 import
+    const { '/src/components/Counter.jsx': _removed, ...dangling } = REACT_PROJECT;
+    const issue = validateProject(dangling, 'react-cdn').errors.find((e) => e.code === 'E_IMPORT_MISSING');
+    expect(issue?.file).toBe('/src/App.jsx');
+    expect(issue!.message).toContain('./components/Counter.jsx');
   });
 
-  it('html 模式不检查注册约定', () => {
-    const result = validateProject(HTML_PROJECT, 'html');
-    expect(result.errors.some((e) => e.code === 'E_GLOBAL_REG')).toBe(false);
+  it('相对路径 ./ ../ 与根绝对路径 resolve 成功均不报错', () => {
+    const project = {
+      ...REACT_PROJECT,
+      '/src/hooks/useCount.js': {
+        path: '/src/hooks/useCount.js',
+        content: "export { default } from '../components/Counter.jsx';\nexport const version = '/src/hooks/useCount.js';",
+      },
+      '/src/App.jsx': {
+        path: '/src/App.jsx',
+        content: "import Counter from '/src/components/Counter.jsx';\nimport useCount from './hooks/useCount.js';\nexport default function App() { return null; }",
+      },
+    };
+    expect(validateProject(project, 'react-cdn').errors.some((e) => e.code === 'E_IMPORT_MISSING')).toBe(false);
+  });
+
+  it('扩展名候选兜底：缺扩展名的本地 import 对齐前端 mini-bundler 不误报', () => {
+    const lenient = {
+      ...REACT_PROJECT,
+      '/src/App.jsx': {
+        path: '/src/App.jsx',
+        content: "import Counter from './components/Counter';\nfunction App() { return null; }\nexport default App;",
+      },
+    };
+    expect(validateProject(lenient, 'react-cdn').errors.some((e) => e.code === 'E_IMPORT_MISSING')).toBe(false);
+  });
+
+  it('注释中的伪 import 不误报（保守剥离注释，对齐 importScanner）', () => {
+    const commented = {
+      ...REACT_PROJECT,
+      '/src/App.jsx': {
+        path: '/src/App.jsx',
+        content:
+          "import Counter from './components/Counter.jsx';\n// import Ghost from './components/Ghost.jsx';\n/* import Ghost2 from './Ghost2.jsx'; */\nfunction App() { return null; }\nexport default App;",
+      },
+    };
+    expect(validateProject(commented, 'react-cdn').errors.some((e) => e.code === 'E_IMPORT_MISSING')).toBe(false);
+  });
+
+  it('JS 中 import CSS 不算断链（运行时 no-op，交由提示词与审查维度约束）', () => {
+    const withCssImport = {
+      ...REACT_PROJECT,
+      '/src/App.jsx': {
+        path: '/src/App.jsx',
+        content: "import './styles/main.css';\nimport Counter from './components/Counter.jsx';\nexport default function App() { return null; }",
+      },
+    };
+    const result = validateProject(withCssImport, 'react-cdn');
+    expect(result.errors.some((e) => e.code === 'E_IMPORT_MISSING')).toBe(false);
+  });
+
+  it('html 框架不适用（规则仅 react-cdn）', () => {
+    const result = validateProject(
+      {
+        ...HTML_PROJECT,
+        '/src/main.js': { path: '/src/main.js', content: "import missing from './nope.js';" },
+      },
+      'html',
+    );
+    expect(result.errors.some((e) => e.code === 'E_IMPORT_MISSING')).toBe(false);
+  });
+});
+
+describe('validateProject：E_PKG_DEPS（P1 bare 依赖白名单与声明一致性）', () => {
+  it('import 白名单外的包（chart.js）报 E_PKG_DEPS，指引走 CDN script 全局', () => {
+    const withChart = {
+      ...REACT_PROJECT,
+      '/src/components/Chart.jsx': {
+        path: '/src/components/Chart.jsx',
+        content: "import Chart from 'chart.js';\nexport default function ChartPanel() { return null; }",
+      },
+    };
+    const issue = validateProject(withChart, 'react-cdn').errors.find((e) => e.code === 'E_PKG_DEPS');
+    expect(issue?.file).toBe('/src/components/Chart.jsx');
+    expect(issue!.message).toContain('chart.js');
+    expect(issue!.message).toContain('CDN script');
+  });
+
+  it('react 未在 package.json dependencies 声明报 E_PKG_DEPS', () => {
+    const undeclared = {
+      ...REACT_PROJECT,
+      '/package.json': { path: '/package.json', content: '{"name":"demo","private":true}' },
+    };
+    const issue = validateProject(undeclared, 'react-cdn').errors.find((e) => e.code === 'E_PKG_DEPS');
+    expect(issue).toBeDefined();
+    expect(issue!.message).toContain('react');
+    expect(issue!.message).toContain('dependencies');
+  });
+
+  it('react 与 react-dom 声明齐全无 E_PKG_DEPS', () => {
+    expect(validateProject(REACT_PROJECT, 'react-cdn').errors.some((e) => e.code === 'E_PKG_DEPS')).toBe(false);
+  });
+
+  it('子路径说明符取包名段：react-dom/client 视为 react-dom，声明后放行', () => {
+    const withClient = {
+      ...REACT_PROJECT,
+      '/src/main.jsx': {
+        path: '/src/main.jsx',
+        content:
+          "import { createRoot } from 'react-dom/client';\nimport App from './App.jsx';\ncreateRoot(document.getElementById('root')).render(null);",
+      },
+    };
+    const result = validateProject(withClient, 'react-cdn');
+    expect(result.errors.some((e) => e.code === 'E_PKG_DEPS')).toBe(false);
+    expect(result.errors.some((e) => e.code === 'E_IMPORT_MISSING')).toBe(false);
+  });
+
+  it('scoped 包取两段包名：@scope/pkg 不在白名单报错', () => {
+    const withScoped = {
+      ...REACT_PROJECT,
+      '/src/utils.js': {
+        path: '/src/utils.js',
+        content: "import { helper } from '@scope/pkg';\nexport const wrapped = helper;",
+      },
+    };
+    const issue = validateProject(withScoped, 'react-cdn').errors.find((e) => e.code === 'E_PKG_DEPS');
+    expect(issue).toBeDefined();
+    expect(issue!.message).toContain('@scope/pkg');
+  });
+
+  it('同一包多处违规只报一次（按首次出现文件定位）', () => {
+    const duplicated = {
+      ...REACT_PROJECT,
+      '/src/utils/a.js': { path: '/src/utils/a.js', content: "import Chart from 'chart.js';\nexport const a = Chart;" },
+      '/src/utils/b.js': { path: '/src/utils/b.js', content: "import Chart from 'chart.js';\nexport const b = Chart;" },
+    };
+    const issues = validateProject(duplicated, 'react-cdn').errors.filter((e) => e.code === 'E_PKG_DEPS');
+    expect(issues).toHaveLength(1);
+  });
+
+  it('无 bare import 时 package.json 不可解析不误报 E_PKG_DEPS', () => {
+    const noBareImportProject = {
+      ...REACT_PROJECT,
+      '/src/main.jsx': {
+        path: '/src/main.jsx',
+        content: "import App from './App.jsx';\nReactDOM.createRoot(document.getElementById('root')).render(null);",
+      },
+      '/src/App.jsx': { path: '/src/App.jsx', content: "import Counter from './components/Counter.jsx';\nexport default function App() { return null; }" },
+      '/src/components/Counter.jsx': { path: '/src/components/Counter.jsx', content: 'export default function Counter() { return null; }' },
+      '/package.json': { path: '/package.json', content: 'not-json{{{' },
+    };
+    const result = validateProject(noBareImportProject, 'react-cdn');
+    expect(result.errors.some((e) => e.code === 'E_PKG_DEPS')).toBe(false);
   });
 });
 
@@ -111,11 +291,15 @@ describe('validateProject：整体行为', () => {
   });
 
   it('多规则同时失败时逐条报告', () => {
-    const result = validateProject({ '/src/App.jsx': { path: '/src/App.jsx', content: 'x' } }, 'react-cdn');
+    const result = validateProject(
+      { '/src/App.jsx': { path: '/src/App.jsx', content: "import x from 'chart.js';" } },
+      'react-cdn',
+    );
     const codes = new Set(result.errors.map((e) => e.code));
     expect(codes.has('E_ENTRY')).toBe(true);
     expect(codes.has('E_SCAFFOLD')).toBe(true);
-    expect(codes.has('E_GLOBAL_REG')).toBe(true);
+    expect(codes.has('E_PKG_DEPS')).toBe(true);
+    expect(codes.has('E_IMPORT_MISSING')).toBe(false);
   });
 });
 
@@ -217,13 +401,6 @@ describe('validateProject：E_CDN_DOMAIN（D-8 资源域白名单）', () => {
   });
 });
 
-describe('componentName', () => {
-  it('从路径提取 PascalCase 组件名', () => {
-    expect(componentName('/src/components/Counter.jsx')).toBe('Counter');
-    expect(componentName('/src/App.jsx')).toBe('App');
-  });
-});
-
 describe('validateProject：E_INLINE_VOLUME（F1 html 单文件体量）', () => {
   /** 生成 n 行的单文件 html（真实事故样本：731 行单文件计算器，此处构造同形态） */
   function oversizedHtml(lines: number): string {
@@ -308,68 +485,5 @@ describe('validateProject：E_INLINE_VOLUME（F1 html 单文件体量）', () =>
       { enforceInlineVolume: true },
     );
     expect(result.errors.some((e) => e.code === 'E_INLINE_VOLUME')).toBe(false);
-  });
-});
-
-describe('validateProject：E_NO_BARE_IMPORT（P0 过渡，react-cdn 恒开）', () => {
-  it('/src 组件文件行首 import → 报 E_NO_BARE_IMPORT 并给全局挂载指引', () => {
-    const result = validateProject(
-      {
-        ...REACT_PROJECT,
-        '/src/App.jsx': {
-          path: '/src/App.jsx',
-          content: 'import { useState } from "react";\nfunction App() { return null; }\nwindow.__components = window.__components || {};\nwindow.__components.App = App;',
-        },
-      },
-      'react-cdn',
-    );
-    const issue = result.errors.find((e) => e.code === 'E_NO_BARE_IMPORT');
-    expect(issue?.file).toBe('/src/App.jsx');
-    expect(issue?.message).toContain('window.__components');
-  });
-
-  it('/src 工具文件行首 export 同样命中（含缩进）', () => {
-    const result = validateProject(
-      {
-        ...REACT_PROJECT,
-        '/src/utils.js': {
-          path: '/src/utils.js',
-          content: '  export function fmt(n) { return n; }',
-        },
-      },
-      'react-cdn',
-    );
-    expect(result.errors.some((e) => e.code === 'E_NO_BARE_IMPORT' && e.file === '/src/utils.js')).toBe(true);
-  });
-
-  it('行中出现 import 字样的代码不误报（仅行首语句命中）', () => {
-    const result = validateProject(
-      {
-        ...REACT_PROJECT,
-        '/src/data.js': {
-          path: '/src/data.js',
-          content: '// 负责数据的 import 解析\nconst importedCount = 1;\nwindow.__utils = window.__utils || {};',
-        },
-      },
-      'react-cdn',
-    );
-    expect(result.errors.some((e) => e.code === 'E_NO_BARE_IMPORT')).toBe(false);
-  });
-
-  it('html 框架不适用（规则仅 react-cdn）', () => {
-    const result = validateProject(
-      {
-        '/index.html': { path: '/index.html', content: '<!DOCTYPE html><html><body><script type="module">import x from "./a.js";</script></body></html>' },
-        '/src/main.js': { path: '/src/main.js', content: 'import a from "./a.js";' },
-        '/README.md': { path: '/README.md', content: '# 说明' },
-      },
-      'html',
-    );
-    expect(result.errors.some((e) => e.code === 'E_NO_BARE_IMPORT')).toBe(false);
-  });
-
-  it('非 /src 路径不查（入口内联脚本不受约束）', () => {
-    const result = validateProject(REACT_PROJECT, 'react-cdn');
-    expect(result.errors.some((e) => e.code === 'E_NO_BARE_IMPORT')).toBe(false);
   });
 });

@@ -111,8 +111,12 @@ export interface FileEdit {
 export interface FileChange {
   /** 文件路径 */
   file: string;
-  /** 编辑操作列表 */
+  /** 变更类型：edit 行级编辑（缺省，向后兼容）/ create 新增文件 / delete 删除文件（方案 §6.2） */
+  action?: 'edit' | 'create' | 'delete';
+  /** 编辑操作列表（action 为 edit 时必填；create/delete 可省略） */
   edits: FileEdit[];
+  /** 完整文件内容（action 为 create 时必填；create 语义下 edits 被忽略） */
+  content?: string;
 }
 
 /**

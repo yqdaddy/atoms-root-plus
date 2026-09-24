@@ -190,8 +190,9 @@ async function runCreateFlow(options: {
 /** diff 修改流程：单阶段直通；currentFiles 可注入自定义存量项目（D-9 用），prompt 可自定义（F4 用） */
 async function runModifyFlow(
   responses: (string | Error)[],
-  currentFiles?: typeof TEST_FILES,
+  currentFiles?: Record<string, { path: string; content: string; language: 'html' | 'javascript' }>,
   prompt = '把标题改成新标题',
+  framework?: 'html' | 'react-cdn',
 ): Promise<{
   events: LLMEvent[];
   requestBodies: string[];
@@ -204,6 +205,7 @@ async function runModifyFlow(
     prompt,
     currentFiles: currentFiles ?? TEST_FILES,
     intent: MODIFY_INTENT,
+    framework,
     onEvent: (e) => events.push(e),
     signal: new AbortController().signal,
   });
@@ -327,17 +329,21 @@ describe('混合失败预算封顶与 retry 文案区分', () => {
   });
 
   it('d. 结构校验失败 + 解析失败混合 → 预算封顶 3 次，retry 文案按来源区分', async () => {
-    // react 项目：第 1 次缺注册（结构校验失败）；第 2 次截断（解析失败）；
-    // 第 3 次合法 → 审查通过 → 交付
-    const reactApp = (registered: boolean) => JSON.stringify({
+    // react 项目：第 1 次 import 断链（结构校验失败，P1 触发器）；
+    // 第 2 次截断（解析失败）；第 3 次合法 → 审查通过 → 交付
+    const reactApp = (brokenImport: boolean) => JSON.stringify({
       files: [
         { path: '/index.html', content: '<!DOCTYPE html><html><head></head><body><div id="root"></div></body></html>', language: 'html' },
-        { path: '/src/main.jsx', content: 'const App = window.__components.App;', language: 'javascript' },
+        {
+          path: '/src/main.jsx',
+          content: "import App from './App.jsx';\nReactDOM.createRoot(document.getElementById('root')).render(null);",
+          language: 'javascript',
+        },
         {
           path: '/src/App.jsx',
-          content: registered
-            ? 'function App() { return null; }\nwindow.__components = window.__components || {};\nwindow.__components.App = App;'
-            : 'function App() { return null; }',
+          content: brokenImport
+            ? "import Badge from './components/Badge.jsx';\nfunction App() { return null; }\nexport default App;"
+            : 'function App() { return null; }\nexport default App;',
           language: 'javascript',
         },
       ],
@@ -345,7 +351,7 @@ describe('混合失败预算封顶与 retry 文案区分', () => {
 
     const { events, fetchMock } = await runCreateFlow({
       framework: 'react-cdn',
-      responses: [FEATURES_JSON, reactApp(false), TRUNCATED_JSON, reactApp(true), '审查通过'],
+      responses: [FEATURES_JSON, reactApp(true), TRUNCATED_JSON, reactApp(false), '审查通过'],
     });
 
     expect(events.find((e) => e.type === 'error')).toBeUndefined();
@@ -981,7 +987,7 @@ describe('F4 多文件裁剪保底（字面路径强制附带 + 未附带清单�
   });
 });
 
-describe('E_NO_BARE_IMPORT（集成）：react-cdn 幻觉 import 确定性打回重试', () => {
+describe('P1 真实 import 切换（集成）：E_NO_BARE_IMPORT 退役与 E_IMPORT_MISSING 重试', () => {
   beforeEach(() => {
     process.env.LLM_API_KEY = 'test-key';
   });
@@ -991,16 +997,57 @@ describe('E_NO_BARE_IMPORT（集成）：react-cdn 幻觉 import 确定性打回
     delete process.env.LLM_API_KEY;
   });
 
-  it('u. 工程师输出含裸 import → 带全局挂载指引重试 → 合规产物交付', async () => {
-    const reactApp = (withImport: boolean) => JSON.stringify({
+  /** react-cdn 工程师产出（withImport 控制是否真实 import） */
+  const reactApp = (withImport: boolean) => JSON.stringify({
+    files: [
+      { path: '/index.html', content: '<!DOCTYPE html><html><head></head><body><div id="root"></div></body></html>', language: 'html' },
+      {
+        path: '/src/main.jsx',
+        content: "import App from './App.jsx';\nReactDOM.createRoot(document.getElementById('root')).render(null);",
+        language: 'javascript',
+      },
+      {
+        path: '/src/App.jsx',
+        content: withImport
+          ? "import { useState } from 'react';\nfunction App() { return null; }\nexport default App;"
+          : 'function App() { return null; }',
+        language: 'javascript',
+      },
+    ],
+  });
+
+  it('u. react-cdn 含真实 import 的文件不再被打回（E_NO_BARE_IMPORT 已退役，一次通过）', async () => {
+    const { events, requestBodies, fetchMock } = await runCreateFlow({
+      framework: 'react-cdn',
+      responses: [FEATURES_JSON, reactApp(true), '审查通过'],
+    });
+
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+    // 无重试：分析师 + 工程师 + 审查者 = 3 次调用
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(retryEvents(events)).toHaveLength(0);
+    // import 语句原样交付（不要求全局挂载改写）
+    const done = events.find((e) => e.type === 'done');
+    expect(done).toBeDefined();
+    expect(done!.payload.files?.['/src/App.jsx']?.content).toContain("from 'react'");
+    // 平台注入的 package.json 含 react 依赖（E_PKG_DEPS 声明一致）
+    expect(done!.payload.files?.['/package.json']?.content).toContain('react-dom');
+    // 请求体不再出现 E_NO_BARE_IMPORT 指引
+    expect(requestBodies.join('\n')).not.toContain('import/export 语句');
+  });
+
+  it('v. import 断链（E_IMPORT_MISSING）→ 带 hint 重试一次 → 修复后交付', async () => {
+    const dangling = JSON.stringify({
       files: [
         { path: '/index.html', content: '<!DOCTYPE html><html><head></head><body><div id="root"></div></body></html>', language: 'html' },
-        { path: '/src/main.jsx', content: 'const App = window.__components.App;', language: 'javascript' },
+        {
+          path: '/src/main.jsx',
+          content: "import App from './App.jsx';\nReactDOM.createRoot(document.getElementById('root')).render(null);",
+          language: 'javascript',
+        },
         {
           path: '/src/App.jsx',
-          content: withImport
-            ? 'import { useState } from "react";\nfunction App() { return null; }\nwindow.__components = window.__components || {};\nwindow.__components.App = App;'
-            : 'function App() { return null; }\nwindow.__components = window.__components || {};\nwindow.__components.App = App;',
+          content: "import Badge from './components/Badge.jsx';\nfunction App() { return null; }\nexport default App;",
           language: 'javascript',
         },
       ],
@@ -1008,19 +1055,92 @@ describe('E_NO_BARE_IMPORT（集成）：react-cdn 幻觉 import 确定性打回
 
     const { events, requestBodies, fetchMock } = await runCreateFlow({
       framework: 'react-cdn',
-      responses: [FEATURES_JSON, reactApp(true), reactApp(false), '审查通过'],
+      responses: [FEATURES_JSON, dangling, reactApp(false), '审查通过'],
     });
 
     expect(events.find((e) => e.type === 'error')).toBeUndefined();
-    // 分析师 + 工程师×2 + 审查者
+    // 分析师 + 工程师（断链打回）+ 工程师重试 + 审查者 = 4 次调用
     expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(retryEvents(events)).toHaveLength(1);
 
-    // 重试请求（index 2）携带 E_NO_BARE_IMPORT 指引（全局挂载约定）
-    expect(requestBodies[2]).toContain('import/export 语句');
-    expect(requestBodies[2]).toContain('window.__components');
+    // 重试请求（index 2）携带 E_IMPORT_MISSING 错误清单与拼写指引
+    expect(requestBodies[2]).toContain('import 的本地模块');
+    expect(requestBodies[2]).toContain('./components/Badge.jsx');
+    expect(requestBodies[2]).toContain('完全一致');
 
     const done = events.find((e) => e.type === 'done');
     expect(done).toBeDefined();
-    expect(done!.payload.files?.['/src/App.jsx']?.content).not.toContain('import');
+    // 重试产物无悬空 import，正常交付
+    expect(done!.payload.files?.['/src/App.jsx']?.content).not.toContain('./components/Badge.jsx');
+  });
+
+  it('w. diff delete 后悬空 import → E_IMPORT_MISSING 拦截 → 重试清理引用后交付', async () => {
+    const reactFiles = {
+      '/index.html': {
+        path: '/index.html',
+        content: '<!DOCTYPE html><html><head></head><body><div id="root"></div></body></html>',
+        language: 'html' as const,
+      },
+      '/src/main.jsx': {
+        path: '/src/main.jsx',
+        content: "import App from './App.jsx';\nReactDOM.createRoot(document.getElementById('root')).render(null);",
+        language: 'javascript' as const,
+      },
+      '/src/App.jsx': {
+        path: '/src/App.jsx',
+        content: "import Counter from './components/Counter.jsx';\nfunction App() { return null; }\nexport default App;",
+        language: 'javascript' as const,
+      },
+      '/src/components/Counter.jsx': {
+        path: '/src/components/Counter.jsx',
+        content: 'export default function Counter() { return null; }',
+        language: 'javascript' as const,
+      },
+    };
+    // 第一轮：只删 Counter.jsx（悬空引用未清理）→ 校验打回
+    const deleteOnly = JSON.stringify({
+      changes: [{ file: '/src/components/Counter.jsx', action: 'delete' }],
+      summary: '删除 Counter 组件',
+    });
+    // 第二轮：对同一 merge base 重新输出完整修正清单（删除 + 清理引用，行 1 整行删除）
+    const deleteWithCleanup = JSON.stringify({
+      changes: [
+        { file: '/src/components/Counter.jsx', action: 'delete' },
+        {
+          file: '/src/App.jsx',
+          edits: [
+            {
+              line: 1,
+              old: "import Counter from './components/Counter.jsx';",
+              new: '',
+              type: 'delete',
+            },
+          ],
+        },
+      ],
+      summary: '删除 Counter 并清理引用',
+    });
+
+    const { events, requestBodies, fetchMock } = await runModifyFlow(
+      [deleteOnly, deleteWithCleanup],
+      reactFiles,
+      '删除 Counter 组件',
+      'react-cdn',
+    );
+
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+    // diff/modify 跳过 LLM 审查（§5.1）：工程师 + 工程师重试 = 2 次调用
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(retryEvents(events)).toHaveLength(1);
+
+    // 重试请求携带悬空 import 的错误清单（含被删文件路径与拼写指引）
+    expect(requestBodies[1]).toContain('import 的本地模块');
+    expect(requestBodies[1]).toContain('./components/Counter.jsx');
+
+    const done = events.find((e) => e.type === 'done');
+    expect(done).toBeDefined();
+    // 被删文件不在交付集合中，悬空 import 已清理
+    expect(done!.payload.files?.['/src/components/Counter.jsx']).toBeUndefined();
+    expect(done!.payload.files?.['/src/App.jsx']?.content).not.toContain('Counter.jsx');
   });
 });
