@@ -15,6 +15,8 @@ import { Icon } from '@iconify/react';
 import ReactMarkdown from 'react-markdown';
 import type { GenerationStatus } from '../services/ai/types';
 import JsonStructureRenderer from './JsonStructureRenderer';
+import MessageErrorBoundary from './MessageErrorBoundary';
+import { isOversizedJson } from '../lib/renderGuard';
 import {
   calculateProgress,
   getEstimateByIntent,
@@ -335,6 +337,10 @@ export function StreamingMessage({ content, stage, activeFilePath, startTime, in
   // 检测是否为纯 JSON（LLM 直接输出的分析结果）
   const isPureJson = (text: string): boolean => {
     const trimmed = text.trim();
+    // 超大输入防护：不做 JSON.parse（与 JsonStructureRenderer 阈值一致）
+    if (isOversizedJson(trimmed)) {
+      return false;
+    }
     if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
       return false;
     }
@@ -433,15 +439,19 @@ export function StreamingMessage({ content, stage, activeFilePath, startTime, in
           </div>
         )}
 
-        {/* Markdown 内容：使用自定义组件确保代码块正确渲染 */}
+        {/* Markdown 内容：使用自定义组件确保代码块正确渲染。
+            外层包消息级错误边界：病态内容渲染崩溃时降级为占位卡片，
+            不拖垮整个对话面板（MAJOR-D1 前端兜底） */}
         {content && (
-          <div className="prose prose-sm max-w-none text-[13px] text-[var(--color-text-primary)] leading-[1.6]">
-            {shouldRenderAsJson ? (
-              <JsonStructureRenderer jsonString={content} isStreaming={isActive} />
-            ) : (
-              <ReactMarkdown components={markdownComponents}>{content}</ReactMarkdown>
-            )}
-          </div>
+          <MessageErrorBoundary rawContent={content}>
+            <div className="prose prose-sm max-w-none text-[13px] text-[var(--color-text-primary)] leading-[1.6]">
+              {shouldRenderAsJson ? (
+                <JsonStructureRenderer jsonString={content} isStreaming={isActive} />
+              ) : (
+                <ReactMarkdown components={markdownComponents}>{content}</ReactMarkdown>
+              )}
+            </div>
+          </MessageErrorBoundary>
         )}
 
         {/* 骨架屏加载动画：内容为空且正在生成时显示 */}

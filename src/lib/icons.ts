@@ -11,6 +11,7 @@ import { addCollection } from '@iconify/react';
 
 import atom from '../../assets/icons/lucide/atom.svg?raw';
 import alertCircle from '../../assets/icons/lucide/alert-circle.svg?raw';
+import alertTriangle from '../../assets/icons/lucide/alert-triangle.svg?raw';
 import arrowUp from '../../assets/icons/lucide/arrow-up.svg?raw';
 import bot from '../../assets/icons/lucide/bot.svg?raw';
 import box from '../../assets/icons/lucide/box.svg?raw';
@@ -19,6 +20,7 @@ import check from '../../assets/icons/lucide/check.svg?raw';
 import checkCircle from '../../assets/icons/lucide/check-circle.svg?raw';
 import chevronDown from '../../assets/icons/lucide/chevron-down.svg?raw';
 import chevronRight from '../../assets/icons/lucide/chevron-right.svg?raw';
+import chevronUp from '../../assets/icons/lucide/chevron-up.svg?raw';
 import code from '../../assets/icons/lucide/code.svg?raw';
 import code2 from '../../assets/icons/lucide/code-2.svg?raw';
 import copy from '../../assets/icons/lucide/copy.svg?raw';
@@ -87,6 +89,7 @@ function parseSvg(raw: string): { body: string; width: number; height: number } 
 const LOCAL_ICONS: Record<string, string> = {
   atom,
   'alert-circle': alertCircle,
+  'alert-triangle': alertTriangle,
   'arrow-up': arrowUp,
   bot,
   box,
@@ -95,6 +98,7 @@ const LOCAL_ICONS: Record<string, string> = {
   'check-circle': checkCircle,
   'chevron-down': chevronDown,
   'chevron-right': chevronRight,
+  'chevron-up': chevronUp,
   code,
   'code-2': code2,
   copy,

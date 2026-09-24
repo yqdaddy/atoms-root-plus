@@ -11,6 +11,13 @@
 import { useState, useCallback, useMemo } from 'react';
 import { Icon } from '@iconify/react';
 import type { FeatureList, FeatureItem } from '../services/ai/types';
+import {
+  HIGHLIGHT_SKIP_THRESHOLD,
+  LARGE_JSON_THRESHOLD,
+  RAW_TEXT_RENDER_LIMIT,
+  clampRenderText,
+  limitItems,
+} from '../lib/renderGuard';
 
 /** JSON 结构类型 */
 type JsonStructureType =
@@ -136,15 +143,38 @@ const PRIORITY_STYLES: Record<FeatureItem['priority'], { bg: string; icon: strin
 };
 
 /** 优先级标签组件 */
-function PriorityBadge({ priority }: { priority: FeatureItem['priority'] }) {
-  const style = PRIORITY_STYLES[priority];
+function PriorityBadge({ priority }: { priority: unknown }) {
+  // 防御（MAJOR-D1）：畸形 priority（越界字符串、非字符串）不再抛错
+  // （PRIORITY_STYLES[priority] 为 undefined 时读取 style.bg 曾抛 TypeError），
+  // 回退为灰色中性标签并显示可读文本，交由服务端围栏修复数据源头
+  if (priority === 'must' || priority === 'nice') {
+    const style = PRIORITY_STYLES[priority];
+    return (
+      <span
+        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium border ${style.bg}`}
+      >
+        <Icon icon={style.icon} width={12} height={12} />
+        {priority === 'must' ? '必需' : '可选'}
+      </span>
+    );
+  }
+  const label = typeof priority === 'string' ? priority.slice(0, 12) : '未知';
   return (
-    <span
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium border ${style.bg}`}
-    >
-      <Icon icon={style.icon} width={12} height={12} />
-      {priority === 'must' ? '必需' : '可选'}
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium border bg-slate-500/10 text-slate-600 border-slate-500/20">
+      {label}
     </span>
+  );
+}
+
+/** 列表截断提示（与 limitItems 配套使用） */
+function ListOverflowHint({ hiddenCount }: { hiddenCount: number }) {
+  if (hiddenCount <= 0) {
+    return null;
+  }
+  return (
+    <div className="mt-2 px-3 py-2 rounded-lg bg-[var(--color-bg-inset)] text-[11px] text-[var(--color-text-tertiary)]">
+      内容过长，还有 {hiddenCount} 项未显示
+    </div>
   );
 }
 
@@ -172,6 +202,11 @@ function FeatureCard({ feature, index }: { feature: FeatureItem; index: number }
 
 /** 分析结果卡片（FeatureList） */
 function AnalysisResultCard({ data }: { data: FeatureList }) {
+  // 条目截断：超大功能清单只渲染前 MAX_LIST_ITEMS 项，其余仅计数
+  const featuresView = limitItems(data.features);
+  const interactionsView = limitItems(data.interactions);
+  const assumptionsView = limitItems(data.assumptions);
+
   return (
     <div className="my-4 rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] overflow-hidden">
       {/* 头部：标题 + 类型标签 */}
@@ -219,10 +254,11 @@ function AnalysisResultCard({ data }: { data: FeatureList }) {
             </span>
           </div>
           <div className="grid gap-2">
-            {data.features.map((feature, i) => (
+            {featuresView.items.map((feature, i) => (
               <FeatureCard key={feature.id || i} feature={feature} index={i} />
             ))}
           </div>
+          <ListOverflowHint hiddenCount={featuresView.hiddenCount} />
         </div>
       )}
 
@@ -241,7 +277,7 @@ function AnalysisResultCard({ data }: { data: FeatureList }) {
             </span>
           </div>
           <div className="flex flex-wrap gap-2">
-            {data.interactions.map((interaction, i) => (
+            {interactionsView.items.map((interaction, i) => (
               <span
                 key={i}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-[var(--color-bg-inset)] text-[12px] text-[var(--color-text-secondary)]"
@@ -251,6 +287,7 @@ function AnalysisResultCard({ data }: { data: FeatureList }) {
               </span>
             ))}
           </div>
+          <ListOverflowHint hiddenCount={interactionsView.hiddenCount} />
         </div>
       )}
 
@@ -269,7 +306,7 @@ function AnalysisResultCard({ data }: { data: FeatureList }) {
             </span>
           </div>
           <ul className="space-y-1">
-            {data.assumptions.map((assumption, i) => (
+            {assumptionsView.items.map((assumption, i) => (
               <li
                 key={i}
                 className="text-[11px] text-[var(--color-text-tertiary)] pl-4 relative before:content-['·'] before:absolute before:left-0 before:text-[var(--color-text-tertiary)]"
@@ -278,6 +315,7 @@ function AnalysisResultCard({ data }: { data: FeatureList }) {
               </li>
             ))}
           </ul>
+          <ListOverflowHint hiddenCount={assumptionsView.hiddenCount} />
         </div>
       )}
     </div>
@@ -286,6 +324,8 @@ function AnalysisResultCard({ data }: { data: FeatureList }) {
 
 /** 交互列表组件 */
 function InteractionListCard({ interactions }: { interactions: string[] }) {
+  const view = limitItems(interactions);
+
   return (
     <div className="my-4 p-4 rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)]">
       <div className="flex items-center gap-2 mb-3">
@@ -302,7 +342,7 @@ function InteractionListCard({ interactions }: { interactions: string[] }) {
         </span>
       </div>
       <div className="grid grid-cols-2 gap-2">
-        {interactions.map((interaction, i) => (
+        {view.items.map((interaction, i) => (
           <div
             key={i}
             className="flex items-center gap-2 p-2 rounded-lg bg-[var(--color-bg-base)] border border-[var(--color-border-default)]"
@@ -319,6 +359,7 @@ function InteractionListCard({ interactions }: { interactions: string[] }) {
           </div>
         ))}
       </div>
+      <ListOverflowHint hiddenCount={view.hiddenCount} />
     </div>
   );
 }
@@ -340,8 +381,10 @@ interface ReviewReport {
 
 /** 审查报告卡片组件 */
 function ReviewReportCard({ data }: { data: ReviewReport }) {
+  // 统计口径用全量 checks，渲染只取前 MAX_LIST_ITEMS 项
   const passedCount = data.checks.filter(c => c.pass).length;
   const totalCount = data.checks.length;
+  const checksView = limitItems(data.checks);
 
   return (
     <div className="my-4 rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] overflow-hidden">
@@ -370,7 +413,7 @@ function ReviewReportCard({ data }: { data: ReviewReport }) {
       {/* 检查项列表 */}
       <div className="p-4">
         <div className="grid gap-2">
-          {data.checks.map((check, i) => (
+          {checksView.items.map((check, i) => (
             <div
               key={i}
               className={`p-3 rounded-lg border ${
@@ -407,6 +450,7 @@ function ReviewReportCard({ data }: { data: ReviewReport }) {
             </div>
           ))}
         </div>
+        <ListOverflowHint hiddenCount={checksView.hiddenCount} />
       </div>
 
       {/* 修复指令 */}
@@ -443,6 +487,7 @@ interface ErrorReport {
 /** 错误诊断报告卡片组件 */
 function ErrorReportCard({ data }: { data: ErrorReport }) {
   const [expandedSuggestions, setExpandedSuggestions] = useState<Set<number>>(new Set());
+  const suggestionsView = limitItems(data.fixSuggestions);
 
   const toggleSuggestion = (index: number) => {
     setExpandedSuggestions(prev => {
@@ -515,7 +560,7 @@ function ErrorReportCard({ data }: { data: ErrorReport }) {
           </span>
         </div>
         <div className="space-y-2 pl-6">
-          {data.fixSuggestions.map((suggestion, i) => (
+          {suggestionsView.items.map((suggestion, i) => (
             <div
               key={i}
               className="group p-2.5 rounded-lg bg-[var(--color-bg-base)] border border-[var(--color-border-default)] hover:border-[var(--color-accent)]/30 transition-colors cursor-pointer"
@@ -537,6 +582,7 @@ function ErrorReportCard({ data }: { data: ErrorReport }) {
               </div>
             </div>
           ))}
+          <ListOverflowHint hiddenCount={suggestionsView.hiddenCount} />
         </div>
       </div>
     </div>
@@ -568,6 +614,8 @@ const LANGUAGE_COLORS: Record<string, string> = {
 
 /** 文件清单概要卡片 */
 function MultiFileOutputCard({ data }: { data: MultiFileOutput }) {
+  const filesView = limitItems(data.files);
+
   return (
     <div className="my-4 rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] overflow-hidden">
       {/* 头部 */}
@@ -590,7 +638,7 @@ function MultiFileOutputCard({ data }: { data: MultiFileOutput }) {
       {/* 文件列表 */}
       <div className="p-3">
         <div className="grid gap-2">
-          {data.files.map((file, i) => {
+          {filesView.items.map((file, i) => {
             const fileName = file.path.split('/').pop() || file.path;
             const isEntry = fileName === 'index.html';
             const langColor = LANGUAGE_COLORS[file.language || 'default'] || LANGUAGE_COLORS.default;
@@ -620,6 +668,7 @@ function MultiFileOutputCard({ data }: { data: MultiFileOutput }) {
             );
           })}
         </div>
+        <ListOverflowHint hiddenCount={filesView.hiddenCount} />
       </div>
     </div>
   );
@@ -670,7 +719,9 @@ const CHANGE_TYPE_STYLES: Record<ChangeType, { icon: string; label: string; colo
 
 /** 变更清单卡片 */
 function ChangeListCard({ data }: { data: ChangeList }) {
+  // 统计口径用全量 changes，渲染只取前 MAX_LIST_ITEMS 个文件
   const totalEdits = data.changes.reduce((sum, change) => sum + change.edits.length, 0);
+  const changesView = limitItems(data.changes);
 
   return (
     <div className="my-4 rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] overflow-hidden">
@@ -700,7 +751,7 @@ function ChangeListCard({ data }: { data: ChangeList }) {
 
       {/* 变更列表 */}
       <div className="p-3">
-        {data.changes.map((change, i) => {
+        {changesView.items.map((change, i) => {
           const editsByType = change.edits.reduce((acc, edit) => {
             if (!acc[edit.type]) acc[edit.type] = [];
             acc[edit.type].push(edit);
@@ -737,6 +788,7 @@ function ChangeListCard({ data }: { data: ChangeList }) {
             </div>
           );
         })}
+        <ListOverflowHint hiddenCount={changesView.hiddenCount} />
       </div>
     </div>
   );
@@ -927,8 +979,22 @@ function GenericJsonView({ code }: { code: string }) {
     }
   }, [code]);
 
-  const highlightedCode = useMemo(() => highlightJson(code), [code]);
-  const lineCount = code.split('\n').length;
+  // 超大输入防护：渲染内容截断到上限，超限部分仅提示字数（MAJOR-D1）
+  const clippedView = useMemo(
+    () => clampRenderText(code, RAW_TEXT_RENDER_LIMIT),
+    [code],
+  );
+  const displayCode = clippedView.text;
+
+  const highlightedCode = useMemo(() => {
+    // 超大文本跳过正则高亮（多次全文正则扫描开销大），仅保留转义
+    if (code.length > HIGHLIGHT_SKIP_THRESHOLD) {
+      return escapeHtml(displayCode);
+    }
+    return highlightJson(displayCode);
+  }, [code, displayCode]);
+
+  const lineCount = displayCode.split('\n').length;
   const canCollapse = lineCount > 10;
 
   return (
@@ -971,6 +1037,11 @@ function GenericJsonView({ code }: { code: string }) {
           <div className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-[var(--color-bg-inset)] to-transparent pointer-events-none" />
         )}
       </div>
+      {clippedView.clipped && (
+        <div className="px-3 py-2 border-t border-[var(--color-border-default)] text-[11px] text-[var(--color-text-tertiary)]">
+          内容过长，仅显示前 {RAW_TEXT_RENDER_LIMIT.toLocaleString()} 字符（共 {code.length.toLocaleString()} 字符）
+        </div>
+      )}
     </div>
   );
 }
@@ -984,6 +1055,12 @@ interface JsonStructureRendererProps {
 }
 
 export function JsonStructureRenderer({ jsonString, isStreaming = false }: JsonStructureRendererProps) {
+  // 超大输入防护（MAJOR-D1）：不做 JSON.parse 与结构化渲染，直接走折叠
+  // 文本视图。结构化卡片按条目全量展开，超大输入会生成海量 DOM 与解析开销
+  if (jsonString.length > LARGE_JSON_THRESHOLD) {
+    return <GenericJsonView code={jsonString} />;
+  }
+
   // 尝试解析 JSON
   let parsedJson: unknown;
   try {

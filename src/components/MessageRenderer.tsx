@@ -7,6 +7,12 @@
 import { useState, useCallback, useMemo } from 'react';
 import { Icon } from '@iconify/react';
 import JsonStructureRenderer from './JsonStructureRenderer';
+import {
+  HIGHLIGHT_SKIP_THRESHOLD,
+  RAW_TEXT_RENDER_LIMIT,
+  clampRenderText,
+  isOversizedJson,
+} from '../lib/renderGuard';
 
 interface MessageRendererProps {
   /** 消息内容（支持 Markdown） */
@@ -128,6 +134,11 @@ function truncateMessage(text: string): { preview: string; full: string; truncat
 /** 检测文本是否为纯 JSON（可能是 LLM 直接输出的分析结果） */
 function isPureJson(text: string): { isJson: boolean; parsed?: unknown } {
   const trimmed = text.trim();
+  // 超大输入防护：不尝试 JSON.parse（超大 JSON 走折叠文本视图，避免
+  // 解析开销与结构化渲染卡顿），由 JsonStructureRenderer 的折叠视图兜底
+  if (isOversizedJson(trimmed)) {
+    return { isJson: false };
+  }
   // 必须以 { 开头且以 } 结尾
   if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
     return { isJson: false };
@@ -269,8 +280,9 @@ function parseInlineMarkdown(text: string): React.ReactNode {
 function CodeBlock({ language, code }: { language: string; code: string }) {
   const isJson = language === 'json';
 
-  // JSON 使用结构化渲染器
-  if (isJson) {
+  // JSON 使用结构化渲染器；超大 JSON 输入跳过（结构化卡片会按条目全量
+  // 展开，超大输入直接走下方折叠代码视图，避免大量 DOM 与解析开销）
+  if (isJson && !isOversizedJson(code)) {
     return <JsonStructureRenderer jsonString={code} />;
   }
 
@@ -293,6 +305,11 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
     const escaped = escapeHtml(code);
 
     if (!language || language === 'plaintext') {
+      return escaped;
+    }
+
+    // 超大代码防护：跳过正则高亮（多次全文正则扫描开销大），仅保留转义
+    if (isOversizedJson(code) || code.length > HIGHLIGHT_SKIP_THRESHOLD) {
       return escaped;
     }
 
@@ -366,13 +383,25 @@ export default function MessageRenderer({ content, isStreaming }: MessageRendere
     return truncateMessage(content);
   }, [content, isStreaming]);
 
-  const displayContent = expanded ? full : preview;
+  // 展开态渲染上限：超大文本即使手动展开也不全量渲染（MAJOR-D1 防护）
+  const expandedView = useMemo(
+    () => clampRenderText(full, RAW_TEXT_RENDER_LIMIT),
+    [full],
+  );
+
+  const displayContent = expanded ? expandedView.text : preview;
+  const contentClipped = expanded && expandedView.clipped;
 
   return (
     <div className="text-[14px] leading-[1.65] text-[var(--color-text-primary)]">
       {parseMarkdown(displayContent)}
       {isStreaming && (
         <span className="inline-block w-2 h-4 ml-1 bg-[var(--color-accent)] animate-pulse" />
+      )}
+      {contentClipped && (
+        <p className="mt-2 text-[11px] text-[var(--color-text-tertiary)]">
+          内容过长，仅显示前 {RAW_TEXT_RENDER_LIMIT.toLocaleString()} 字符（共 {full.length.toLocaleString()} 字符）
+        </p>
       )}
       {/* 展开/收起按钮 */}
       {truncated && !isStreaming && (

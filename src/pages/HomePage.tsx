@@ -32,6 +32,8 @@ import { ReviewSummary } from '../components/ReviewSummary';
 import { extractPreferences } from '../services/ai/preferenceExtractor';
 import { StreamingMessage } from '../components/StreamingMessage';
 import MessageRenderer from '../components/MessageRenderer';
+import MessageErrorBoundary from '../components/MessageErrorBoundary';
+import LongTextTruncate from '../components/LongTextTruncate';
 import { ImagePreview } from '../components/ImagePreview';
 import { CommandDropdown } from '../commands/CommandDropdown';
 import { parseCommandInput, executeCommand, type CommandContext } from '../commands/index';
@@ -233,11 +235,18 @@ function MessageBubble({
         )}
 
         {isUser ? (
-          // 用户消息：纯文本显示
-          <p className="text-[13px] leading-[1.6] whitespace-pre-wrap">{message.content}</p>
+          // 用户消息：纯文本显示；超长文本折叠展示，不全量渲染（MAJOR-D1 防护）
+          <LongTextTruncate
+            text={message.content}
+            className="text-[13px] leading-[1.6] whitespace-pre-wrap"
+          />
         ) : (
-          // AI 消息：使用 MessageRenderer（支持 JSON 结构化渲染 + Markdown）
-          <MessageRenderer content={message.content} />
+          // AI 消息：MessageRenderer（JSON 结构化渲染 + Markdown）。
+          // 外层包消息级错误边界：单条消息渲染崩溃时降级为占位卡片，
+          // 不向上抛、不拖垮对话面板（MAJOR-D1 前端兜底）
+          <MessageErrorBoundary rawContent={message.content}>
+            <MessageRenderer content={message.content} />
+          </MessageErrorBoundary>
         )}
 
         {/* 状态标签 */}
