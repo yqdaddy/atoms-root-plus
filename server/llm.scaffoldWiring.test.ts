@@ -34,11 +34,10 @@ const HTML_FILES_JSON = JSON.stringify({
   ],
 });
 
-/** react 组件文件：registered=false 时缺 window.__components 注册（应触发校验重试） */
-function reactProjectJson(registered: boolean): string {
-  const register = registered
-    ? '\nwindow.__components = window.__components || {};\nwindow.__components.App = App;'
-    : '';
+/** react 组件文件（P1 真实 import 形态）：brokenImport=true 时 App.jsx import
+ *  不存在的本地文件（触发 E_IMPORT_MISSING 校验重试） */
+function reactProjectJson(brokenImport: boolean): string {
+  const brokenLine = brokenImport ? "import Badge from './components/Badge.jsx';\n" : '';
   return JSON.stringify({
     files: [
       {
@@ -48,24 +47,24 @@ function reactProjectJson(registered: boolean): string {
       },
       {
         path: '/src/main.jsx',
-        content: 'const App = window.__components.App;\nReactDOM.createRoot(document.getElementById("root")).render(null);',
+        content: "import App from './App.jsx';\nReactDOM.createRoot(document.getElementById(\"root\")).render(null);",
         language: 'javascript',
       },
       {
         path: '/src/App.jsx',
-        content: `function App() { return null; }${register}`,
+        content: `${brokenLine}function App() { return null; }\nexport default App;`,
         language: 'javascript',
       },
     ],
   });
 }
 
-/** react 计算器项目：broken=true 时 Calculator.jsx 含悬空 const（语法错误，
+/** react 计算器项目（P1 真实 import 形态）：broken=true 时 Calculator.jsx 含悬空 const（语法错误，
  *  确定性校验器查不出，由审查者检出 → 触发 D-3 修复循环） */
 function reactCalculatorProject(broken: boolean): string {
   const calcBody = broken
-    ? 'function Calculator() { return null; }\nconst dangling = ;\nwindow.__components = window.__components || {};\nwindow.__components.Calculator = Calculator;'
-    : 'function Calculator() { return null; }\nwindow.__components = window.__components || {};\nwindow.__components.Calculator = Calculator;';
+    ? 'function Calculator() { return null; }\nconst dangling = ;\nexport default Calculator;'
+    : 'function Calculator() { return null; }\nexport default Calculator;';
   return JSON.stringify({
     files: [
       {
@@ -75,12 +74,12 @@ function reactCalculatorProject(broken: boolean): string {
       },
       {
         path: '/src/main.jsx',
-        content: 'const App = window.__components.App;\nReactDOM.createRoot(document.getElementById("root")).render(null);',
+        content: "import App from './App.jsx';\nReactDOM.createRoot(document.getElementById(\"root\")).render(null);",
         language: 'javascript',
       },
       {
         path: '/src/App.jsx',
-        content: 'function App() { return null; }\nwindow.__components = window.__components || {};\nwindow.__components.App = App;',
+        content: "import Calculator from './components/Calculator.jsx';\nfunction App() { return null; }\nexport default App;",
         language: 'javascript',
       },
       {
@@ -198,11 +197,11 @@ describe('P0 M4 接线：三件套注入', () => {
     expect(readme!.content).toContain('Node 18+');
   });
 
-  it('create react-cdn 项目：注入 DESIGN.md/package.json；组件缺注册时带错误清单重试后交付', async () => {
+  it('create react-cdn 项目：注入 DESIGN.md/package.json；import 断链时带错误清单重试后交付', async () => {
     const { stage2Events, requestBodies, fetchMock } = await runCreateFlow({
       framework: 'react-cdn',
-      // 分析师 → 工程师（组件缺注册，校验失败） → 工程师重试（含注册，通过） → 审查者
-      responses: [FEATURES_JSON, reactProjectJson(false), reactProjectJson(true), '审查通过'],
+      // 分析师 → 工程师（import 断链，校验失败） → 工程师重试（修正，通过） → 审查者
+      responses: [FEATURES_JSON, reactProjectJson(true), reactProjectJson(false), '审查通过'],
     });
 
     expect(stage2Events.find((e) => e.type === 'error')).toBeUndefined();
@@ -213,8 +212,8 @@ describe('P0 M4 接线：三件套注入', () => {
 
     // 自动重试发生：分析师 + 工程师×2 + 审查者 = 4 次
     expect(fetchMock).toHaveBeenCalledTimes(4);
-    // 重试请求携带结构校验错误清单（含注册约定指引）
-    expect(requestBodies[2]).toContain('window.__components');
+    // 重试请求携带结构校验错误清单（含断链说明符与拼写指引）
+    expect(requestBodies[2]).toContain('./components/Badge.jsx');
     expect(requestBodies[2]).toContain('项目结构不完整');
     // 聊天区有重试进度
     expect(joinedDeltaText(stage2Events)).toContain('自动重试中');
@@ -241,15 +240,15 @@ describe('P0 M4 接线：三件套注入', () => {
     expect(done!.payload.files?.['/README.md']?.content).toBe(llmReadme);
   });
 
-  it('校验重试耗尽仍失败：降级交付，无 error 事件，delta 输出人话提示', async () => {
-    // 三次尝试的组件全部缺注册 → 结构校验持续失败 → 降级交付
+  it('校验重试耗尽仍失败（import 断链三轮不修正）：降级交付，无 error 事件，delta 输出人话提示', async () => {
+    // 三次尝试的 App.jsx 均含断链 import → 结构校验持续失败 → 降级交付
     const { stage2Events, fetchMock } = await runCreateFlow({
       framework: 'react-cdn',
       responses: [
         FEATURES_JSON,
-        reactProjectJson(false),
-        reactProjectJson(false),
-        reactProjectJson(false),
+        reactProjectJson(true),
+        reactProjectJson(true),
+        reactProjectJson(true),
         '审查通过',
       ],
     });
@@ -385,14 +384,14 @@ describe('D-3 审查修复循环', () => {
   });
 
   it('修复循环与结构校验重试不打架：校验失败走校验重试，审查 fail 走修复循环', async () => {
-    // 第 1 次工程师输出缺 App 注册（校验失败 → 校验重试）；
-    // 第 2 次输出注册齐全但含悬空 const（校验通过 → 审查）；
+    // 第 1 次工程师输出 import 断链（校验失败 → 校验重试）；
+    // 第 2 次输出 import 一致但含悬空 const（校验通过 → 审查）；
     // 审查 fail → 修复循环修复 → 复审 pass。两层闸门按序独立触发。
     const { stage2Events, requestBodies, fetchMock } = await runCreateFlow({
       framework: 'react-cdn',
       responses: [
         FEATURES_JSON,
-        reactProjectJson(false),
+        reactProjectJson(true),
         reactCalculatorProject(true),
         REVIEW_FAIL_JSON,
         reactCalculatorProject(false),

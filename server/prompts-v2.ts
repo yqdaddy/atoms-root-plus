@@ -175,7 +175,7 @@ export const REVIEWER_SYSTEM_PROMPT_V2 = `你是 Litpp 平台的质量审查者�
 5. **健壮性**：输入验证、错误提示、空状态、localStorage 保护
 6. **UI 质量**：按钮状态完整（hover/active/disabled）、有动画、响应式
 7. **资源合规**：仅 jsdelivr/tailwindcss、无手写 SVG、无 Inter 字体、无紫色渐变
-8. **工程化**：三层分离（纯计算不在组件内、状态逻辑不在渲染函数内）；组件拆分与交互复杂度匹配（2 个以上独立交互区域未拆分、单文件超 150 行为缺陷）；react 组件文件含 window.__components 注册；滚动行为（单屏应用无页面级滚动条、内容流应用内容完整可达、无横向滚动条）
+8. **工程化**：三层分离（纯计算不在组件内、状态逻辑不在渲染函数内）；组件拆分与交互复杂度匹配（2 个以上独立交互区域未拆分、单文件超 150 行为缺陷）；import 目标文件必须存在（react-cdn 文件间用真实 ESM import，路径含扩展名且与文件树一致，缺失即 fail 并列入 repairInstructions）；bare import 仅允许 react 与 react-dom 且与 package.json 声明一致；图表库经 index.html 的 CDN script 引入后用全局变量（window.Chart / window.echarts），禁止 import；禁止在 JS 中 import 样式文件；滚动行为（单屏应用无页面级滚动条、内容流应用内容完整可达、无横向滚动条）
 
 ## 输出格式（仅 JSON）
 \`\`\`json
@@ -225,7 +225,7 @@ export const REVIEWER_SYSTEM_PROMPT_V2 = `你是 Litpp 平台的质量审查者�
 export function getFrameworkPromptV2(framework: 'html' | 'react-cdn' | 'vue-cdn'): string {
   switch (framework) {
     case 'react-cdn':
-      return `## React CDN 模式（过渡注册约定）
+      return `## React CDN 模式（真实 ESM import）
 
 ### 文件树
 \`\`\`
@@ -241,10 +241,12 @@ export function getFrameworkPromptV2(framework: 'html' | 'react-cdn' | 'vue-cdn'
 /DESIGN.md           # 由平台注入，禁止自行生成
 \`\`\`
 
-### 组件引用约定（禁止 import）
-1. 每个组件文件末尾注册：\`window.__components = window.__components || {}; window.__components.Counter = Counter;\`
-2. 使用方读取：\`const Counter = window.__components.Counter;\`
-3. 禁止写任何 import 语句；React 与 hooks 直接用全局：\`const { useState, useEffect } = React;\`
+### import 规则（必须遵守）
+1. 文件间引用一律使用真实 ESM import；import 路径必须与生成文件路径完全一致（含扩展名），建议相对路径：\`import Counter from './components/Counter.jsx'\`
+2. bare import 仅允许 react 与 react-dom（已在 package.json dependencies 中声明）；其他任何包都不允许 import
+3. 图表库（chart.js/echarts）在 index.html 用 CDN script 引入，代码中直接用全局 \`window.Chart\` / \`window.echarts\`，禁止 import
+4. 禁止在 JS 中 import CSS，样式一律由 index.html 的 link 引用
+5. 每个 jsx 文件保留 \`import React from 'react';\`
 
 ### 拆分粒度
 - 存在 2 个以上独立交互区域必须拆组件
@@ -253,21 +255,21 @@ export function getFrameworkPromptV2(framework: 'html' | 'react-cdn' | 'vue-cdn'
 ### 示例
 \`\`\`jsx
 // /src/components/Counter.jsx
+import React from 'react';
 function Counter() {
   const [count, setCount] = React.useState(0);
   return <button onClick={() => setCount(count + 1)}>{count}</button>;
 }
-window.__components = window.__components || {};
-window.__components.Counter = Counter;
+export default Counter;
 \`\`\`
 \`\`\`jsx
 // /src/App.jsx
-const Counter = window.__components.Counter;
+import React from 'react';
+import Counter from './components/Counter.jsx';
 function App() {
   return <Counter />;
 }
-window.__components = window.__components || {};
-window.__components.App = App;
+export default App;
 \`\`\``;
 
     case 'vue-cdn':

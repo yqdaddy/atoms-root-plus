@@ -13,6 +13,7 @@ import {
   toFileNodeRecord,
   generateFileTreeSummary,
   formatAffectedFiles,
+  inferLanguageFromPath,
   type MultiFileOutput,
   type GeneratedFile,
   type FileLanguage,
@@ -280,6 +281,14 @@ const ENGINEER_DIFF_PROMPT = `你是 Litpp 平台的前端工程师，负责根�
 - replace：将 line 指定的行替换为 new 内容，old 必须与原行完全一致
 - insert：在 line 指定的行之后插入 new 内容，old 填该行原文（用于校验定位）
 - delete：删除 line 指定的行，old 填该行原文，new 填空字符串
+
+【新增 / 删除整个文件（工程化扩展）】
+当修改请求需要新增或删除整个文件时，在该文件的变更对象上加 action 字段：
+- 新增文件：{ "file": "/src/components/Xxx.jsx", "action": "create", "content": "新文件的完整内容" }（content 必填且为完整内容；可省略 edits）
+- 删除文件：{ "file": "/src/utils/Old.js", "action": "delete" }（省略 edits 与 content）
+- 不带 action 字段的变更默认是对现有文件的行级编辑（与旧格式完全兼容）
+- 新增文件遵循现有目录约定（components/hooks/utils），命名延续现有风格
+- 删除文件前确认没有其他文件 import 它；删除后仍被引用的 import 会被结构校验打回
 
 【规则】
 1. old 必须精确匹配原文件中的行，包括空格和缩进；不匹配的编辑会被跳过（不按行号盲改），宁可少改不可错改
@@ -1512,14 +1521,15 @@ export async function continueAfterApproval(
             }
           }
           // 确定性结构校验：注入保证类规则仅在 create 全量流水线强制，
-          // modify/diff 仅查入口（P0 之前存量项目无 README/注册约定，不误报）；
-          // CDN 域白名单仅扫本次 LLM 实际触碰的文件（D-9）：diff/容错路径用
-          // 变更声明的文件集合，纯 files 生成路径回退为 multiFileOutput 全部
-          // 路径——存量项目的历史外部引用两种路径下都不误报
+          // modify/diff 仅查入口（P0 之前存量项目无 README，不误报）；
+          // E_IMPORT_MISSING / E_PKG_DEPS 恒开（存量项目无 import 不误报，
+          // diff 行级编辑恰是 import 幻觉高发入口）；CDN 域白名单仅扫本次
+          // LLM 实际触碰的文件（D-9）：diff/容错路径用变更声明的文件集合，
+          // 纯 files 生成路径回退为 multiFileOutput 全部路径——存量项目的
+          // 历史外部引用两种路径下都不误报
           const enforceP0 = !useDiffMode && !isIteration;
           const validation = validateProject(finalFiles, framework, {
             enforceScaffold: enforceP0,
-            enforceGlobalReg: enforceP0,
             enforceInlineVolume: enforceP0,
             cdnScanPaths: multiFileOutput
               ? (cdnTouchedPaths ?? multiFileOutput.files.map((f) => f.path))
@@ -1532,7 +1542,7 @@ export async function continueAfterApproval(
               // 复用格式重试通道：带错误清单再来一次
               parseSuccess = false;
               shouldRetry = true;
-              formatErrorHint = `项目结构不完整（${errorSummary}）。请修正后重新输出完整文件`;
+              formatErrorHint = `项目结构不完整（${errorSummary}）。请修正后重新输出${useDiffMode ? '变更清单' : '完整文件'}`;
             } else {
               // 重试额度耗尽：降级交付，记录问题清单
               validationIssues = validation.errors;
@@ -1705,7 +1715,6 @@ export async function continueAfterApproval(
             const enforceP0 = !useDiffMode && !isIteration;
             const revalidation = validateProject(repairedRecord, framework, {
               enforceScaffold: enforceP0,
-              enforceGlobalReg: enforceP0,
               enforceInlineVolume: enforceP0,
               // 修复输出是全量文件（含原样保留的存量文件），CDN 扫描同样只看
               // 本次会话实际触碰的文件集合（D-9 同类防线）
@@ -2400,6 +2409,9 @@ function formatFilesWithLineNumbers(
 /**
  * 解析工程师 diff 输出为 ChangeList。
  * 支持剥离 markdown 围栏。解析失败抛出错误。
+ * action 语义（方案 §6.2）：无 action 默认 'edit'（向后兼容旧格式）；
+ * 'create' 必须带非空 content（edits 可省略）；'delete' 只需 file；
+ * action 值非法视为格式错误抛出（走重试通道修正）。
  */
 export function parseChangeList(output: string): ChangeList {
   // 剥离可能的 markdown 围栏
@@ -2451,6 +2463,25 @@ export function parseChangeList(output: string): ChangeList {
     if (typeof change.file !== 'string' || !change.file) {
       throw new Error('变更缺少 file 字段');
     }
+    // action 归一化：无 action 默认 edit（向后兼容旧格式，方案 §6.2）
+    if (change.action === undefined || change.action === null || change.action === '') {
+      change.action = 'edit';
+    } else if (!['edit', 'create', 'delete'].includes(change.action)) {
+      throw new Error(`文件 ${change.file} 的 action 非法: ${change.action}（仅允许 edit/create/delete）`);
+    }
+    if (change.action === 'create') {
+      if (typeof change.content !== 'string' || change.content.trim().length === 0) {
+        throw new Error(`文件 ${change.file} 的 create 变更缺少 content（须为新文件的完整内容）`);
+      }
+      // create 语义下 edits 不参与应用，缺省为空数组
+      if (!Array.isArray(change.edits)) change.edits = [];
+      continue;
+    }
+    if (change.action === 'delete') {
+      // delete 只需 file，edits 缺省为空数组
+      if (!Array.isArray(change.edits)) change.edits = [];
+      continue;
+    }
     if (!Array.isArray(change.edits)) {
       throw new Error(`文件 ${change.file} 的变更缺少 edits 数组`);
     }
@@ -2472,7 +2503,14 @@ export function parseChangeList(output: string): ChangeList {
 /**
  * 将变更清单应用到文件集合。
  *
- * 校验规则（F2 诚实匹配，不盲改）：
+ * action 语义（方案 §6.2）：
+ * - edit（缺省）：行级编辑，见下方 F2 诚实匹配规则
+ * - create：file 不要求已存在，content 作为完整内容写入（edits 忽略）；
+ *   文件已存在时按整文件覆盖处理；language 由路径扩展名推断
+ * - delete：从文件集合移除；文件不存在时记入结构性 errors
+ * - 删除后仍被 import 引用的文件由确定性校验 E_IMPORT_MISSING 拦截（llm.ts 接线）
+ *
+ * edit 校验规则（F2 诚实匹配，不盲改）：
  * - replace/delete 的 old 字段必须与实际行匹配（精确或 trim 双口径），不匹配则跳过该编辑，
  *   绝不按行号盲改（历史事故：old 来自历史摘要幻觉时按行号硬改导致"改得很乱"）
  * - 空 old 的 replace/delete 视为不匹配（无验证锚点即不动现有内容）
@@ -2480,7 +2518,7 @@ export function parseChangeList(output: string): ChangeList {
  * - 行号从大到小应用（避免行号偏移）；被跳过的编辑不移动行，不影响其余编辑行号
  *
  * 返回 { newFiles, appliedCount, skippedCount, skippedEdits, errors }：
- * - appliedCount：真实应用的编辑数
+ * - appliedCount：真实应用的编辑数（create/delete 各计 1）
  * - skippedCount：因 old 不匹配被跳过的编辑数
  * - skippedEdits：被跳过编辑的明细（"文件:行号"）
  * - errors：结构性错误（文件不存在、行号越界）
@@ -2503,6 +2541,30 @@ export function applyChanges(
   const errors: string[] = [];
 
   for (const change of changes) {
+    const action = change.action ?? 'edit';
+
+    // create：新文件完整写入（不要求已存在，edits 忽略；已存在按整文件覆盖）
+    if (action === 'create') {
+      newFiles[change.file] = {
+        path: change.file,
+        content: change.content ?? '',
+        language: inferLanguageFromPath(change.file),
+      };
+      appliedCount++;
+      continue;
+    }
+
+    // delete：从文件集合移除；目标不存在记结构性错误（诚实计数，不静默吞掉）
+    if (action === 'delete') {
+      if (!newFiles[change.file]) {
+        errors.push(`文件不存在: ${change.file}`);
+        continue;
+      }
+      delete newFiles[change.file];
+      appliedCount++;
+      continue;
+    }
+
     const file = newFiles[change.file];
     if (!file) {
       errors.push(`文件不存在: ${change.file}`);

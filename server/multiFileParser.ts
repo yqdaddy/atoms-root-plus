@@ -76,7 +76,7 @@ function isValidLanguage(language: unknown): language is FileLanguage {
  * 从文件路径扩展名推断语言类型。
  * 未知扩展名默认返回 'text'。
  */
-function inferLanguageFromPath(path: string): FileLanguage {
+export function inferLanguageFromPath(path: string): FileLanguage {
   const ext = path.split('.').pop()?.toLowerCase();
   switch (ext) {
     case 'html':
