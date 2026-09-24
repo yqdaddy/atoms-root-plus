@@ -8,15 +8,18 @@
  *   ├── src/...             （多文件模式下的其余源码文件）
  *   ├── styles/...          （样式文件）
  *   ├── dist/index.html     （平台物化的浏览器端编译产物，双击即可运行）
+ *   ├── dist/vendor/...     （react-cdn 项目的本地运行时，随产物相对引用）
  *   └── README.md           （自动生成的运行说明，中文）
  *
- * dist 物化失败（组装两级链路都失败）时中止导出，不产出下载。
+ * dist 物化失败（组装两级链路都失败）时中止导出，不产出下载；
+ * react-cdn 项目的 vendor 运行时获取失败时同样中止（引用已改写为相对路径，
+ * 缺文件即坏产物，宁可不给，不给坏的）。
  */
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { ENTRY_FILE_PATH } from '../../types/project';
 import type { Project, FileNode } from '../../types/project';
-import { materializeDistIndex, DIST_INDEX_PATH } from './distMaterializer';
+import { materializeDistIndex, DIST_INDEX_PATH, DIST_VENDOR_DIR } from './distMaterializer';
 
 /** 项目名转安全文件名：替换文件系统非法字符，压缩空白；无有效字符时兜底 */
 function sanitizeFileName(name: string): string {
@@ -104,8 +107,14 @@ function detectFramework(files: Record<string, FileNode>): string {
   return '原生 HTML/CSS/JavaScript，无需构建工具';
 }
 
-/** 生成 README.md（中文） */
-export function buildReadme(project: Project): string {
+/**
+ * 生成 README.md（中文）。
+ *
+ * @param project 导出的项目
+ * @param vendorFiles dist 产物引用的 vendor 运行时文件名（react-cdn 导出链传入，
+ *        用于在运行说明与目录结构中如实标注；默认空即不提及）
+ */
+export function buildReadme(project: Project, vendorFiles: readonly string[] = []): string {
   const name = project.name || '未命名项目';
   const description = project.description.trim().length > 0
     ? project.description.trim()
@@ -120,6 +129,14 @@ export function buildReadme(project: Project): string {
     ? deps.map((d) => `- ${d.name}（${d.usage}，经 CDN 引入）`).join('\n')
     : '- 无第三方依赖，全部为原生实现';
 
+  const vendorNote = vendorFiles.length > 0
+    ? `\n\`dist/vendor/\` 下是平台附带的运行时本地副本（${vendorFiles.join('、')}），\`dist/index.html\` 以相对路径引用它们，请保持原目录结构，无需联网即可运行。\n`
+    : '';
+
+  const vendorTreeLines = vendorFiles.length > 0
+    ? vendorFiles.map((f) => `├── dist/vendor/${f}`).join('\n') + '\n'
+    : '';
+
   return `# ${name}
 
 > ${description}
@@ -133,7 +150,7 @@ export function buildReadme(project: Project): string {
 解压后双击 \`dist/index.html\`，即可在浏览器中打开应用。
 这是平台在导出时生成的浏览器端编译产物（自包含单文件），无需任何构建步骤。
 引用 CDN 的外部库（如图表库）需要联网加载。
-
+${vendorNote}
 ### 方式二：源码作为工程起点
 
 源码目录（\`index.html\`、\`src/\`、\`styles/\` 等）是规范的工程起点。
@@ -172,18 +189,40 @@ ${Object.keys(project.files)
   .map((p) => `├── ${p.replace(/^\//, '')}`)
   .join('\n')}
 ├── dist/index.html
-└── README.md
+${vendorTreeLines}└── README.md
 \`\`\`
 `;
 }
 
 /**
+ * 获取同源 vendor 运行时文件内容（public/vendor 下的平台本地副本）。
+ * 仅浏览器端导出时调用：dev 下 Vite 静态服务、生产下构建产物根目录均提供 /vendor/。
+ *
+ * @throws 获取失败（网络异常或非 2xx）时抛出，由导出链中止（产物引用已改为
+ *         相对路径，缺文件即坏产物，不给坏的）
+ */
+export async function loadVendorRuntime(fileName: string): Promise<string> {
+  const url = `/vendor/${fileName}`;
+  let response: Response;
+  try {
+    response = await fetch(url);
+  } catch (error) {
+    throw new Error(`vendor 运行时文件获取失败（${url}）：${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!response.ok) {
+    throw new Error(`vendor 运行时文件获取失败（${url}，HTTP ${response.status}），已中止导出`);
+  }
+  return response.text();
+}
+
+/**
  * 把项目构建为 ZIP Blob（不触发下载）。
  *
- * 结构 = 全部源码文件按原路径 + dist/index.html（物化产物）+ README.md。
+ * 结构 = 全部源码文件按原路径 + dist/index.html（物化产物）
+ *       + dist/vendor/（react-cdn 运行时，按产物实际引用）+ README.md。
  * dist 物化失败（组装两级链路都失败）时抛错中止，不产出半成品。
  *
- * @throws 项目无文件、缺少入口文件、路径不安全或 dist 物化失败时抛出 Error
+ * @throws 项目无文件、缺少入口文件、路径不安全、dist 物化失败或 vendor 运行时获取失败时抛出 Error
  */
 export async function buildProjectZipBlob(project: Project): Promise<Blob> {
   const fileNodes = Object.values(project.files);
@@ -223,7 +262,14 @@ export async function buildProjectZipBlob(project: Project): Promise<Blob> {
   }
   zip.file(DIST_INDEX_PATH, materialized.html);
 
-  zip.file('README.md', buildReadme(project));
+  // react-cdn 运行时随 ZIP 交付：物化产物引用已改写为 ./vendor/...，
+  // 这里把被引用的运行时文件放入 dist/vendor/，保证解压后离线可运行
+  for (const fileName of materialized.vendorFiles) {
+    const content = await loadVendorRuntime(fileName);
+    zip.file(`dist/${DIST_VENDOR_DIR}/${fileName}`, content);
+  }
+
+  zip.file('README.md', buildReadme(project, materialized.vendorFiles));
 
   return zip.generateAsync({ type: 'blob' });
 }
