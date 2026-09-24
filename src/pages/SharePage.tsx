@@ -139,8 +139,8 @@ export default function SharePage() {
     if (!shareData?.html) return '';
     let html = injectFilesIntoHtml(shareData.html, shareData.files);
 
-    // 注入 CSP meta 标签（限制外部资源访问，只允许默认 CDN 域名，不允许 eval）
-    const csp = buildPreviewCsp(DEFAULT_CDN_HOSTS, false);
+    // 注入 CSP meta 标签（限制外部资源访问，只允许默认 CDN 域名与同源 /vendor/ 路径，不允许 eval）
+    const csp = buildPreviewCsp(DEFAULT_CDN_HOSTS, false, window.location.origin);
     const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
 
     if (html.includes('<head>')) {

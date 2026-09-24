@@ -14,7 +14,6 @@ import {
 import type { SandboxAllowFlag, FileNode, ProjectFramework } from '../types/project';
 import { useSettingsStore, type DeviceMode, DEVICE_VIEWPORTS } from '../stores/settingsStore';
 import { assembleFiles, assembleProjectFiles, injectReactRuntime, injectVueRuntime } from '../services/sandbox/assembler';
-import { ESM_CDN_HOST } from '../services/sandbox/jsxCompiler';
 import CodeViewer from './CodeViewer';
 
 /**
@@ -55,9 +54,10 @@ function assemblePreviewHtml(
   userHtml: string,
   sessionId: string,
   cdnHosts: readonly string[],
-  evalAllowed: boolean = false
+  evalAllowed: boolean = false,
+  selfOrigin?: string
 ): string {
-  const csp = buildPreviewCsp(cdnHosts, evalAllowed);
+  const csp = buildPreviewCsp(cdnHosts, evalAllowed, selfOrigin);
 
   // 注入消息桥接脚本（监听错误、日志、resize）
   const bridgeScript = `
@@ -262,15 +262,11 @@ export default function SandboxFrame({
   const previewSourceHtml = bundledHtml ?? syncAssembledHtml;
 
   // 组装预览 HTML（注入 CSP 和桥接脚本）
-  // React CDN 模式：开放 unsafe-eval（Sucrase 产物经 new Function 执行）并加白 esm.sh（Sucrase ESM 构建域）
-  // Vue CDN 模式：开放 unsafe-eval（SFC 编译器产物经 new Function 执行）
+  // React/Vue CDN 模式：开放 unsafe-eval（编译器产物经 new Function 执行）
+  // selfOrigin 放行同源 /vendor/ 本地运行时（React/ReactDOM/Sucrase 已零外网依赖）
   const previewHtml = useMemo(() => {
     const needsEval = framework === 'react-cdn' || framework === 'vue-cdn';
-    const effectiveHosts =
-      framework === 'react-cdn' && !cdnHosts.includes(ESM_CDN_HOST)
-        ? [...cdnHosts, ESM_CDN_HOST]
-        : cdnHosts;
-    return assemblePreviewHtml(previewSourceHtml, sessionId, effectiveHosts, needsEval);
+    return assemblePreviewHtml(previewSourceHtml, sessionId, cdnHosts, needsEval, window.location.origin);
   }, [previewSourceHtml, sessionId, cdnHosts, framework]);
 
   // 监听来自沙箱的消息

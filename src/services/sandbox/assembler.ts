@@ -433,16 +433,17 @@ export class Assembler {
   }
 
   /**
-   * 注入 React CDN 运行时（React 18 UMD + Sucrase 编译器）
+   * 注入 React CDN 运行时（同源 vendor 的 React/ReactDOM + Sucrase 编译器）
    * 同时处理无 src 的内联 <script> 中出现的 JSX 代码
    *
    * 无论用户 HTML 是否自带 React 引用都注入平台运行时：
-   * 沙箱 CSP 只放行白名单 CDN（docs/tech-sandbox.md 铁律 4），
+   * 沙箱 CSP 只放行白名单 CDN 与同源 /vendor/ 路径（docs/tech-sandbox.md 铁律 4），
    * 模型自带的外域引用（如 unpkg.com）会被浏览器拦截导致白屏，
-   * 平台运行时固定走 jsdelivr，保证 React/ReactDOM/Sucrase 可用。
+   * 平台运行时固定走本地 vendor（/vendor/react.vendor.js，零外网依赖），
+   * 保证 React/ReactDOM/Sucrase 可用。
    */
   injectReactRuntime(html: string, warnings: string[]): string {
-    if (html.includes('react@') || html.includes('react-dom@') || html.includes('unpkg.com/react')) {
+    if (html.includes('react@') || html.includes('react-dom@') || html.includes('unpkg.com/react') || html.includes('cdn.jsdelivr.net/npm/react')) {
       warnings.push('HTML 已包含 React 引用，与平台运行时并存（白名单外的引用会被 CSP 拦截）');
     }
 
@@ -501,7 +502,7 @@ export class Assembler {
    * 同时处理无 src 的内联 <script> 中出现的 Vue SFC 代码
    */
   injectVueRuntime(html: string, warnings: string[]): string {
-    // 同 React：无论用户 HTML 是否自带 Vue 引用都注入平台运行时（白名单内 jsdelivr）
+    // 同 React：无论用户 HTML 是否自带 Vue 引用都注入平台运行时（Vue 运行时暂仍走白名单内 jsdelivr）
     if (html.includes('vue@') || html.includes('unpkg.com/vue') || html.includes('cdn.jsdelivr.net/npm/vue')) {
       warnings.push('HTML 已包含 Vue 引用，与平台运行时并存（白名单外的引用会被 CSP 拦截）');
     }

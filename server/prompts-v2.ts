@@ -139,11 +139,12 @@ function saveData(key, value) {
 
 ## 产物铁律
 1. 所有文件自包含，浏览器直接运行
-2. 外部资源仅限 jsdelivr 和 tailwindcss CDN
+2. 外部资源仅限 jsdelivr CDN 与同源 /vendor/ 路径；禁止其他任何域名
 3. 禁止手写 SVG 图标
 4. 数据持久化只用 localStorage
 5. 游戏必须有结束判定和重开功能
 6. 所有应用必须完整功能实现（不接受最小原型）
+7. 样式一律手写原生 CSS；禁止引用 Tailwind CDN 等 CSS 框架脚本（部署环境不可达，会导致整页无样式）
 
 ## 工程化规范
 - 文件输出顺序：/index.html 最先，其次入口脚本，再次组件，hooks/utils 随后，样式最后
@@ -174,8 +175,8 @@ export const REVIEWER_SYSTEM_PROMPT_V2 = `你是 Litpp 平台的质量审查者�
 4. **交互真实**：按钮有事件、表单有验证、交互有反馈
 5. **健壮性**：输入验证、错误提示、空状态、localStorage 保护
 6. **UI 质量**：按钮状态完整（hover/active/disabled）、有动画、响应式
-7. **资源合规**：仅 jsdelivr/tailwindcss、无手写 SVG、无 Inter 字体、无紫色渐变
-8. **工程化**：三层分离（纯计算不在组件内、状态逻辑不在渲染函数内）；组件拆分与交互复杂度匹配（2 个以上独立交互区域未拆分、单文件超 150 行为缺陷）；import 目标文件必须存在（react-cdn 文件间用真实 ESM import，路径含扩展名且与文件树一致，缺失即 fail 并列入 repairInstructions）；bare import 仅允许 react 与 react-dom 且与 package.json 声明一致；图表库经 index.html 的 CDN script 引入后用全局变量（window.Chart / window.echarts），禁止 import；禁止在 JS 中 import 样式文件；滚动行为（单屏应用无页面级滚动条、内容流应用内容完整可达、无横向滚动条）
+7. **资源合规**：外部资源仅 jsdelivr 与同源 /vendor/ 路径、无 CSS 框架 CDN（如 Tailwind CDN）、无手写 SVG、无 Inter 字体、无紫色渐变
+8. **工程化**：三层分离（纯计算不在组件内、状态逻辑不在渲染函数内）；组件拆分与交互复杂度匹配（2 个以上独立交互区域未拆分、单文件超 150 行为缺陷）；import 目标文件必须存在（react-cdn 文件间用真实 ESM import，路径含扩展名且与文件树一致，缺失即 fail 并列入 repairInstructions）；bare import 仅允许 react 与 react-dom 且与 package.json 声明一致；图表库经 index.html 的 script（须带 defer）引入后用全局变量（window.Chart / window.echarts），禁止 import；禁止引用 react/react-dom 的 script（平台运行时注入）；禁止在 JS 中 import 样式文件；滚动行为（单屏应用无页面级滚动条、内容流应用内容完整可达、无横向滚动条）
 
 ## 输出格式（仅 JSON）
 \`\`\`json
@@ -229,7 +230,7 @@ export function getFrameworkPromptV2(framework: 'html' | 'react-cdn' | 'vue-cdn'
 
 ### 文件树
 \`\`\`
-/index.html          # 入口（挂载点 root + CDN 引用，不含业务代码）
+/index.html          # 入口（挂载点 root + 图表库 script，不含框架引用与业务代码）
 /src/main.jsx        # createRoot 挂载，只做挂载
 /src/App.jsx         # 根组件：布局与组装
 /src/components/     # 视图组件（每文件一个组件，PascalCase.jsx）
@@ -244,9 +245,10 @@ export function getFrameworkPromptV2(framework: 'html' | 'react-cdn' | 'vue-cdn'
 ### import 规则（必须遵守）
 1. 文件间引用一律使用真实 ESM import；import 路径必须与生成文件路径完全一致（含扩展名），建议相对路径：\`import Counter from './components/Counter.jsx'\`
 2. bare import 仅允许 react 与 react-dom（已在 package.json dependencies 中声明）；其他任何包都不允许 import
-3. 图表库（chart.js/echarts）在 index.html 用 CDN script 引入，代码中直接用全局 \`window.Chart\` / \`window.echarts\`，禁止 import
+3. 图表库（chart.js/echarts）在 index.html 用 script 引入且必须带 defer 属性（如 \`<script defer src="https://cdn.jsdelivr.net/npm/chart.js"></script>\`），代码中直接用全局 \`window.Chart\` / \`window.echarts\`，禁止 import
 4. 禁止在 JS 中 import CSS，样式一律由 index.html 的 link 引用
 5. 每个 jsx 文件保留 \`import React from 'react';\`
+6. React/ReactDOM 运行时由平台以同源 /vendor/react.vendor.js 注入，index.html 禁止引用 react/react-dom 的任何 script 标签
 
 ### 拆分粒度
 - 存在 2 个以上独立交互区域必须拆组件
@@ -285,7 +287,7 @@ export default App;
 \`\`\`
 
 ### 关键规则
-1. 入口文件只含 \`<div id="app"></div>\` 和 CDN 引用
+1. 入口文件只含 \`<div id="app"></div>\` 与样式引用；Vue 运行时由平台注入，禁止自行引用 vue 的 script 标签
 2. 组件使用选项对象格式（含 template 字段）
 3. 使用 Vue 3 Composition API
 4. 挂载点必须是 \`<div id="app"></div>\`
@@ -300,8 +302,8 @@ const App = {
     const count = ref(0);
     return { count };
   },
-  template: \`<div class="min-h-screen bg-gray-50 p-4">
-    <button @click="count++" class="px-4 py-2 bg-green-500 text-white rounded">
+  template: \`<div style="min-height:100vh;padding:16px;background:#f9fafb">
+    <button @click="count++" style="padding:8px 16px;background:#22c55e;color:#fff;border-radius:6px">
       点击 {{ count }} 次
     </button>
   </div>\`
@@ -334,16 +336,22 @@ createApp(App).mount('#app');
 <!DOCTYPE html>
 <html>
 <head>
-  <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="./styles/main.css">
 </head>
-<body class="min-h-screen bg-gray-50">
-  <div class="container mx-auto p-4">
-    <button id="counter" class="px-4 py-2 bg-blue-500 text-white rounded">点击 0 次</button>
+<body>
+  <div class="container">
+    <button id="counter" class="btn">点击 0 次</button>
   </div>
   <script src="./src/main.js"></script>
 </body>
 </html>
+\`\`\`
+
+\`\`\`css
+/* /styles/main.css */
+body { margin: 0; min-height: 100vh; background: #f9fafb; }
+.container { max-width: 960px; margin: 0 auto; padding: 16px; }
+.btn { padding: 8px 16px; background: #3b82f6; color: #fff; border-radius: 6px; }
 \`\`\`
 
 \`\`\`javascript

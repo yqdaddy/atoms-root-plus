@@ -2,7 +2,8 @@
  * bare import shim 表（mini-bundler，路线 B）。
  *
  * 生成的应用代码以 ESM 语法 import 第三方库（如 react、chart.js），
- * 沙箱内这些库以 CDN UMD 全局（window.React、window.Chart 等）提供。
+ * 沙箱内这些库以全局变量提供（window.React 经同源 /vendor 平台运行时注入，
+ * window.Chart 等图表库经生成的入口 HTML 的 jsdelivr UMD script 提供）。
  * 本表把 bare 说明符映射到互操作工厂：require(spec) 返回带
  * __esModule 标记的命名空间对象，供 Sucrase imports transform 的
  * _interopRequireDefault / _interopRequireWildcard 正确消费。
@@ -18,8 +19,8 @@ type ShimFactoryBody = string;
 
 /**
  * shim 表：bare 说明符 -> 工厂函数体源码。
- * window.React / window.ReactDOM 由 react-cdn 平台运行时（jsdelivr UMD）注入；
- * window.Chart / window.echarts 由生成的入口 HTML 的 CDN script 标签提供。
+ * window.React / window.ReactDOM 由 react-cdn 平台运行时注入（同源 /vendor/react.vendor.js）；
+ * window.Chart / window.echarts 由生成的入口 HTML 的图表 script 标签提供（jsdelivr UMD 构建）。
  */
 export const BARE_IMPORT_SHIMS: Readonly<Record<string, ShimFactoryBody>> = {
   react: `
@@ -70,13 +71,13 @@ export const BARE_IMPORT_SHIMS: Readonly<Record<string, ShimFactoryBody>> = {
       return { __esModule: true, jsx: jsx, jsxs: jsx, jsxDEV: jsx, Fragment: R.Fragment, default: { jsx: jsx, jsxs: jsx, jsxDEV: jsx, Fragment: R.Fragment } };`,
   'chart.js': `
       var C = window.Chart;
-      if (!C) { throw new Error('window.Chart 未加载：chart.js 需通过 CDN script 标签引入（jsdelivr UMD 构建）'); }
+      if (!C) { throw new Error('window.Chart 未加载：chart.js 需在入口 HTML 通过 script 标签引入（jsdelivr UMD 构建，须带 defer）'); }
       var m = { __esModule: true, default: C, Chart: C };
       for (var k in C) { if (Object.prototype.hasOwnProperty.call(C, k) && !(k in m)) { m[k] = C[k]; } }
       return m;`,
   echarts: `
       var E = window.echarts;
-      if (!E) { throw new Error('window.echarts 未加载：echarts 需通过 CDN script 标签引入（jsdelivr UMD 构建）'); }
+      if (!E) { throw new Error('window.echarts 未加载：echarts 需在入口 HTML 通过 script 标签引入（jsdelivr UMD 构建，须带 defer）'); }
       var m = { __esModule: true, default: E };
       for (var k in E) { if (Object.prototype.hasOwnProperty.call(E, k) && !(k in m)) { m[k] = E[k]; } }
       return m;`,

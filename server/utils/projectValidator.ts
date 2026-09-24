@@ -41,7 +41,12 @@ export interface ValidatableFile {
 const SCAFFOLD_FULL = ['/README.md', '/DESIGN.md', '/package.json'] as const;
 const SCAFFOLD_HTML = ['/README.md'] as const;
 
-/** 外部资源白名单 CDN 域名（E_CDN_DOMAIN，D-8）：仅 jsdelivr 与 tailwindcss 官方 CDN */
+/**
+ * 外部资源白名单 CDN 域名（E_CDN_DOMAIN，D-8）：仅 jsdelivr 与 tailwindcss 官方 CDN。
+ * 同源 /vendor/ 路径（平台本地运行时，零外网依赖）不经本表：externalHostOf 对
+ * 根绝对/相对路径返回 null，天然放行；本表仅约束真正的外部域名。
+ * tailwindcss 域名仅对存量项目兼容放行，提示词已不再指引使用。
+ */
 const CDN_WHITELIST_HOSTS: ReadonlySet<string> = new Set(['cdn.jsdelivr.net', 'cdn.tailwindcss.com']);
 
 /** 资源引用形态一：属性赋值 src="..." / href="..."（覆盖 script/link/img/iframe，
@@ -253,14 +258,15 @@ export function validateProject(
   }
 
   // E_CDN_DOMAIN：外部资源引用仅允许白名单 CDN（D-8，确定性零 token 兜底，
-  // 弥补 LLM 审查在资源合规维度的盲区；违规走既有校验重试通道让模型换 jsdelivr）
+  // 弥补 LLM 审查在资源合规维度的盲区；违规走既有校验重试通道让模型换
+  // 同源 /vendor/ 路径或 jsdelivr）
   for (const [path, file] of Object.entries(files)) {
     if (cdnScanPaths && !cdnScanPaths.includes(path)) continue;
     for (const host of collectOffWhitelistHosts(file.content)) {
       errors.push({
         code: 'E_CDN_DOMAIN',
         file: path,
-        message: `引用了非白名单 CDN 域名 ${host}（外部资源仅允许 cdn.jsdelivr.net 与 cdn.tailwindcss.com），请改用 jsdelivr 上的等价资源`,
+        message: `引用了非白名单外部域名 ${host}（外部资源仅允许同源 /vendor/ 路径、cdn.jsdelivr.net 与 cdn.tailwindcss.com），请改用同源 /vendor/ 路径或 jsdelivr 上的等价资源`,
       });
     }
   }

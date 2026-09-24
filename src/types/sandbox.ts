@@ -6,10 +6,15 @@ import type { SandboxAllowFlag } from './project';
 
 export const SANDBOX_PROTOCOL_VERSION = 1 as const;
 
-/** 允许生成代码引用的 CDN 主机白名单（铁律 4）。包含 jsdelivr 和 Tailwind CDN。 */
+/**
+ * 允许生成代码引用的外部 CDN 主机白名单（铁律 4）。
+ * 平台自身运行时已切换为同源 /vendor/ 路径（经 buildPreviewCsp 的 selfOrigin 放行，
+ * 不在本表）；本表仅覆盖生成应用可能引用的外部资源（图表库 jsdelivr）与
+ * 存量项目的 tailwind CDN 引用（兼容，不再主动指引使用）。
+ */
 export const DEFAULT_CDN_HOSTS: readonly string[] = [
   'cdn.jsdelivr.net',
-  'cdn.tailwindcss.com',  // Tailwind CSS CDN（HTML/React/Vue 模式均需要）
+  'cdn.tailwindcss.com',  // Tailwind CSS CDN（仅存量项目兼容；生成指引已改手写 CSS）
 ];
 
 /**
@@ -182,9 +187,21 @@ export function parseSandboxMessage(
  * 默认不含 unsafe-eval（等于在访客内禁了 eval/new Function）。
  * React CDN 模式需要 evalAllowed=true：Sucrase 编译产物经 new Function 执行。
  * unsafe-eval 的风险由 iframe sandbox（无 allow-same-origin）隔离缓解。
+ *
+ * selfOrigin：宿主页面的同源源表达式（如 http://localhost:5173）。
+ * 本地 vendor 运行时（/vendor/*.js）在 srcdoc 文档中以宿主页面为 base URL
+ * 解析为 selfOrigin 下的 URL，必须显式加入 script-src 才能加载
+ * （srcdoc 文档为 opaque origin，'self' 关键字不可依赖，故由调用方显式传入）。
  */
-export function buildPreviewCsp(cdnHosts: readonly string[], evalAllowed: boolean = false): string {
+export function buildPreviewCsp(
+  cdnHosts: readonly string[],
+  evalAllowed: boolean = false,
+  selfOrigin?: string,
+): string {
   const scriptSrcParts = ["'unsafe-inline'", ...cdnHosts.map((host) => `https://${host}`)];
+  if (selfOrigin && selfOrigin.length > 0) {
+    scriptSrcParts.push(selfOrigin);
+  }
   if (evalAllowed) {
     scriptSrcParts.push("'unsafe-eval'");
   }

@@ -335,6 +335,34 @@ describe('validateProject：E_CDN_DOMAIN（D-8 资源域白名单）', () => {
     expect(validateProject(project, 'html').errors.some((e) => e.code === 'E_CDN_DOMAIN')).toBe(false);
   });
 
+  it('同源 /vendor/ 路径（平台本地运行时，零外网依赖）放行，不报 E_CDN_DOMAIN', () => {
+    const project = {
+      ...HTML_PROJECT,
+      '/index.html': {
+        path: '/index.html',
+        content: '<!DOCTYPE html><html><head>'
+          + '<script src="/vendor/react.vendor.js"></script>'
+          + '<script src="/vendor/sucrase.vendor.js"></script>'
+          + '<link rel="stylesheet" href="/vendor/theme.css">'
+          + '</head><body>hi</body></html>',
+      },
+    };
+    expect(validateProject(project, 'html').errors.some((e) => e.code === 'E_CDN_DOMAIN')).toBe(false);
+  });
+
+  it('/vendor/ 路径在 cdnScanPaths 限定扫描下同样放行', () => {
+    const project = {
+      ...HTML_PROJECT,
+      '/index.html': {
+        path: '/index.html',
+        content: '<!DOCTYPE html><html><head><script src="/vendor/react.vendor.js"></script></head><body>hi</body></html>',
+      },
+    };
+    expect(
+      validateProject(project, 'html', { cdnScanPaths: ['/index.html'] }).errors.some((e) => e.code === 'E_CDN_DOMAIN')
+    ).toBe(false);
+  });
+
   it('CSS @import 非白名单域名同样命中', () => {
     const project = {
       ...HTML_PROJECT,

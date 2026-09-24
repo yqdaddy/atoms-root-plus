@@ -145,9 +145,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);`,
       expect(result.html).toContain('<style>');
       expect(result.html).toContain('.app { padding: 20px; }');
 
-      // 验证 React 运行时被注入
-      expect(result.html).toContain('react@');
-      expect(result.html).toContain('react-dom@');
+      // 验证 React 运行时被注入（同源 vendor：React 运行时 + Sucrase 编译器）
+      expect(result.html).toContain('<script src="/vendor/react.vendor.js"></script>');
+      expect(result.html).toContain('<script src="/vendor/sucrase.vendor.js"></script>');
 
       // 验证 JSX 文件被正确包装（通过文件名标记）
       expect(result.html).toContain('"./src/App.jsx"');
@@ -330,9 +330,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);`,
       expect(result.html).toContain('__compileAndRun(');
       expect(result.html).toContain('__sucraseReady');
 
-      // 平台运行时（白名单内 jsdelivr）已注入，保证 React 在 CSP 下可用
-      expect(result.html).toContain('https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js');
-      expect(result.html).toContain('window.React = window.React || React');
+      // 平台运行时（同源 vendor，零外网依赖）已注入，保证 React 在 CSP 下可用
+      expect(result.html).toContain('<script src="/vendor/react.vendor.js"></script>');
+      expect(result.html).toContain('<script src="/vendor/sucrase.vendor.js"></script>');
 
       // 用户自带引用保留原样（白名单外由 CSP 拦截，白名单内后加载覆盖）
       expect(result.html).toContain('https://unpkg.com/react@18/umd/react.production.min.js');
@@ -605,9 +605,10 @@ export default function App() {
     expect(result.stats.inlinedCss).toBe(1);
     expect(result.stats.inlinedJs).toBe(2);
 
-    // 平台 React 运行时注入保持不变，且先于打包脚本执行（文档序）
-    expect(result.html).toContain('https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js');
-    expect(result.html.indexOf('window.React = window.React || React')).toBeLessThan(
+    // 平台 React 运行时注入保持不变（同源 vendor），且先于打包脚本执行（文档序：
+    // vendor 为经典 script 在 head 同步执行，bundle 内联脚本在其后）
+    expect(result.html).toContain('<script src="/vendor/react.vendor.js"></script>');
+    expect(result.html.indexOf('/vendor/react.vendor.js')).toBeLessThan(
       result.html.indexOf('__defineModule(')
     );
 

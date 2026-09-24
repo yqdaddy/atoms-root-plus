@@ -33,10 +33,20 @@ describe('getFrameworkPromptV2（react-cdn）：真实 import 规则在场', () 
     expect(REACT_PROMPT).toContain('仅允许 react 与 react-dom');
   });
 
-  it('图表库走 index.html CDN script 用全局变量，禁止 import', () => {
+  it('图表库走 index.html script 用全局变量且必须带 defer，禁止 import', () => {
     expect(REACT_PROMPT).toContain('window.Chart');
     expect(REACT_PROMPT).toContain('window.echarts');
     expect(REACT_PROMPT).toContain('禁止 import');
+    // defer：离线/弱网环境图表 CDN 加载失败不阻塞页面解析，仅图表区空
+    expect(REACT_PROMPT).toContain('defer');
+  });
+
+  it('React 运行时由平台同源 vendor 注入，生成应用禁止自带 react script', () => {
+    expect(REACT_PROMPT).toContain('/vendor/react.vendor.js');
+    expect(REACT_PROMPT).toContain('禁止引用 react/react-dom 的任何 script 标签');
+    // 零外网依赖：模板不得再指引 jsdelivr 上的 react UMD（离线超时 90s+ 的元凶）
+    expect(REACT_PROMPT).not.toContain('cdn.jsdelivr.net/npm/react');
+    expect(REACT_PROMPT).not.toContain('unpkg.com/react');
   });
 
   it('禁止在 JS 中 import CSS', () => {
@@ -71,6 +81,13 @@ describe('REVIEWER_SYSTEM_PROMPT_V2：第 8 维度同步', () => {
     expect(REVIEWER_SYSTEM_PROMPT_V2).toContain('仅允许 react 与 react-dom');
     expect(REVIEWER_SYSTEM_PROMPT_V2).toContain('package.json 声明一致');
   });
+
+  it('维度 7/8 资源合规口径与 vendor 化一致：同源 /vendor/ 放行、CSS 框架 CDN 禁止、图表 script 带 defer', () => {
+    expect(REVIEWER_SYSTEM_PROMPT_V2).toContain('同源 /vendor/ 路径');
+    expect(REVIEWER_SYSTEM_PROMPT_V2).toContain('无 CSS 框架 CDN');
+    expect(REVIEWER_SYSTEM_PROMPT_V2).toContain('须带 defer');
+    expect(REVIEWER_SYSTEM_PROMPT_V2).not.toContain('cdn.tailwindcss.com');
+  });
 });
 
 describe('不受本次切换影响的回归锚点', () => {
@@ -80,10 +97,29 @@ describe('不受本次切换影响的回归锚点', () => {
     expect(htmlPrompt).toContain('由平台注入');
   });
 
+  it('html 段示例已去除 Tailwind CDN 引用（切换手写 CSS）', () => {
+    const htmlPrompt = getFrameworkPromptV2('html');
+    expect(htmlPrompt).not.toContain('cdn.tailwindcss.com');
+    expect(htmlPrompt).toContain('./styles/main.css');
+    expect(htmlPrompt).toContain('/styles/main.css');
+  });
+
+  it('工程师 base 铁律不再指引 Tailwind CDN，仅允许 jsdelivr 与同源 /vendor/ 路径', () => {
+    expect(ENGINEER_BASE_PROMPT_V2).not.toContain('cdn.tailwindcss.com');
+    expect(ENGINEER_BASE_PROMPT_V2).toContain('/vendor/');
+    expect(ENGINEER_BASE_PROMPT_V2).toContain('jsdelivr');
+    expect(ENGINEER_BASE_PROMPT_V2).toContain('手写原生 CSS');
+  });
+
   it('vue-cdn 段保持全局 Vue 用法（模块运行时 P2）', () => {
     const vuePrompt = getFrameworkPromptV2('vue-cdn');
     expect(vuePrompt).toContain('Vue.createApp');
     expect(vuePrompt).toContain('由平台注入');
+  });
+
+  it('vue-cdn 段禁止生成应用自带 vue script（平台运行时注入，避免离线双重加载）', () => {
+    const vuePrompt = getFrameworkPromptV2('vue-cdn');
+    expect(vuePrompt).toContain('禁止自行引用 vue 的 script 标签');
   });
 
   it('工程师 base 段仍含输出顺序与禁 import 样式的工程化规范', () => {
