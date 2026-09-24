@@ -1,0 +1,31 @@
+# D-9/D-10 核验清理记录（2026-09-24 15:00）
+
+## 已清理
+
+localStorage（经同源临时页执行，页已删）：
+- 删除项目详情键 3 个：
+  - f01523e6-6bde-4948-b0e7-c1982714a603（倒数日，本轮采样 1）
+  - 6d60dccf-5adc-4197-acbe-015c60f050d5（单位换算器，本轮采样 2）
+  - d9d90001-1111-4111-8111-111111111111（D9存量夹具-unpkg-legacy，验收夹具）
+- 摘要索引 litpp:v1:projects 中对应 3 条 summary 已移除：49 → 46（恢复本轮核验前计数）
+- currentId 若指向被删项目已置空；孤儿键扫描 0 残留
+
+临时文件（均已删除，未进入任何提交）：
+- __rc_d9_fixture.html（仓库根，D-9 夹具注入页）
+- public/__rc_d10_render.html / __rc_d10_render2.html / __rc_d10_render3.html（渲染复现页）
+- public/__rc_cleanup.html（清理执行页）
+- /tmp 下核验中间产物（f-*.json/txt/png、mcc.sh 等）留存于 /tmp，未入仓
+
+浏览器：
+- 本核验打开的全部标签已按 URL 精确关闭（/workspace ×8、/__rc_* ×4）；本轮创建的 2 个独立窗口随标签关闭消亡
+- 用户原有标签（含 atoms.litpp.com 生产标签与 localhost:5173/login 标签）未触碰
+- 附注：/workspace 批量关闭中可能波及并发会话打开的同 URL 标签（共享浏览器，对方可原路重开，无数据影响）
+
+## 保留（非本核验产物，不清理）
+
+- 其余 46 个项目及其键（含其他会话的测试项目，如「生成中」卡住项）——属其他会话/角色，未动
+- 12 个 localhost:5173 标签残留属并发会话活动标签
+
+## 工具环境备注
+
+mcp-chrome 桥接会话中途失效（Invalid MCP request or session），改用直连 HTTP（/tmp/mcc.sh，initialize+tools/call）完成全部操作；chrome_inject_script 注入不落地、chrome_screenshot 仅存壳帧，取证路径切换为 DOM 读取 + webRequest + 同源临时页，均已在 real-machine.txt 说明。

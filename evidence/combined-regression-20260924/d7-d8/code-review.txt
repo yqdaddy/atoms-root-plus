@@ -1,0 +1,67 @@
+代码审查记录（D-7 / D-8 聚焦，2026-09-24 11:20-12:05）
+
+═══ D-7 虚假降级警告修复 ═══
+位置：server/llm.ts:1572-1722
+1. 初值改 'converged'（llm.ts:1572），初值仅在零修复轮生效 ✓
+2. 循环四条退出路径均显式赋值 ✓
+   - 1685 复审 pass → 'converged' + break
+   - 1691 复审 fail/裁决不可解析 → 'still-failing'（由 while 条件继续或终止）
+   - 1694 复审网络失败 → 'network-failed' + break
+   - 1700 修复未应用（调用失败/不可解析/校验不过）→ 'repair-not-applied' + break
+3. gate 语义 ✓：降级文案（1718）含"自动修复"字样的分支仅 loopOutcome ∈ {still-failing,
+   repair-not-applied} 可达，两者要求 repairRound ≥ 1（真实修复轮发生过）；
+   network-failed 文案"自动修复已完成"亦仅在修复应用后可达
+4. fail 无指令新提示（1707-1712）✓："审查发现部分问题但未提供修复指令，本次按现状
+   交付"——不含修复动作声称；repairRound === 0 条件与降级 gate 互斥（repairRound=0
+   时 loopOutcome 必为 'converged'，gate 1714 不触发）
+5. 两条新断言到位且有效 ✓（server/llm.scaffoldWiring.test.ts）
+   - :344 首审直接通过 → 断言无"仍未全部解决"、无"自动修复中"、warning 事件数=0
+   - :362 fail 无指令 → 断言无"仍未全部解决"、含"未提供修复指令"
+观察 O-4（minor，不阻塞）：'repair-not-applied' 与 'still-failing' 共用同一文案
+"自动修复…后仍未全部解决"；修复轮存在但修复未应用时该措辞略过强，可再区分。
+
+═══ D-8 CDN 域白名单（E_CDN_DOMAIN）修复 ═══
+校验器：server/utils/projectValidator.ts
+1. 扫描面 ✓：ATTR_REF_RE（src/href 属性，覆盖运行时 el.src 注入与 data-src 懒加载，
+   后者为有意设计并有注释说明）+ CSS_IMPORT_RE（@import）+ 协议相对 //host
+   （externalHostOf 经 http: 前缀 URL 解析）
+2. 误报防线 ✓：externalHostOf 仅认 http(s):// 与 //host；相对路径/锚点/data: URI
+   返回 null；代码内普通字符串（无 src=/href= 上下文）不命中
+   ——projectValidator.test.ts 用例 4 逐项断言（/favicon.ico、./app.js、#top、
+   unpkg 纯字符串）
+3. cdnScanPaths 双语义 ✓：undefined=全量扫描、数组=仅扫列表（llm.ts:1461 与 :1644
+   两处调用点分别传 multiFileOutput / repairedFiles 实际产出路径）
+4. 重试通道接入 ✓：E_CDN_DOMAIN 随 validation.errors 进 errorSummary → formatErrorHint
+   "项目结构不完整（…）请修正后重新输出完整文件" → 复用 MAX_PARSE_ATTEMPTS=3 预算
+   （llm.ts:1463-1474）
+5. 6 个新单测有效 ✓：unpkg 命中/白名单通过/@import 命中/误报面四类/协议相对/
+   cdnScanPaths 限定与全量对照
+
+═══ 新发现 D-9（major，迭代流误报面回归）═══
+现象链（代码级证据）：
+- diff 模式（modify 默认）在 llm.ts:1213 分支只设 finalFiles 与 changeList，
+  multiFileOutput 保持 undefined（:1434 注释自证）
+- 流程仍进入 :1441 校验块 → :1461 cdnScanPaths 取 multiFileOutput?.files.map(...) = undefined
+  → 按校验器语义退化为全量扫描（projectValidator.test.ts 用例 6 后半已证 undefined=全量）
+- changes 容错路径（llm.ts:1360 附近）multiFileOutput=全量合并文件，cdnScanPaths 同样
+  覆盖存量文件
+后果：对含非白名单绝对外域引用的存量项目执行 modify → 存量文件命中 E_CDN_DOMAIN →
+白耗 3 次重试（且 hint"请修正后重新输出完整文件"与 diff 格式要求相悖）→ 用户收到
+"自动重试后仍有 N 处结构问题"警告（llm.ts:1503-1509）。交付本身仍成功（validationIssues
+降级通道），但直接违背 :1456 注释"存量项目的历史外部引用不误报"的修复目标。
+触发面：存量项目（含 jsdelivr/tailwindcss 之外绝对引用，如修复前生成的 unpkg 项目）+ modify。
+建议修复：diff 模式传 changeList 涉及文件路径、容错路径传 changes 涉及文件路径
+（即"本次 LLM 实际产出/触碰"的路径），并补 2 条单测（diff 迭代不扫存量、容错迭代只扫
+变更文件）。
+
+═══ 新发现 D-10（major，预存在，非本轮改动引入）═══
+react-cdn 生成项目预览白屏的第二根因（与上轮 unpkg 网络问题无关、叠加存在）：
+- 组装器 src/services/sandbox/assembler.ts inlineJsScripts 的 src 正则仅匹配
+  ./ 与 ../ 相对路径（约 :184），不识别 /src/xxx 根相对路径 → 原样保留
+- 沙箱 srcdoc（2736 字节，sandbox=allow-scripts 无 allow-same-origin，opaque origin）
+  中 <script type="text/babel" src="/src/App.jsx"> 等无法解析 → 零执行、零网络请求、
+  桥接 ready 消息零发送 → 白屏
+- 对照：html 框架样本 srcdoc 17085 字节全部内联，渲染正常
+- 影响：所有以 /src/ 根相对路径引用脚本的 react-cdn 产物均不可预览交互；本轮生成物
+  即如此（14 文件、审查 7 项全 pass 仍白屏）
+- 建议：inlineJsScripts 正则放宽接受前导 / 并经 resolvePath 归一

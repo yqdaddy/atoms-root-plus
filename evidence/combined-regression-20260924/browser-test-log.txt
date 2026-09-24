@@ -1,0 +1,28 @@
+联合回归 真机采样证据（2026-09-24 10:44-11:15 CST，vite:5173 + API:3000 tsx watch，未重启）
+
+采样 1：create react 计算器（数据看板 chip 置 react-cdn，项目 4310920f-c9cc）
+- 多轮修复真机触发：对话区依次出现"[审查未通过，自动修复中（第 1/2 轮）]"与"[审查未通过，自动修复中（第 2/2 轮）]"
+- 第 2 轮收敛：最终审查裁决全部 pass（脚本可执行/功能覆盖/交互真实/健壮性/UI质量/资源合规/工程化 全 true，repairInstructions:[]），无降级 warning，无 error，done 正常（12 文件 = 9 生成 + 3 三件套补齐）
+- server 日志：审查修复应用（第 1 轮）9 文件、（第 2 轮）12 文件，结构校验通过；修复自检日志出现（模型声明 fixed=[] 但 summary 称已修复，自检序号填报质量问题，见观察 O-3）
+- SSE 合并：控制台全程无 Maximum update depth exceeded（6600 个网络分块），崩溃根因修复成立
+- 唯一异常：liveEngine.ts:291 Uncaught (in promise) AbortError（旧流中止）= 任务书已声明的预存在边界，非新缺陷
+- framework 完整性：detail.framework=react-cdn、summary 索引 framework=react-cdn，均完整
+- 预览交互：白屏，未渲染。根因排查：生成产物 index.html 以 unpkg.com 引入 react/react-dom/babel（违反 prompts-v2.ts:142"仅限 jsdelivr"约定；babel 3MB 在本网络 14s+ 且 iframe 内长期未完成），text/babel 脚本无一执行 → 空根节点。产物静态结构正确（script 顺序 utils→hooks→组件→App→main、type=text/babel、onClick x5、addEventListener x1、__components 注册齐全）。审查者"资源合规"未识别 unpkg 违规（审查盲区）；Cdpf 点击无法执行因页面未渲染。附注：修复循环收敛于代码语法层面，未覆盖 CDN 选择这类环境性缺陷
+- 对照：curl 实测 jsdelivr react 200/约1s；unpkg 需 302 跳转，babel 3.1MB/14.2s
+
+采样 2：create html 待办清单（计算器 chip 置 html 框架，项目 81ee0b81）
+- 6 文件：/index.html、/styles/main.css、/src/utils.js、/src/storage.js、/src/main.js、/README.md，仅注入 README、无 DESIGN/package.json（html 分支正确）
+- 审查全 pass（failCount=0，repairInstructions=[]），但对话区出现"提示：审查发现的问题自动修复后仍未全部解决，本次按现状交付；应用可能存在缺陷，可点击重试重新生成。"——零修复轮次下的虚假降级提示 = D-7 真机实锤（与 /tmp 复现脚本结论一致：loopOutcome 初值 still-failing + 循环未启动时仍发通知）
+- 预览完整渲染；CDP 坐标点击"未完成"筛选 tab，蓝色选中态由"全部"切换至"未完成"，交互真实
+- 滚动：列表为空态，10+ 条目自然滚动未实测（如实注明）；审查 note 报告无横向滚动
+
+采样 3：modify（81ee0b81 会话内迭代"把标题颜色改一下，改成绿色"）
+- 文件 6 → 6，无三件套新增；index.html 含绿色色值；status=ready，done 正常；framework=html 保持
+
+server 日志扫描（/private/tmp/litpp-server.log，lsof 定位）
+- "已自动重试"出现 0 次，谎报文案无再现；无 error 事件
+- 历史窗口可见"修复调用失败，保留原产物: 不可重试的错误"（修复调用 catch 生效记录）
+
+清理
+- 4310920f、81ee0b81 均经 UI 删除，localStorage 复查两 id 均不存在
+- 项目列表中出现非本轮创建的新项目（10:19-10:36 本地时段，含一个 status=generating），为并行会话产物，未触碰

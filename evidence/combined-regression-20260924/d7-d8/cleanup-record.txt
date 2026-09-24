@@ -1,0 +1,26 @@
+清理记录（2026-09-24 12:05-12:15）
+
+本轮自建 4 个项目 + 上轮登记的 2 个授权残留，全部删除并复查：
+
+自建（授权内）：
+- 145f4046-6156-41d7-b1c1-ccd1f6a14eb3  番茄钟首试误入 html，主动停止（draft）
+- f0b42288-b87c-431f-9bbb-6095c2712665  待办清单首试误入 react-cdn，主动停止（draft）
+- 242754ec-7169-4ad2-8d05-8f33dcfe50cc  采样 1 react 番茄钟（draft，D-10 白屏样本）
+- 71e2cc02-ab52-4c2e-8cdf-842aafdb7c4f  采样 2 html 待办清单（ready）
+
+授权残留（上轮 cleanup-record.txt 登记，协调者指明"其一卡 generating"的并行中断测试对）：
+- 85afd098（status=generating 卡死）→ 已删
+- 4e02c863（同会话 3 分钟后完成的 ready 项目）→ 已删
+
+保留未动（不在明确授权内）：a877b0f9、0e5e8377 及更早项目
+
+复查：detail 剩 36 key、目标 id 零残留（TARGET_LEFT[0]）；summary 索引同步移除 6 条；
+最新剩余项目为 a877b0f9(02:25Z)/0e5e8377(02:19Z)/e9f47bbd(昨日)
+
+过程偏离说明（如实上报）：
+- UI 删除第一项时触发原生 confirm()（ProjectsPage.tsx:196），MCP 工具链无
+  Page.handleJavaScriptDialog 接口且无键盘 dialog 授权，页面 JS 被弹窗冻结；
+- 处置：刷新取消弹窗后改用存储级清理（detail key + summary 条目移除）。
+  该方法仅用于清理，验收证据均在清理前采集完毕，不影响任何验收结论；
+- 附带发现（不阻塞）：原生 confirm 阻塞式弹窗对自动化测试不友好，建议产品侧
+  改用自定义确认弹窗（交 frontend-developer 参考）。

@@ -1,0 +1,27 @@
+D-3 审查修复循环 真机回归证据（2026-09-24 09:43-10:00 CST，浏览器实测）
+环境：dev server vite :5173 + API :3000（未重启），mcp-chrome 驱动
+
+生成 1（09:43 发起，"做一个计算器"，数据看板 chip 置 react-cdn，项目 93725f2d-3f9c-48d5-b75e-84b156792a72）
+- 审查者真实返回 fail：checks 含 脚本可执行 pass:false（App.jsx和main.jsx重复 import 与 window.__components 赋值冲突）、健壮性 pass:false（除零检测）、工程化 pass:false（App.jsx 超150行注释混乱）
+- repairInstructions 3 条（删除 App.jsx 冲突行 / 修复除零检测 / 简化 main.jsx）
+- 对话区出现且仅出现 1 次 "[审查未通过，自动修复中（1/1）]"（textContent 抓取 start=true，计数 repair=1）
+- 标记后紧跟修复工程师的 {"files":[...]} 流式输出（可解析）
+- 全程 missingFiles 出现 2 次 = 首审 + 复审两份裁决 JSON
+- 复审仍 fail → 降级提示 "提示：审查发现的问题自动修复后仍未全部解决，本次按现状交付；应用可能存在缺陷，可点击重试重新生成。"（degrade=1）
+- 无 error 事件，done 正常，项目落盘 12 文件（含三件套 README/DESIGN/package.json + 组件拆分 Display/Button/CalculatorButtons/hooks/utils）
+- 交付产物 main.jsx 仍同时含 `import App from './App.jsx'` 与 `const App = window.__components...`（重复声明，Babel 语法错误）→ 预览白屏（深蓝空面板）
+- 结论：修复循环真机端到端触发（修复→复审→降级），与单测用例 2 行为一致；但修复未收敛，交付物不可用（设计内降级，提示句如实）
+
+生成 2（09:50 发起，同 prompt 新项目 1d05d305，第 2 次生成后达到预算上限）
+- 存档 chat（36153 字符）含 "自动修复中"=true、"仍未全部解决"=true：本轮同样审查 fail → 修复 → 复审 fail → 降级
+- 交付 12 文件（README/DESIGN/package.json + Display/Buttons/History/App/main/hooks/utils）
+- UI 渲染成功（Babel 编译通过，计算器界面完整显示），但交互测试失败：
+  * 普通 click "8"(1070,440)、"9"(1145,440) → 显示屏保持 "0"
+  * CDP 受信点击 "1"(995,660) → 显示屏保持 "0"
+  * 控制台无报错（主页面 vite/react 正常）
+  * 结论：渲染通过但事件接线失效（疑似 window.__hooks/__modules 同步注册时序缺陷），预览不可交互
+- 验收点 "预览可交互即通过"：两次生成均未达成
+
+崩溃观察（O-1，前轮已记录的既有问题）：生成 2 监控期间 React "Maximum update depth exceeded" 使整棵树空白（root.innerHTML=0），刷新后恢复；本轮前端零改动（git diff 仅 server/llm.ts、测试文件、tsbuildinfo），非 D-3 引入
+数据观察（O-2）：崩溃后 93725f2d 项目记录被重新持久化，framework 字段丢失（react-cdn → undefined），updatedAt 由 01:45:57.618Z 变为 01:45:57.726Z；疑为崩溃时状态冲刷，建议前端/数据角色排查（超出 D-3 范围）
+草稿观察（O-3）：项目列表出现一个 "草稿" 卡片（约 09:53 创建），疑为崩溃标签页的在途壳项目，列入清理

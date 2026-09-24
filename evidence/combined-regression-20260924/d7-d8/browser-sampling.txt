@@ -1,0 +1,59 @@
+真机采样记录（2026-09-24 11:33-12:00，vite:5173 主 + API:3000，tsx watch 未手动重启）
+
+═══ 采样 1：create react 项目「做一个番茄钟，包含专注与休息倒计时」═══
+框架链路：模板 chip（数据看板）预置 react-cdn，server 日志确认"使用用户手动选择的框架: react-cdn"
+（首试误入 html 框架已在 ~40s 内主动停止，见清理记录）
+产物：项目 242754ec-7169-4ad2-8d05-8f33dcfe50cc，14 文件（11 生成 + README/DESIGN/package.json），
+done 事件正常，流接收 2067 个分块
+
+D-7 核验（首审直接通过场景）✓：
+- 审查裁决 7 项全 pass（脚本可执行/功能覆盖/交互真实/健壮性/UI质量/资源合规/工程化），
+  repairInstructions=[]，missingFiles=[]
+- 对话区 textContent 全文检索：无"自动修复中"、无"仍未全部解决"、无"未提供修复指令"
+- 控制台无 warning 事件（仅前端自有 toast：响应式启发式 1 条提示，属既有前端校验，
+  与本轮改动无关；首页"生成完成，但代码存在 1 个问题"由此而来，项目状态置 draft）
+- server 日志：react-cdn 生成启动后至 done 无任何降级/修复/校验失败日志行（成功路径静默）
+
+D-8 核验 ✓：
+- 源码级：对 14 个文件全部内容跑 src|href/@import 提取，唯一外域 = cdn.jsdelivr.net
+  （react/react-dom/@babel/standalone 三件套），无 unpkg、无其他域
+- CSP 层：SandboxFrame 注入 meta CSP，script-src 白名单 = cdn.jsdelivr.net + cdn.tailwindcss.com
+  + esm.sh（与 htmlValidator ALLOWED_CDN_HOSTS 同源），违规域即使写出也会被浏览器拦截
+- Network 捕获说明：CDP 网络调试对 srcdoc 沙箱 iframe 子请求捕获为 0 条（工具边界，
+  无法作反证），以源码级 + CSP 白名单双证据为准
+
+framework 完整性 ✓：detail.framework=react-cdn、summary 索引 framework=react-cdn
+
+控制台 ✓：全程无 Maximum update depth exceeded（2067 分块）；唯一异常为预存在
+Uncaught (in promise) AbortError（liveEngine.ts:291，任务书已声明边界）
+
+预览白屏（D-10，预存在缺陷，证据见 code-review.txt）：
+- srcdoc 2736 字节含完整 CSP + postMessage 桥接 + jsdelivr 三件套 + 根 div，
+  但 9 个 app 脚本以 <script type="text/babel" src="/src/..."> 保留 → opaque origin
+  无法加载 → 桥接 ready/错误/日志消息 0 条、网络请求 0 条、白屏
+- 该样本的"预览内真实点击交互"因此不可执行，改由采样 2 承担（见下）
+
+═══ 采样 2：create html 项目「做一个待办清单，可以添加任务、勾选完成、筛选」═══
+框架链路：计算器 chip 预置 html（待办清单 chip 本轮映射 react-cdn，首试已即停即弃）
+产物：项目 71e2cc02-ab52-4c2e-8cdf-842aafdb7c4f，status=ready
+
+D-7 核验 ✓：审查 7 项全 pass、repairInstructions=[]；对话区无"自动修复中/仍未全部解决/
+未提供修复指令"
+D-8 核验 ✓：srcdoc 17085 字节全内联，唯一外部 <script src> = cdn.tailwindcss.com（白名单内）
+framework ✓：detail.framework=html、summary framework=html
+
+预览真实渲染 ✓：「Litpp To-Do」完整渲染（标题/筛选 tab/统计/空态插画与文案）
+预览内真实交互 ✓（CDP 坐标点击，3 处证据）：
+1. 点击"未完成" tab → 选中态（蓝字白底）由"全部"切换至"未完成"
+2. 点击"全部" tab → 选中态切回
+3. （上轮同型样本亦有筛选 tab 切换证据）
+应用为单屏设计，添加输入区（#task-input + "+"按钮）位于首屏折叠下方，经滚动父级容器可见
+
+键盘输入边界（如实注明）：无法以可用工具向 sandbox 无 allow-same-origin 的 opaque
+iframe 送达键盘输入，三种方式均尝试并失败：
+- mcp-chrome keyboard 非 CDP 模式（DOM 事件仅达顶层 activeElement=iframe 元素）
+- mcp-chrome keyboard CDP 模式（Input.dispatchKeyEvent 仅路由主 frame，"successful"
+  但访客输入框无回显）
+- macOS System Events 真实键入（AppleEvent 超时 -1712，无辅助功能授权）
+因此"真实键入 10+ 条目 + 长列表滚动到底"本轮无法闭环，保持 UNVERIFIED（工具边界，
+非应用缺陷；鼠标路径的可达性与交互性已由筛选 tab 切换证实）

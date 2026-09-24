@@ -1,0 +1,48 @@
+# D-9 / D-10 代码审查记录（reality-checker，2026-09-24）
+
+静态门禁：build:server / typecheck / npm test（238/238，14 文件）/ npm run build 全绿，见 gates-static.txt（13:50:03）。
+
+## D-9（ai-engineer）：cdnTouchedPaths 会话级扫描范围
+
+代码审查（server/llm.ts，工作区未提交版本）：
+
+| 检查点 | 位置 | 结论 |
+|---|---|---|
+| 变量声明 + 注释说明三分支语义 | llm.ts:1149 | PASS。注释明确「diff/容错修改流程: 记录本轮实际改动的文件；纯生成流程: 保持 undefined」 |
+| 每轮重置 | llm.ts:1160（retry for 循环首行） | PASS。`cdnTouchedPaths = undefined;` 位于 MAX_PARSE_ATTEMPTS=3 循环内第一行，每次重试前清空 |
+| diff 采纳点赋值 | llm.ts:1262 | PASS。`cdnTouchedPaths = changeList.changes.map((c) => c.file);` 仅取本轮变更声明文件 |
+| changes 容错采纳点赋值 | llm.ts:1396 | PASS。`cdnTouchedPaths = toleratedList.changes.map(...)` 同语义 |
+| 纯生成路径 | 全局 | PASS。无 diff/容错时保持 undefined |
+| 主校验点传参 | llm.ts:1475-1477 | PASS。`cdnScanPaths: multiFileOutput ? (cdnTouchedPaths ?? multiFileOutput.files.map(f=>f.path)) : cdnTouchedPaths` — 纯生成回落全量（模型手写全部文件），diff 用触碰集 |
+| 修复产物复审传参 | llm.ts:1662 | PASS。`cdnScanPaths: cdnTouchedPaths ?? repairedFiles.map(f=>f.path)` |
+| 双向语义 | 单测 m/n + 真机 | 见下 |
+
+单测审查（server/llm.parseRetry.test.ts，新增 describe「D-9 CDN 扫描范围：diff/容错路径不误伤存量文件」）：
+
+- 测试 m（:683 存量不误报）：夹具 legacy.html 含 unpkg + 干净 index.html；diff 仅改 index.html 标题。断言：1 次调用、0 重试、无「结构问题」、done 含新标题。断言有效。
+- 测试 n（:697 触碰必拦截）：diff 触碰含 unpkg 的 index.html。断言：3 次调用、2 次重试且 reason 为「项目结构不完整」、requestBodies[1] 同时包含 unpkg.com 与 cdn.jsdelivr.net（错误提示白名单生效）、最终 degrade 且 done。断言有效。
+- O-4（:628 测试 l「修复未应用：文案区分『未能应用』，不声称『仍未全部解决』」）：4 次调用，deltaText 含「自动修复未能应用」，不含「仍未全部解决」。断言有效。
+
+三分支互斥（llm.ts:1734-1741，含注释「复审网络失败 ≠ 审查未通过 ≠ 修复未应用…『仍未全部解决』只用于修复真实应用过且复审仍不通过的场合」）。真机日志佐证（server-log-full.txt）：
+- L649 `审查修复循环降级交付（repair-not-applied，共 1 轮）`
+- L690/L701 `审查修复循环降级交付（still-failing，共 2 轮）`
+两种措辞在日志中互斥出现，与代码三分支一致。
+
+## D-10（frontend-developer）：装配器四层修复
+
+src/services/sandbox/assembler.ts（+111 行 diff）：
+
+| 层 | 实现 | 测试 |
+|---|---|---|
+| 1. 根相对路径放宽 | inlineCssLinks href 正则 `/(?:\.{1,2}\/|\/(?!\/))[^"']+/i`（:144），inlineJsScripts src 同（:191）；`(?!\/)` 排除协议相对 //host | assembler.test.ts:165（/src/xxx.jsx react-cdn）、:188（/src/xxx.js html）、:206（./ 回归）、:253（// 排除）、:267（CSS 对称）、:286（缺失替换注释+告警） |
+| 2. 入口自引用防循环 | `absolutePath === this.config.entryPath` 跳过并告警（CSS/JS 两处） | :224 |
+| 3. 运行时始终注入 | injectReactRuntime/injectVueRuntime 不再因用户自带引用而跳过；用户白名单外引用降级为 warning「与平台运行时并存（白名单外的引用会被 CSP 拦截）」；injectHead 去重 | :299（react 并存）、:344（vue 并存） |
+| 4. containsJsx 增补 + .jsx 兜底 | jsxCompiler.ts:43-44 `=>\s*\(?\s*<`、`return\s*\(?\s*<`（补括号换行形态）；assembler.ts:217-220 `isJsxFile` 扩展名直判，注释说明漏报代价 | :421（return ( 换行）、:448（.jsx 兜底，夹具构造启发式盲区）、:474（纯 .js 不误包装） |
+
+warnUnreferencedSourceFiles（assembler.ts:396-408）：收集入口 html src/href 引用集合（resolvePath 归一），对 /src/**/*.{jsx,js} 且非 /src/main.jsx 的未引用文件告警；调用点 :85-90 在内联之前（react-cdn only，「必须在内联发生前检查原始引用完整性」）。测试 :379/:403。误报面：仅 react-cdn、仅 /src 下源码文件、仅告警不阻断。
+
+containsJsx 增补正则误报面评估：`return\s*\(?\s*<` 要求 return 后紧跟可选括号与 `<`，`return a < b` 比较表达式不命中；纯 .js 若含 JSX 形态本就无法作为普通脚本运行，误包装即正确行为。测试 :474 证实纯 .js 不含 JSX 时不包装。
+
+## 已知边界（记录，不属于本次验收缺陷）
+
+assembler 的内联面是 src/href 属性引用；对 index.html 中动态 `import('/src/...')` 引导（模型 import 违约的一种形态）无改写能力（assembler.ts 无 importmap/blob 处理，486 行全文件 grep 证实）。真机影响见 real-machine 记录。

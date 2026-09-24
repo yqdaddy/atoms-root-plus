@@ -1,0 +1,46 @@
+# D-9 / D-10 真机核验记录（reality-checker，2026-09-24 14:00-15:00）
+
+环境：dev server localhost:5173（vite PID 38905/69821 等；server tsx watch PID 59263，stdout → /tmp/litpp-server.log，已归档为 server-log-full.txt）。Chrome 经 mcp-chrome 桥接。
+环境异常（影响取证方式，不影响结论）：本次会话 chrome_inject_script 注入不落地、chrome_screenshot 仅能取到页面挂载前的壳帧（后续 readback failed）、screencast 权限不可用。取证改用 DOM 读取（chrome_get_web_content）、webRequest 网络捕获、CDP console、同源临时页 + 标题回显，全部为实际运行证据。
+
+## D-9 真机（localStorage 夹具 + 同源注入页，非单测回退）
+
+因 UI 无项目导入入口（importProjects 仅 example.ts 引用；唯一 file input 是图表数据 DataImportPanel），改用同源夹具页写 localStorage（临时根文件经 vite 提供，用后删除，见 cleanup-record.txt）。夹具项目：`D9存量夹具-unpkg-legacy`，id d9d90001-1111-4111-8111-111111111111，framework html，含两个文件：
+- /index.html 干净主页（标题「存量项目」）
+- /legacy.html 含 `<script src="https://unpkg.com/legacy-lib@1.2.3/dist/legacy.min.js">`
+
+run 1（存量不误报，log 行 903-908，见 server-log-d9-fixture-runs.txt）：
+- 指令「验收D9：把主页大标题改成…」→ classifyIntent modify (0.85) → runDirectModifyPipeline 上下文裁剪 2/2 文件
+- `diff 解析成功: 1 个文件, 1 处编辑` → `已应用 1 处编辑`
+- 全窗口（行 903-921）无「结构校验失败」「非白名单 CDN 域名」「格式错误重试」→ 存量 legacy.html 的 unpkg 未被扫描、未触发虚假重试，交付正常。PASS。
+
+run 2（触碰必拦截，log 行 910-921）：
+- 指令「验收D9拦截：把旧版页 legacy.html 里的大标题改成…」→ diff 1 个文件（legacy.html）→ 应用
+- `结构校验失败: /legacy.html 引用了非白名单 CDN 域名 unpkg.com（外部资源仅允许 cdn.jsdelivr.net 与 cdn.tailwindcss.com）` → `格式错误重试（第 1/2 次）` —— E_CDN_DOMAIN 精确命中被触碰文件
+- 重试 diff 2 处编辑：改标题并自行删除 unpkg 行（模型遵循修复提示）→ 应用 → 结构校验通过（静默）→ 管线收敛完成
+- 备注：UI 侧未收到 done 事件，因共享浏览器并发会话导致客户端 SSE 中断（本核验环境因素，非产品缺陷）；服务端日志证实收敛路径完整。PASS。
+
+结论：D-9「存量不误报、触碰必拦截」双向真机成立；单测 m/n 与真机一致。
+
+## D-10 真机（2 次新生成 react-cdn 采样，预算内）
+
+采样 1（倒数日，数据看板 chip → 日志确认「使用用户手动选择的框架: react-cdn」）：
+- 生成链路：E_CDN_DOMAIN 拦截 fonts.googleapis.com/gstatic.com/unpkg.com（2 次重试 + 策略切换，D-8 活体证据）→ 换用 jsdelivr 后结构校验通过 → 审查修复 2 轮 → still-failing 降级交付（12 文件，log 行 679-690）
+- 装配产物（实取 iframe srcdoc 分析，f-iframe-html.txt 证据快照）：根相对 /styles/main.css 成功内联为 <style>（层1）；CSP 白名单仅 jsdelivr/tailwindcss/esm.sh，0 个 unpkg/googleapis（D-8 合规）；平台 react@18 运行时与用户 react@18.3.1 引用并存（层3，双 UMD 加载为设计行为）；sandbox="allow-scripts" 不变
+- 运行时：白屏。证据链：(a) srcdoc 中无任何 /src 模块实体；(b) index.html 引导为 `import('/src/...')` 动态导入（模型 import 违约形态），assembler 无 importmap/blob 改写能力；(c) 刷新预览时 webRequest 捕获仅 cdn.tailwindcss.com 与 esm.sh/sucrase 两个请求、无任何 /src/* 模块请求 → 导入链未解析即失败；(d) 同源顶层复现页 console 报 `Failed to resolve module`/无内容挂载
+- 判定：白屏根因 = 模型 import 违约（前端开发者已报 P1 线索「import 违约高频」），非 D-10 四层任一的回归
+
+采样 2（单位换算器，react-cdn 确认，log 行 694-701）：交付 10 文件 still-failing 降级。装配产物正确（无 import() 引导、__compileAndRun 包装块 ×2、白名单干净）——层1/3/4 装配级证据 + 正面样本。运行时仍白屏：同源顶层复现页 console 实测 `Uncaught SyntaxError: [JSX] Cannot use import statement outside a module`（源文件含 ESM import，Sucrase jsx transform 不转模块语句，new Function 执行即语法错）→ 同为 import 违约类。
+
+正向渲染对照：本轮两次 react-cdn 新生成均因 import 违约白屏（2/2），故「CDP 坐标点击核心按钮交互生效」无法在新鲜产物上验证，标注 UNVERIFIED。html 框架渲染回归引用 Task D/E 证据（计算器/待办清单渲染+交互通过），本轮未重测（按验收范围）。
+
+## 其他观察（一句话级，不展开）
+
+1. esm.sh 依赖风险：平台 react-cdn 运行时从 esm.sh 加载 Sucrase，本网络 curl 实测 esm.sh 不可达/极慢（jsdelivr 正常），页面内置 15s 超时即报「Sucrase 编译器加载超时」。环境层面存在间歇性白屏风险，建议 P1 关注（如Sucrase 改 jsdelivr 或本地内联）。
+2. O-4 措辞真机互斥佐证：log L649 repair-not-applied 与 L690/L701 still-failing 分立出现。
+3. HomePage 控制台抽屉为静态占位文案（HomePage.tsx:2078「预览控制台输出将显示在这里...」），SandboxFrame 的 onError/onLog 未接线，guest 报错 UI 静默——与白屏并列的用户体验缺口，属前端已知范围。
+4. 项目列表状态标记：本轮两个新生成项目与夹具项目均显示「草稿」而非「已完成」，与 Task D/E 已完成项目不一致，未展开核查（不排除并发会话干扰）。
+
+## 执行者自述核对（验收项 D-10.3）
+
+前端开发者自述「曾用 localStorage 直改剥离 import 隔离变量」。本核验以全新会话、全新生成、零 localStorage 预处理独立取样，实测 2/2 新鲜 react-cdn 产物因 import 违约无法渲染。因此：若其最终渲染证据依赖该剥离手段，则该证据仅证明「装配器对 import 干净代码可正确渲染」（与本次装配级证据一致），不能证明管线新鲜产物的端到端渲染；若其另有天然 import-free 的生成样本，则与本观察不矛盾（模型输出风格逐次波动）。其证据强度按前者保守降级，按后者持保留——两种情形均不动摇本次结论。

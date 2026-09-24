@@ -1,0 +1,11 @@
+=== gates 2026-09-24 13:50:03 ===
+> tsc -p tsconfig.server.json
+
+build:server exit=0
+typecheck exit=0
+ Test Files  14 passed (14)
+      Tests  238 passed (238)
+test exit=0
+
+✓ built in 2.63s
+build exit=0

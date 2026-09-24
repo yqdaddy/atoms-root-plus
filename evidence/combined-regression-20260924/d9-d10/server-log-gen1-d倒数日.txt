@@ -1,0 +1,23 @@
+[classifyIntent] 关键词匹配成功：create (0.850)
+[generateWithStages] 意图识别: 创建应用 (type=create, confidence=0.85) 创建关键词命中 1 次 + 空项目
+[generateWithStages] 使用用户手动选择的框架: react-cdn
+[continueAfterApproval] 结构校验失败: /index.html 引用了非白名单 CDN 域名 fonts.googleapis.com（外部资源仅允许 cdn.jsdelivr.net 与 cdn.tailwindcss.com），请改用 jsdelivr 上的等价资源；/index.html 引用了非白名单 CDN 域名 fonts.gstatic.com（外部资源仅允许 cdn.jsdelivr.net 与 cdn.tailwindcss.com），请改用 jsdelivr 上的等价资源；/index.html 引用了非白名单 CDN 域名 unpkg.com（外部资源仅允许 cdn.jsdelivr.net 与 cdn.tailwindcss.com），请改用 jsdelivr 上的等价资源
+[continueAfterApproval] 格式错误重试（第 1/2 次）
+[continueAfterApproval] 结构校验失败: /index.html 引用了非白名单 CDN 域名 fonts.googleapis.com（外部资源仅允许 cdn.jsdelivr.net 与 cdn.tailwindcss.com），请改用 jsdelivr 上的等价资源；/index.html 引用了非白名单 CDN 域名 fonts.gstatic.com（外部资源仅允许 cdn.jsdelivr.net 与 cdn.tailwindcss.com），请改用 jsdelivr 上的等价资源
+[continueAfterApproval] 格式错误重试（第 2/2 次），策略切换
+[continueAfterApproval] 修复自检通过（0 项已修复）: 已将 /src/hooks/useEvents.js、/src/components/AddForm.jsx、/src/components/EventCard.jsx 中的 'React' 改为小写 'react'
+[continueAfterApproval] 审查修复应用（第 1 轮）: 9 个文件，结构校验通过
+[continueAfterApproval] 修复自检通过（0 项已修复）: 已将 main.jsx 中的 ESM import 改为使用全局 ReactDOM.createRoot，并将 EventCard.jsx 中的内部 calculateDays 函数替换为从 utils/dateUtils.js 导入的 getDaysDiff。
+[continueAfterApproval] 审查修复应用（第 2 轮）: 12 个文件，结构校验通过
+[continueAfterApproval] 审查修复循环降级交付（still-failing，共 2 轮）
+[classifyIntent] 关键词匹配成功：create (0.850)
+[generateWithStages] 意图识别: 创建应用 (type=create, confidence=0.85) 创建关键词命中 1 次 + 空项目
+[generateWithStages] 使用用户手动选择的框架: react-cdn
+[classifyIntent] 关键词匹配成功：create (0.850)
+[generateWithStages] 意图识别: 创建应用 (type=create, confidence=0.85) 创建关键词命中 1 次 + 空项目
+[generateWithStages] 使用用户手动选择的框架: html
+[continueAfterApproval] 修复自检通过（0 项已修复）: 已将3个文件中的React导入从大写'React'改为小写'react'
+[continueAfterApproval] 审查修复应用（第 1 轮）: 13 个文件，结构校验通过
+[continueAfterApproval] 修复自检通过（0 项已修复）: 已将重置按钮从 App.jsx 底部移至 ResultsSection 组件顶部标题栏右侧，在有输入值时才显示。
+[continueAfterApproval] 审查修复应用（第 2 轮）: 10 个文件，结构校验通过
+[continueAfterApproval] 审查修复循环降级交付（still-failing，共 2 轮）

@@ -1,0 +1,30 @@
+=== 联合回归 静态门禁 2026-09-24 10:53:07 ===
+
+--- npm run build:server ---
+> litpp-root-plus@1.0.0 build:server
+> tsc -p tsconfig.server.json
+
+exit=0
+
+--- npm run typecheck ---
+> litpp-root-plus@1.0.0 typecheck
+> tsc --noEmit
+
+exit=0
+
+--- npm test (10:53:27) ---
+   ✓ D-5 复审网络失败降级 > f. 复审调用持续网络失败 → 保留修复产物降级交付，无 error 事件  4080ms
+ ✓ src/hooks/useKeybinding.test.ts (20 tests) 53ms
+
+ Test Files  14 passed (14)
+      Tests  213 passed (213)
+   Start at  10:53:31
+   Duration  6.06s (transform 815ms, setup 0ms, collect 2.07s, tests 4.77s, environment 1.03s, prepare 2.36s)
+
+test-exit=0
+
+--- npm run build (10:53:45) ---
+dist/assets/vendor-react-DvzFTMeu.js                             404.77 kB │ gzip: 123.12 kB
+
+✓ built in 4.18s
+build-exit=0

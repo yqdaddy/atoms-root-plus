@@ -1,0 +1,17 @@
+=== gates 2026-09-24 11:30:08 ===
+> litpp-root-plus@1.0.0 build:server
+> tsc -p tsconfig.server.json
+
+build:server exit=0
+typecheck exit=0
+ Test Files  14 passed (14)
+      Tests  220 passed (220)
+test exit=0
+dist/assets/vendor-react-DvzFTMeu.js                             404.77 kB │ gzip: 123.12 kB
+
+✓ built in 3.95s
+build exit=0
+
+说明：
+- npm test 220/220（14 文件）= 上一轮 213 + parseRetry 11 用例中新增断言 + scaffoldWiring 2 条 D-7 断言 + projectValidator 6 条 E_CDN_DOMAIN 用例，与协调者预期 220 一致
+- 门禁执行时间 2026-09-24 11:30（修复代码写入后，tsx watch 于 11:27 自动重启使 :3000 服务最新代码）
