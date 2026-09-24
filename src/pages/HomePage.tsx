@@ -41,6 +41,7 @@ import { useKeybinding } from '../hooks/useKeybinding';
 import { MessageGroupContainer, groupMessages } from '../components/MessageGroup';
 import { looksStuck } from '../lib/progressEstimator';
 import { BuildGroup } from '../components/BuildGroup';
+import { DiffModal } from '../components/DiffModal';
 
 /** 图片限制配置 */
 const IMAGE_CONFIG = {
@@ -92,6 +93,8 @@ interface UIMessage {
   sessionId?: string;
   /** 用户上传的图片（Base64 Data URL 数组） */
   images?: string[];
+  /** 变更清单（修改消息时携带，用于 diff 查看） */
+  changes?: ChangeList;
 }
 
 /** 将持久化消息转换为 UI 消息（过滤 system 消息） */
@@ -107,6 +110,10 @@ function toUIMessage(msg: ProjectChatMessage): UIMessage | null {
   // 仅在有图片时添加 images 属性
   if (msg.images && msg.images.length > 0) {
     result.images = msg.images;
+  }
+  // 仅在有 changes 时添加 changes 属性（P1: diff 查看支持）
+  if (msg.changes) {
+    result.changes = msg.changes;
   }
   return result;
 }
@@ -199,72 +206,100 @@ function MessageBubble({
   message: UIMessage;
 }) {
   const isUser = message.role === 'user';
+  const [showDiffModal, setShowDiffModal] = useState(false);
 
   return (
-    <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
-      {/* 时间戳 */}
-      <div className={`flex items-center gap-2 mb-1 text-[11px] text-[var(--color-text-tertiary)] ${isUser ? 'flex-row-reverse' : ''}`}>
-        <span>{formatTime(message.timestamp)}</span>
-        {!isUser && message.steps && (
-          <span className="px-1.5 py-0.5 rounded bg-[var(--color-bg-base)]">
-            {message.steps} 步
-          </span>
-        )}
-      </div>
-
-      {/* 消息内容 */}
-      <div className={`max-w-[85%] rounded-xl px-4 py-3 ${
-        isUser
-          ? 'bg-[var(--color-accent)] text-white'
-          : 'bg-[var(--color-bg-base)] border border-[var(--color-border-default)]'
-      }`}>
-        {/* 用户图片 */}
-        {isUser && message.images && message.images.length > 0 && (
-          <div className="mb-2 -mx-1">
-            <div className="flex flex-wrap gap-2">
-              {message.images.map((image, index) => (
-                <img
-                  key={`${image.slice(0, 50)}-${index}`}
-                  src={image}
-                  alt={`附件图片 ${index + 1}`}
-                  className="w-24 h-24 rounded-lg object-cover"
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {isUser ? (
-          // 用户消息：纯文本显示；超长文本折叠展示，不全量渲染（MAJOR-D1 防护）
-          <LongTextTruncate
-            text={message.content}
-            className="text-[13px] leading-[1.6] whitespace-pre-wrap"
-          />
-        ) : (
-          // AI 消息：MessageRenderer（JSON 结构化渲染 + Markdown）。
-          // 外层包消息级错误边界：单条消息渲染崩溃时降级为占位卡片，
-          // 不向上抛、不拖垮对话面板（MAJOR-D1 前端兜底）
-          <MessageErrorBoundary rawContent={message.content}>
-            <MessageRenderer content={message.content} />
-          </MessageErrorBoundary>
-        )}
-
-        {/* 状态标签 */}
-        {!isUser && message.status && (
-          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-[var(--color-border-default)]">
-            <span className={`text-[11px] ${
-              message.status === 'done' ? 'text-green-500' :
-              message.status === 'error' ? 'text-red-500' :
-              'text-[var(--color-accent)]'
-            }`}>
-              {message.status === 'done' ? '已处理' :
-               message.status === 'error' ? '处理失败' :
-               '处理中...'}
+    <>
+      <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+        {/* 时间戳 */}
+        <div className={`flex items-center gap-2 mb-1 text-[11px] text-[var(--color-text-tertiary)] ${isUser ? 'flex-row-reverse' : ''}`}>
+          <span>{formatTime(message.timestamp)}</span>
+          {!isUser && message.steps && (
+            <span className="px-1.5 py-0.5 rounded bg-[var(--color-bg-base)]">
+              {message.steps} 步
             </span>
-          </div>
-        )}
+          )}
+        </div>
+
+        {/* 消息内容 */}
+        <div className={`max-w-[85%] rounded-xl px-4 py-3 ${
+          isUser
+            ? 'bg-[var(--color-accent)] text-white'
+            : 'bg-[var(--color-bg-base)] border border-[var(--color-border-default)]'
+        }`}>
+          {/* 用户图片 */}
+          {isUser && message.images && message.images.length > 0 && (
+            <div className="mb-2 -mx-1">
+              <div className="flex flex-wrap gap-2">
+                {message.images.map((image, index) => (
+                  <img
+                    key={`${image.slice(0, 50)}-${index}`}
+                    src={image}
+                    alt={`附件图片 ${index + 1}`}
+                    className="w-24 h-24 rounded-lg object-cover"
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {isUser ? (
+            // 用户消息：纯文本显示；超长文本折叠展示，不全量渲染（MAJOR-D1 防护）
+            <LongTextTruncate
+              text={message.content}
+              className="text-[13px] leading-[1.6] whitespace-pre-wrap"
+            />
+          ) : (
+            // AI 消息：MessageRenderer（JSON 结构化渲染 + Markdown）。
+            // 外层包消息级错误边界：单条消息渲染崩溃时降级为占位卡片，
+            // 不向上抛、不拖垮对话面板（MAJOR-D1 前端兜底）
+            <MessageErrorBoundary rawContent={message.content}>
+              <MessageRenderer content={message.content} />
+            </MessageErrorBoundary>
+          )}
+
+          {/* P1: 查看变更按钮（仅修改消息且有 changes 数据时显示） */}
+          {!isUser && message.changes && (
+            <div className="mt-3 pt-3 border-t border-[var(--color-border-default)]">
+              <button
+                onClick={() => setShowDiffModal(true)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-green-500/10 text-green-500 hover:bg-green-500/20 transition-colors"
+              >
+                <Icon icon="lucide:git-compare" width={14} height={14} />
+                <span className="text-[12px] font-medium">查看变更</span>
+                <span className="text-[11px] text-green-500/70">
+                  ({message.changes.changes.length} 个文件)
+                </span>
+              </button>
+            </div>
+          )}
+
+          {/* 状态标签 */}
+          {!isUser && message.status && (
+            <div className="flex items-center gap-2 mt-2 pt-2 border-t border-[var(--color-border-default)]">
+              <span className={`text-[11px] ${
+                message.status === 'done' ? 'text-green-500' :
+                message.status === 'error' ? 'text-red-500' :
+                'text-[var(--color-accent)]'
+              }`}>
+                {message.status === 'done' ? '已处理' :
+                 message.status === 'error' ? '处理失败' :
+                 '处理中...'}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+
+      {/* P1: DiffModal 弹窗 */}
+      {message.changes && (
+        <DiffModal
+          open={showDiffModal}
+          onClose={() => setShowDiffModal(false)}
+          changes={message.changes}
+        />
+      )}
+    </>
   );
 }
 
@@ -639,20 +674,24 @@ export default function HomePage() {
               // 保存版本快照
               const summary = `应用变更：${payload.changes!.summary}`;
               saveVersion(summary, 'iteration');
+              // P1: 保存 changes 数据用于 diff 查看
               addMessage({
                 role: 'assistant',
                 content: fullContent || `变更已应用：${payload.changes!.summary}`,
                 runId: useChatStore.getState().streamBuffer.runId ?? undefined,
                 intentType: streamBuffer.intent?.type,
+                changes: payload.changes,
               });
               toast.success('变更已应用');
             } else {
               const warningMsg = `变更已应用，但代码存在 ${validation.issues.length} 个问题`;
+              // P1: 保存 changes 数据用于 diff 查看
               addMessage({
                 role: 'assistant',
                 content: fullContent || warningMsg,
                 runId: useChatStore.getState().streamBuffer.runId ?? undefined,
                 intentType: streamBuffer.intent?.type,
+                changes: payload.changes,
               });
               toast.info(warningMsg);
               console.warn('[HomePage] 验证问题:', validation.issues);

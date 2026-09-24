@@ -88,6 +88,8 @@ export interface ChatMessage {
   runId?: string | undefined;
   /** 意图类型：用于分组标题显示 */
   intentType?: IntentType | undefined;
+  /** 变更清单（修改消息时携带，用于 diff 查看） */
+  changes?: ChangeList | undefined;
 }
 
 /**
