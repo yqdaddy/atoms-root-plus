@@ -34,6 +34,18 @@ import {
 } from './utils/chatDelivery.js';
 import type { ChangeList, FileChange } from './types.js';
 import {
+  enhancedJsonParse,
+  getJsonErrorHint,
+} from './utils/jsonRepair.js';
+import {
+  selectRetryStrategy,
+  diagnoseFailure,
+  generateRetryHint,
+  MAX_RETRY_ATTEMPTS,
+  type RetryStrategy,
+  type FailureDiagnosis,
+} from './utils/retryStrategy.js';
+import {
   ANALYST_SYSTEM_PROMPT_V2,
   ENGINEER_BASE_PROMPT_V2,
   REVIEWER_SYSTEM_PROMPT_V2,
@@ -1173,31 +1185,50 @@ export async function continueAfterApproval(
     // 结构校验最终失败时的问题清单（降级交付不阻塞 done，见循环后处理）
     let validationIssues: ValidationIssue[] = [];
 
-    // 解析格式重试：最多 3 次尝试（首次 + 格式提示重试 + 策略切换重试）
-    const MAX_PARSE_ATTEMPTS = 3;
-    // 重试循环
+    // 解析格式重试：最多 5 次尝试（多维度重试策略升级）
+    const MAX_PARSE_ATTEMPTS = MAX_RETRY_ATTEMPTS;
+    // 重试循环：多维度策略切换
+    let currentDiagnosis: FailureDiagnosis | undefined;
     for (let attempt = 0; attempt < MAX_PARSE_ATTEMPTS; attempt++) {
       // 每轮尝试重置触碰集，防止上一轮失败尝试的残留污染本轮扫描范围
       cdnTouchedPaths = undefined;
-      // 重试时在提示词中强调格式要求，并向前端广播重试进度（retry 事件 + generate 阶段 delta）
+
+      // 策略选择：根据失败诊断和尝试次数选择策略
+      let currentStrategy: RetryStrategy | undefined;
+      if (retryCount > 0 && currentDiagnosis) {
+        currentStrategy = selectRetryStrategy(retryCount - 1, currentDiagnosis);
+      }
+
+      // 重试时在提示词中强调格式要求，并向前端广播重试进度
       const retryMessages: ChatMessage[] = [...generateMessages];
       if (retryCount > 0 && formatErrorHint) {
         const isFinalStrategySwitch = retryCount >= MAX_PARSE_ATTEMPTS - 1;
-        // 重试原因区分：结构校验失败（hint 由 validateProject 接线写入，前缀固定）
-        // 与输出格式/解析失败，用户可见文案按来源显示，不再一律说"格式不符合要求"
         const isStructureRetry = formatErrorHint.startsWith('项目结构不完整');
         const retryReasonText = isStructureRetry ? '项目结构不完整' : '输出格式不符合要求';
-        // 策略切换：两次格式纠正仍失败时，放弃"纠正"改用最强指令——
-        // 给出最小正确的 JSON 结构示例，要求模型忽略增量修改思路、从零输出完整项目
-        const strategySwitch = isFinalStrategySwitch
-          ? `\n\n【最后一次尝试】请忽略之前"增量修改/变更清单"的思路，从零重新输出完整项目。格式必须严格为如下 JSON 结构（示例）：\n${useDiffMode ? '{ "changes": [ { "file": "/index.html", "edits": [ { "line": 3, "old": "旧行内容", "new": "新行内容", "type": "replace" } ], "summary": "变更摘要" } ] }' : '{ "files": [ { "path": "/index.html", "content": "<!DOCTYPE html><html>...完整文件内容...</html>", "language": "html" } ] }'}\n除该 JSON 外不要输出任何其他内容。`
-          : '';
+
+        // 使用策略提示词增强
+        let retryHint = '';
+        if (currentStrategy) {
+          retryHint = generateRetryHint(currentStrategy, currentDiagnosis!, formatErrorHint);
+        } else {
+          // 回退到原有逻辑
+          const strategySwitch = isFinalStrategySwitch
+            ? `\n\n【最后一次尝试】请忽略之前"增量修改/变更清单"的思路，从零重新输出完整项目。格式必须严格为如下 JSON 结构（示例）：\n${useDiffMode ? '{ "changes": [ { "file": "/index.html", "edits": [ { "line": 3, "old": "旧行内容", "new": "新行内容", "type": "replace" } ], "summary": "变更摘要" } ] }' : '{ "files": [ { "path": "/index.html", "content": "<!DOCTYPE html><html>...完整文件内容...</html>", "language": "html" } ] }'}\n除该 JSON 外不要输出任何其他内容。`
+            : '';
+          retryHint = `【重要】${isStructureRetry ? `上次输出存在结构问题：${formatErrorHint}` : `上次输出格式错误：${formatErrorHint}`}\n\n请确保输出格式正确：${useDiffMode ? 'diff 模式必须输出 { "changes": [...] } 格式，包含 file、edits、summary 字段' : '必须输出 { "files": [...] } 格式，每个文件包含 path、content、language 字段；禁止输出 { "changes": [...] } 变更清单格式'}${strategySwitch}`;
+        }
+
         const originalUserMsg = retryMessages[1]!.content;
         retryMessages[1] = {
           role: 'user',
-          content: `${originalUserMsg}\n\n【重要】${isStructureRetry ? `上次输出存在结构问题：${formatErrorHint}` : `上次输出格式错误：${formatErrorHint}`}\n\n请确保输出格式正确：${useDiffMode ? 'diff 模式必须输出 { "changes": [...] } 格式，包含 file、edits、summary 字段' : '必须输出 { "files": [...] } 格式，每个文件包含 path、content、language 字段；禁止输出 { "changes": [...] } 变更清单格式'}${strategySwitch}`,
+          content: `${originalUserMsg}\n\n${retryHint}`,
         };
+
         // 前端可见的重试进度：协议 retry 事件（liveEngine 在思考区渲染）+ 聊天区 delta 文本
+        // 包含策略名称和描述
+        const strategyName = currentStrategy?.name ?? (isStructureRetry ? '结构修复' : '格式纠正');
+        const strategyDesc = currentStrategy?.description ?? '';
+
         onEvent({
           type: 'retry',
           payload: {
@@ -1212,14 +1243,20 @@ export async function continueAfterApproval(
         onEvent({
           type: 'delta',
           payload: {
-            text: `\n[${retryReasonText}，自动重试中（第 ${retryCount}/${MAX_PARSE_ATTEMPTS - 1} 次）${isFinalStrategySwitch ? '，已切换为完整重生成策略' : ''}]\n`,
+            text: `\n[${retryReasonText}，切换为${strategyName}重试（第 ${retryCount}/${MAX_PARSE_ATTEMPTS - 1} 次）${strategyDesc ? ` - ${strategyDesc}` : ''}]\n`,
             phase: 'generate',
           },
         });
-        console.log(`[continueAfterApproval] 格式错误重试（第 ${retryCount}/${MAX_PARSE_ATTEMPTS - 1} 次）${isFinalStrategySwitch ? '，策略切换' : ''}`);
+        console.log(`[continueAfterApproval] 格式错误重试（第 ${retryCount}/${MAX_PARSE_ATTEMPTS - 1} 次）${currentStrategy ? `，策略：${currentStrategy.name}` : ''}`);
       }
 
       // 执行生成。
+      // 应用策略的模型参数
+      const callOptions: StreamChatCallOptions = {
+        onRetry: forwardRetry,
+        ...(currentStrategy?.modelParams ?? {}),
+      };
+
       // MAJOR-D1（服务端半边）：工程师阶段原始输出是 files/changes JSON，
       // 逐 token 转发会经前端 generateText 累积并整段持久化为 assistant 聊天
       // 消息（实测 104,026 字符裸 JSON 入库）。这里只累积不转发：原始 JSON
@@ -1233,7 +1270,7 @@ export async function continueAfterApproval(
           accumulatedOutput += text;
         },
         combinedSignal,
-        { onRetry: forwardRetry }
+        callOptions
       );
       generatedOutput = result.content;
       generateResult = result;
@@ -1329,6 +1366,9 @@ export async function continueAfterApproval(
           console.error('[continueAfterApproval] diff 解析失败:', errorMsg);
           changeList = undefined;
 
+          // 诊断失败原因
+          currentDiagnosis = diagnoseFailure(diffError as Error, generatedOutput);
+
           // 降级判别（顺序即优先级）：
           // 1) parseOutput：模型误输出全量 files JSON → 直接采用；纯文本 → 转对话
           // 2) parseOutput 失败 → 截断抢救；抢救也失败 → 一律进入重试判定。
@@ -1386,33 +1426,71 @@ export async function continueAfterApproval(
       } else {
         // 非 diff 模式解析
         try {
-          const parseResult = parseOutput(generatedOutput);
+          // 应用容错解析策略
+          if (currentStrategy?.repairStrategy === 'json_fix') {
+            // 尝试增强 JSON 解析（自动修复常见错误）
+            const enhancedResult = enhancedJsonParse(generatedOutput);
+            if (enhancedResult.success && enhancedResult.repaired) {
+              console.info('[continueAfterApproval] JSON 自动修复成功');
+              // 用修复后的字符串重新解析
+              const parseResult = parseOutput(JSON.stringify(enhancedResult.data));
 
-          if (parseResult.type === 'conversation') {
-            console.log('[continueAfterApproval] 检测到纯文本对话内容，跳过代码生成');
-            pendingSessions.delete(sessionId);
-            onEvent({
-              type: 'done',
-              payload: {
-                html: '',
-                files: {},
-                // MAJOR-D1：analysis 作为 assistant 消息整段入库，回落值不得是
-                // 工程阶段原始输出（裸 JSON），经交付安全化处理
-                analysis: sanitizeEngineerChatContent(parseResult.content || generatedOutput),
-                stats: result.usage ? {
-                  inputTokens: result.usage.prompt_tokens,
-                  outputTokens: result.usage.completion_tokens,
-                } : undefined,
-              },
-            });
-            return;
+              if (parseResult.type === 'conversation') {
+                console.log('[continueAfterApproval] 检测到纯文本对话内容，跳过代码生成');
+                pendingSessions.delete(sessionId);
+                onEvent({
+                  type: 'done',
+                  payload: {
+                    html: '',
+                    files: {},
+                    analysis: sanitizeEngineerChatContent(parseResult.content || generatedOutput),
+                    stats: result.usage ? {
+                      inputTokens: result.usage.prompt_tokens,
+                      outputTokens: result.usage.completion_tokens,
+                    } : undefined,
+                  },
+                });
+                return;
+              }
+
+              multiFileOutput = { files: parseResult.files! };
+              parseSuccess = true;
+            }
           }
 
-          multiFileOutput = { files: parseResult.files! };
-          parseSuccess = true;
+          // 标准 parseOutput 解析（如果容错解析未成功）
+          if (!parseSuccess) {
+            const parseResult = parseOutput(generatedOutput);
+
+            if (parseResult.type === 'conversation') {
+              console.log('[continueAfterApproval] 检测到纯文本对话内容，跳过代码生成');
+              pendingSessions.delete(sessionId);
+              onEvent({
+                type: 'done',
+                payload: {
+                  html: '',
+                  files: {},
+                  // MAJOR-D1：analysis 作为 assistant 消息整段入库，回落值不得是
+                  // 工程阶段原始输出（裸 JSON），经交付安全化处理
+                  analysis: sanitizeEngineerChatContent(parseResult.content || generatedOutput),
+                  stats: result.usage ? {
+                    inputTokens: result.usage.prompt_tokens,
+                    outputTokens: result.usage.completion_tokens,
+                  } : undefined,
+                },
+              });
+              return;
+            }
+
+            multiFileOutput = { files: parseResult.files! };
+            parseSuccess = true;
+          }
         } catch (parseError) {
           const errorMsg = parseError instanceof Error ? parseError.message : '输出解析失败';
           console.error('[continueAfterApproval] 多文件解析失败:', errorMsg);
+
+          // 诊断失败原因
+          currentDiagnosis = diagnoseFailure(parseError as Error, generatedOutput);
 
           // 智能容错：迭代模式下模型误输出 diff 模式的 { "changes": [...] } 变更清单。
           // 迭代模式必有现有文件上下文，复用 diff 模式的 applyChanges 将清单应用到
