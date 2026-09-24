@@ -1,0 +1,26 @@
+      case 'retry': {
+        // 重试进度事件：在思考区展示重试状态。
+        // delayMs > 0 为传输层重试（限流/超时的真实等待），照常渲染等待提示；
+        // delayMs === 0 为格式解析重试，server 侧已随事件发送信息更丰富的 delta
+        // 文案（含失败原因与策略切换标记），此处跳过渲染，避免聊天区文案重复（D-1）。
+        const retry = payload.retry;
+        if (retry) {
+          console.log('[liveEngine] retry 事件:', retry);
+          if (retry.delayMs > 0) {
+            event = {
+              type: 'delta',
+              payload: {
+                runId,
+                phase: 'generate',
+                text: `\n[重试中，第 ${retry.attempt}/${retry.maxRetries} 次，等待 ${Math.round(retry.delayMs / 1000)}s]\n`,
+              },
+            };
+          } else {
+            return;
+          }
+        } else {
+          console.warn('[liveEngine] retry 事件缺少 retry 字段');
+          return;
+        }
+        break;
+      }

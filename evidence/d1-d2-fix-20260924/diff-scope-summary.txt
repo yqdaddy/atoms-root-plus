@@ -1,0 +1,7 @@
+ .claude/scheduled_tasks.lock        |  2 +-
+ server/llm.changesTolerance.test.ts | 78 +++++++++++++++++++++++++++++++++++++
+ server/llm.ts                       | 53 ++++++++++++++++++++-----
+ src/pages/HomePage.tsx              | 40 ++++++++++++-------
+ src/services/ai/liveEngine.ts       | 25 +++++++-----
+ tsconfig.tsbuildinfo                |  2 +-
+ 6 files changed, 166 insertions(+), 34 deletions(-)

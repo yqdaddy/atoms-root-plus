@@ -1,0 +1,13 @@
+              delayMs: 0,
+              errorMessage: '输出格式不符合要求',
+            },
+          },
+        });
+        onEvent({
+          type: 'delta',
+          payload: {
+            text: `\n[输出格式不符合要求，自动重试中（第 ${retryCount}/${MAX_PARSE_ATTEMPTS - 1} 次）${isFinalStrategySwitch ? '，已切换为完整重生成策略' : ''}]\n`,
+            phase: 'generate',
+          },
+        });
+        console.log(`[continueAfterApproval] 格式错误重试（第 ${retryCount}/${MAX_PARSE_ATTEMPTS - 1} 次）${isFinalStrategySwitch ? '，策略切换' : ''}`);
