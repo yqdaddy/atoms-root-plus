@@ -28,6 +28,10 @@ import {
   trimContext,
   calculateTokenSavings,
 } from './utils/contextTrimming.js';
+import {
+  sanitizeEngineerChatContent,
+  buildDeliverySummary,
+} from './utils/chatDelivery.js';
 import type { ChangeList, FileChange } from './types.js';
 import {
   ANALYST_SYSTEM_PROMPT_V2,
@@ -1215,13 +1219,18 @@ export async function continueAfterApproval(
         console.log(`[continueAfterApproval] 格式错误重试（第 ${retryCount}/${MAX_PARSE_ATTEMPTS - 1} 次）${isFinalStrategySwitch ? '，策略切换' : ''}`);
       }
 
-      // 执行生成
+      // 执行生成。
+      // MAJOR-D1（服务端半边）：工程师阶段原始输出是 files/changes JSON，
+      // 逐 token 转发会经前端 generateText 累积并整段持久化为 assistant 聊天
+      // 消息（实测 104,026 字符裸 JSON 入库）。这里只累积不转发：原始 JSON
+      // 仅进入解析管线，绝不作为消息内容出站；聊天区流式进度由阶段事件、
+      // 重试/降级提示（协议不变）与循环后的交付摘要提供。
+      // 注意：校验拦截、重试与策略切换逻辑不在本改动范围内，原样保留。
       let accumulatedOutput = '';
       const result = await streamChatCompletionWithUsage(
         retryMessages,
         (text) => {
           accumulatedOutput += text;
-          onEvent({ type: 'delta', payload: { text, phase: 'generate' } });
         },
         combinedSignal,
         { onRetry: forwardRetry }
@@ -1387,7 +1396,9 @@ export async function continueAfterApproval(
               payload: {
                 html: '',
                 files: {},
-                analysis: parseResult.content || generatedOutput,
+                // MAJOR-D1：analysis 作为 assistant 消息整段入库，回落值不得是
+                // 工程阶段原始输出（裸 JSON），经交付安全化处理
+                analysis: sanitizeEngineerChatContent(parseResult.content || generatedOutput),
                 stats: result.usage ? {
                   inputTokens: result.usage.prompt_tokens,
                   outputTokens: result.usage.completion_tokens,
@@ -1574,6 +1585,27 @@ export async function continueAfterApproval(
       onEvent({ type: 'error', payload: { message: buildFinalParseErrorMessage(MAX_PARSE_ATTEMPTS - 1) } });
       return;
     }
+
+    // 交付摘要（MAJOR-D1）：原始 JSON 流被抑制后，聊天区以人话交代交付结果：
+    // 是否经历重试/策略切换、包含哪些文件。置于降级/抢救提示之前，随后追加的
+    // 既有 warning 文案（结构问题、截断抢救等）保持原通道与原文不变。
+    onEvent({
+      type: 'delta',
+      payload: {
+        text: buildDeliverySummary({
+          mode: useDiffMode ? 'diff' : 'create',
+          deliveredFilePaths: Object.keys(finalFiles),
+          changedFilePaths: changeList?.changes.map((c) => c.file),
+          appliedEdits: changeList
+            ? changeList.changes.reduce((sum, c) => sum + c.edits.length, 0)
+            : undefined,
+          changeSummary: changeList?.summary,
+          retriesUsed: retryCount,
+          strategySwitchRetries: MAX_PARSE_ATTEMPTS - 1,
+        }),
+        phase: 'generate',
+      },
+    });
 
     if (validationIssues.length > 0) {
       // 结构校验重试耗尽：降级交付不阻塞 done，经既有 delta 通道给一句人话提示（不新建前端 UI）
