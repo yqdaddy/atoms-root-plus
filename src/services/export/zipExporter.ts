@@ -2,25 +2,48 @@
  * ZIP 导出服务：把项目虚拟文件系统打包为 ZIP 并触发浏览器下载。
  * 纯浏览器端实现（JSZip + file-saver），不经过服务端，不触碰沙箱边界。
  *
- * 输出结构：
- *   {projectName}.zip
- *   ├── index.html          （入口，对应虚拟路径 /index.html）
+ * 输出结构（工程化生成计划决议 5，方案 B）：
+ *   {项目名}-{日期}.zip
+ *   ├── index.html          （源码入口，对应虚拟路径 /index.html）
  *   ├── src/...             （多文件模式下的其余源码文件）
  *   ├── styles/...          （样式文件）
+ *   ├── dist/index.html     （平台物化的浏览器端编译产物，双击即可运行）
  *   └── README.md           （自动生成的运行说明，中文）
+ *
+ * dist 物化失败（组装两级链路都失败）时中止导出，不产出下载。
  */
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { ENTRY_FILE_PATH } from '../../types/project';
 import type { Project, FileNode } from '../../types/project';
+import { materializeDistIndex, DIST_INDEX_PATH } from './distMaterializer';
 
-/** 项目名转安全文件名：替换文件系统非法字符，压缩空白 */
+/** 项目名转安全文件名：替换文件系统非法字符，压缩空白；无有效字符时兜底 */
 function sanitizeFileName(name: string): string {
   const cleaned = name
     .replace(/[\\/:*?"<>|]/g, '-')
     .replace(/\s+/g, ' ')
     .trim();
-  return cleaned.length > 0 ? cleaned : '未命名项目';
+  // 全部由占位连字符/点构成（如输入 "///"）视为无有效名称
+  if (cleaned.length === 0 || /^[-. ]+$/.test(cleaned)) {
+    return '未命名项目';
+  }
+  return cleaned;
+}
+
+/** 本地日期转 YYYY-MM-DD（补零） */
+function formatDate(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/**
+ * 生成 ZIP 下载文件名：项目名 + 日期（本地时区），如"计数器-2026-09-24.zip"。
+ * 项目名中的文件系统非法字符转义为连字符。
+ */
+export function buildZipFileName(projectName: string, now: Date = new Date()): string {
+  return `${sanitizeFileName(projectName)}-${formatDate(now)}.zip`;
 }
 
 /**
@@ -105,19 +128,17 @@ export function buildReadme(project: Project): string {
 
 ## 运行方式
 
-### 方式一：直接打开（最简单）
+### 方式一：双击 dist/index.html（最简单）
 
-解压后双击 \`index.html\`，即可在浏览器中打开应用。
-
-适用条件：应用不通过 \`fetch\` 读取本地文件、不依赖 ES Module 相对路径导入。
+解压后双击 \`dist/index.html\`，即可在浏览器中打开应用。
+这是平台在导出时生成的浏览器端编译产物（自包含单文件），无需任何构建步骤。
 引用 CDN 的外部库（如图表库）需要联网加载。
 
-### 方式二：本地 HTTP 服务器（推荐）
+### 方式二：源码作为工程起点
 
-如果应用包含多文件拆分、ES Module 导入或本地数据请求，建议用静态服务器运行，
-避免 \`file://\` 协议下的跨域限制。
-
-任选一种方式，在本目录执行：
+源码目录（\`index.html\`、\`src/\`、\`styles/\` 等）是规范的工程起点。
+如果应用包含多文件拆分、ES Module 导入或本地数据请求，建议在源码目录用静态服务器运行，
+避免 \`file://\` 协议下的跨域限制：
 
 \`\`\`bash
 # 使用 Node.js（任选其一）
@@ -130,10 +151,13 @@ python3 -m http.server 8080
 
 然后按提示在浏览器打开（如 http://localhost:3000 或 http://localhost:8080）。
 
+预览由 Litpp 内置沙箱运行；npm 方式需 Node 18+，作为工程起点使用。
+
 ## 技术说明
 
 - **框架**：${framework}
-- **入口文件**：\`index.html\`
+- **源码入口**：\`index.html\`
+- **可运行产物**：\`dist/index.html\`（双击即可运行）
 - **文件数量**：${fileCount} 个
 
 ## 依赖列表
@@ -147,17 +171,21 @@ ${dependencySection}
 ${Object.keys(project.files)
   .map((p) => `├── ${p.replace(/^\//, '')}`)
   .join('\n')}
+├── dist/index.html
 └── README.md
 \`\`\`
 `;
 }
 
 /**
- * 把项目导出为 ZIP 并触发浏览器下载。
+ * 把项目构建为 ZIP Blob（不触发下载）。
  *
- * @throws 项目无文件或打包失败时抛出 Error，由调用方负责用户提示
+ * 结构 = 全部源码文件按原路径 + dist/index.html（物化产物）+ README.md。
+ * dist 物化失败（组装两级链路都失败）时抛错中止，不产出半成品。
+ *
+ * @throws 项目无文件、缺少入口文件、路径不安全或 dist 物化失败时抛出 Error
  */
-export async function exportProjectAsZip(project: Project): Promise<void> {
+export async function buildProjectZipBlob(project: Project): Promise<Blob> {
   const fileNodes = Object.values(project.files);
   if (fileNodes.length === 0) {
     throw new Error('项目暂无可导出的文件');
@@ -187,8 +215,25 @@ export async function exportProjectAsZip(project: Project): Promise<void> {
     throw new Error(`缺少入口文件 ${ENTRY_FILE_PATH}，无法导出`);
   }
 
+  // dist 物化（方案 B）：失败即中止导出，宁可不给，不给坏的。
+  // 物化写在源码之后：若源码树恰好含 dist/index.html，平台产物覆盖之（产物以平台物化为准）
+  const materialized = await materializeDistIndex(project.files, project.framework ?? 'html');
+  if (materialized.warnings.length > 0) {
+    console.warn('[zipExporter] dist 物化警告:', materialized.warnings);
+  }
+  zip.file(DIST_INDEX_PATH, materialized.html);
+
   zip.file('README.md', buildReadme(project));
 
-  const blob = await zip.generateAsync({ type: 'blob' });
-  saveAs(blob, `${sanitizeFileName(project.name)}.zip`);
+  return zip.generateAsync({ type: 'blob' });
+}
+
+/**
+ * 把项目导出为 ZIP 并触发浏览器下载。
+ *
+ * @throws 项目无文件或打包失败时抛出 Error，由调用方负责用户提示
+ */
+export async function exportProjectAsZip(project: Project): Promise<void> {
+  const blob = await buildProjectZipBlob(project);
+  saveAs(blob, buildZipFileName(project.name));
 }
