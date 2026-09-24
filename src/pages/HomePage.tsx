@@ -631,14 +631,16 @@ export default function HomePage() {
           // （analyze/diagnose 意图、分析师澄清、diff 模式空变更均走此分支）
           if (hasAnalysis && !hasFiles && !payload.html) {
             console.debug('[HomePage] 对话模式，analysis 字段长度:', payload.analysis!.length);
-            finishGeneration();
-            setIsGenerating(false);
             // 对话模式不改动项目文件，恢复生成前状态（runGeneration 已置为 generating）
             revertProjectStatusAfterFailure();
 
             // 将分析/诊断结果作为 assistant 消息保存（带上 runId 和 intentType）
             // 注意：使用 streamBuffer.runId 而不是 currentRunId state，确保获取最新值
             addMessage({ role: 'assistant', content: payload.analysis!, runId: useChatStore.getState().streamBuffer.runId ?? undefined, intentType: streamBuffer.intent?.type });
+
+            // P0 修复：先追加消息，再关闭生成状态
+            finishGeneration();
+            setIsGenerating(false);
             toast.success('分析完成');
 
             // 清除 UI 状态
@@ -660,8 +662,6 @@ export default function HomePage() {
             // 保存多文件
             updateFiles(files, entryPath);
             updateProjectStatus(validation.ok ? 'ready' : 'draft');
-            finishGeneration();
-            setIsGenerating(false);
 
             // 组合完整的 LLM 输出（分析 + 生成内容）
             const filesBuffer = useChatStore.getState().streamBuffer;
@@ -697,6 +697,10 @@ export default function HomePage() {
               console.warn('[HomePage] 验证问题:', validation.issues);
             }
 
+            // P0 修复：先追加消息，再关闭生成状态
+            finishGeneration();
+            setIsGenerating(false);
+
             // 清除 UI 状态
             setPendingMessageId(null);
             setMessageUIState(null);
@@ -716,8 +720,6 @@ export default function HomePage() {
             // 保存多文件
             updateFiles(files, entryPath);
             updateProjectStatus(validation.ok ? 'ready' : 'draft');
-            finishGeneration();
-            setIsGenerating(false);
 
             // 组合完整的 LLM 输出（分析 + 生成内容）
               const filesBuffer = useChatStore.getState().streamBuffer;
@@ -752,6 +754,10 @@ export default function HomePage() {
                 console.warn('[HomePage] 验证问题:', validation.issues);
               }
 
+            // P0 修复：先追加消息，再关闭生成状态
+            finishGeneration();
+            setIsGenerating(false);
+
             // 清除 UI 状态
             setPendingMessageId(null);
             setMessageUIState(null);
@@ -765,8 +771,6 @@ export default function HomePage() {
             updateEntryFile(event.payload.html);
             console.debug('[HomePage] updateEntryFile 完成');
             updateProjectStatus(validation.ok ? 'ready' : 'draft');
-            finishGeneration();
-            setIsGenerating(false);
 
             // 组合完整的 LLM 输出（分析 + 生成内容）
             const singleBuffer = useChatStore.getState().streamBuffer;
@@ -801,6 +805,10 @@ export default function HomePage() {
               console.warn('[HomePage] 验证问题:', validation.issues);
             }
 
+            // P0 修复：先追加消息，再关闭生成状态
+            finishGeneration();
+            setIsGenerating(false);
+
             // 清除 UI 状态
             setPendingMessageId(null);
             setMessageUIState(null);
@@ -810,11 +818,13 @@ export default function HomePage() {
             console.error('[HomePage] HTML 为空');
             setError(errorMsg);
             revertProjectStatusAfterFailure();
-            finishGeneration();
-            setIsGenerating(false);
             toast.error(errorMsg);
             setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
             addMessage({ role: 'assistant', content: errorMsg, runId: useChatStore.getState().streamBuffer.runId ?? undefined, intentType: streamBuffer.intent?.type });
+
+            // P0 修复：先追加消息，再关闭生成状态
+            finishGeneration();
+            setIsGenerating(false);
             setPendingMessageId(null);
           }
           break;
@@ -822,13 +832,15 @@ export default function HomePage() {
         case 'error':
           setError(event.payload.message);
           revertProjectStatusAfterFailure();
-          finishGeneration();
-          setIsGenerating(false);
           toast.error(event.payload.message, 6000);
           // 更新 UI 状态为错误
           setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
           // 添加错误消息到持久化（带上 runId 和 intentType）
           addMessage({ role: 'assistant', content: event.payload.message, runId: useChatStore.getState().streamBuffer.runId ?? undefined, intentType: streamBuffer.intent?.type });
+
+          // P0 修复：先追加消息，再关闭生成状态
+          finishGeneration();
+          setIsGenerating(false);
           setPendingMessageId(null);
           break;
         case 'approval_required': {
@@ -844,10 +856,12 @@ export default function HomePage() {
               const errorMsg = '生成过程发生异常，请重试';
               setError(errorMsg);
               revertProjectStatusAfterFailure();
-              setIsGenerating(false);
               toast.error(errorMsg);
               setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
               addMessage({ role: 'assistant', content: errorMsg, runId: useChatStore.getState().streamBuffer.runId ?? undefined });
+
+              // P0 修复：先追加消息，再关闭生成状态
+              setIsGenerating(false);
               setPendingMessageId(null);
             });
           }
