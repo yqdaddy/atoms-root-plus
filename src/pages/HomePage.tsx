@@ -258,6 +258,10 @@ function MessageBubble({
   );
 }
 
+// 图片上传待接入多模态管线后启用（当前生成管线仅接收文本：前端图片仅本地展示、服务端零接收）
+// 恢复方式：改为 true 即可重新打开粘贴、拖拽、预览与"支持图片"文案，处理逻辑均保留未删
+const IMAGE_UPLOAD_ENABLED = false;
+
 export default function HomePage() {
   const [inputValue, setInputValue] = useState('');
   // 新项目的目标框架：仅在首条消息创建项目时生效，默认 html
@@ -1226,7 +1230,7 @@ export default function HomePage() {
   }, [pastedImages.length]);
 
   /**
-   * 处理粘贴事件
+   * 处理粘贴事件（当前入口已停用：见 IMAGE_UPLOAD_ENABLED，图片上传待接入多模态管线后启用）
    */
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
@@ -1718,8 +1722,8 @@ export default function HomePage() {
               </button>
             )}
 
-            {/* 图片预览 */}
-            {pastedImages.length > 0 && (
+            {/* 图片预览：图片上传待接入多模态管线后启用 */}
+            {IMAGE_UPLOAD_ENABLED && pastedImages.length > 0 && (
               <div className="mb-3">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[11px] text-[var(--color-text-tertiary)]">
@@ -1736,13 +1740,13 @@ export default function HomePage() {
               </div>
             )}
 
-            {/* 输入框容器：支持拖拽 */}
+            {/* 输入框容器：拖拽上传已停用（图片上传待接入多模态管线后启用） */}
             <div
               className="relative"
-              onDragEnter={handleDragEnter}
-              onDragLeave={handleDragLeave}
-              onDragOver={handleDragOver}
-              onDrop={handleDrop}
+              onDragEnter={IMAGE_UPLOAD_ENABLED ? handleDragEnter : undefined}
+              onDragLeave={IMAGE_UPLOAD_ENABLED ? handleDragLeave : undefined}
+              onDragOver={IMAGE_UPLOAD_ENABLED ? handleDragOver : undefined}
+              onDrop={IMAGE_UPLOAD_ENABLED ? handleDrop : undefined}
             >
               {/* 命令下拉 */}
               <CommandDropdown
@@ -1755,8 +1759,8 @@ export default function HomePage() {
                 onClose={() => setShowCommandDropdown(false)}
               />
 
-              {/* 拖拽覆盖层 */}
-              {isDragging && (
+              {/* 拖拽覆盖层：图片上传待接入多模态管线后启用 */}
+              {IMAGE_UPLOAD_ENABLED && isDragging && (
                 <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--color-accent)]/10 border-2 border-dashed border-[var(--color-accent)] rounded-xl">
                   <div className="text-center">
                     <Icon icon="lucide:upload" width={24} height={24} className="mx-auto mb-2 text-[var(--color-accent)]" />
@@ -1769,7 +1773,7 @@ export default function HomePage() {
                 value={inputValue}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
-                onPaste={handlePaste}
+                onPaste={IMAGE_UPLOAD_ENABLED ? handlePaste : undefined}
                 placeholder={
                   isGenerating ? '正在生成中...' :
                   isOptimizing ? '正在分析需求...' :
@@ -1798,9 +1802,11 @@ export default function HomePage() {
                 <p className="text-[11px] text-[var(--color-text-tertiary)] shrink-0 whitespace-nowrap">
                   Enter发送
                 </p>
+                {/* 图片上传待接入多模态管线后启用
                 <p className="text-[11px] text-[var(--color-text-tertiary)] shrink-0 whitespace-nowrap">
                   支持图片
                 </p>
+                */}
                 <p className="text-[11px] text-[var(--color-text-tertiary)] shrink-0 whitespace-nowrap">
                   /命令
                 </p>
