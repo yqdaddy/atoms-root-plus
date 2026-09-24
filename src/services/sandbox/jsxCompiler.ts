@@ -32,6 +32,35 @@ export const SUCRASE_VENDOR_SCRIPT: string = '/vendor/sucrase.vendor.js';
 export const REACT_ROOT_ID = 'root';
 
 /**
+ * 顶层 import/export 语句判定（FINAL-3）。
+ *
+ * 背景：同步逐文件链路的 __compileAndRun 用 Sucrase transforms ['jsx'] 编译，
+ * ESM 语句原样留在产物中，经 new Function 执行必然 SyntaxError；真实 import
+ * 项目由打包链路（moduleBundler 的 transforms ['jsx','imports']）接管，
+ * 同步链对该类文件的失败属预期让位，不应升级为用户可见错误。
+ *
+ * 判定按行首语句形态匹配（模型产物为格式化代码，语句独立成行）：
+ * - 误报（注释/字符串里形似 import）：代价是该文件在同步链跳过执行 + warn 日志，
+ *   打包链路仍正常接管，可接受
+ * - 漏报：保持旧行为（编译抛错），不劣于现状
+ * 动态 import() 在 new Function 内合法，不匹配；行首为 // 的注释被 ^\\s* 后
+ * 的首字符挡住，不匹配。
+ */
+export const MODULE_SYNTAX_PATTERN: RegExp =
+  /^\s*(?:import\s+(?:[\w*{$}\s,]+\s+from\s+)?["']|import\s*["']|export\s+(?:default\b|[{*\w]))/;
+
+/**
+ * 检测代码是否包含顶层 import/export 语句（供测试与调用方复用；
+ * 沙箱内运行时使用同一 pattern 源，见 generateSucraseRuntime 的注入方式）
+ */
+export function containsModuleSyntax(code: string): boolean {
+  return MODULE_SYNTAX_PATTERN.test(code);
+}
+
+/** MODULE_SYNTAX_PATTERN 的字符串源（JSON 转义），注入运行时脚本模板，保持单一事实源 */
+const MODULE_SYNTAX_PATTERN_SOURCE: string = JSON.stringify(MODULE_SYNTAX_PATTERN.source);
+
+/**
  * 检测代码是否包含 JSX 语法
  * 启发式两条线：
  * 1. 大写开头的组件标签（<Counter>、</Item>）
@@ -90,6 +119,13 @@ export function generateSucraseRuntime(): string {
   window.__compileAndRun = function(code, fileName) {
     if (!window.__sucraseReady) {
       window.__jsxQueue.push([code, fileName]);
+      return;
+    }
+    // FINAL-3：含顶层 import/export 的文件由打包链路（transforms ['jsx','imports']）
+    // 接管，同步链 ['jsx'] 无法执行 ESM 语法，编译必然失败；该场景属预期让位，
+    // 降级为 console.warn（走日志桥接，仅进控制台视图），不产生用户可见错误
+    if (new RegExp(${MODULE_SYNTAX_PATTERN_SOURCE}).test(code)) {
+      console.warn('[JSX] 跳过含 import/export 语句的文件（模块打包链路将接管）: ' + (fileName || 'inline-jsx'));
       return;
     }
     var compiled;
