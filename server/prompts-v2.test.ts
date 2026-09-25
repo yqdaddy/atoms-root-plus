@@ -134,6 +134,41 @@ describe('不受本次切换影响的回归锚点', () => {
   });
 });
 
+describe('需求理解与覆盖检查提示词增强（能力 2）', () => {
+  it('分析师提示词要求逐句核对用户原话，列举项各自独立成条', () => {
+    expect(ANALYST_SYSTEM_PROMPT_V2).toContain('逐句阅读用户需求');
+    expect(ANALYST_SYSTEM_PROMPT_V2).toContain('禁止遗漏用户明说的任何功能点');
+    expect(ANALYST_SYSTEM_PROMPT_V2).toContain('不得合并概括');
+  });
+
+  it('分析师提示词含非功能需求与边界条件提取要求', () => {
+    expect(ANALYST_SYSTEM_PROMPT_V2).toContain('非功能需求与边界条件');
+    expect(ANALYST_SYSTEM_PROMPT_V2).toContain('空数据、极限值、非法输入、重复提交');
+  });
+
+  it('分析师提示词要求 description 写清入口/操作/反馈（可核对性）', () => {
+    expect(ANALYST_SYSTEM_PROMPT_V2).toContain('入口位置、用户操作、界面反馈');
+    expect(ANALYST_SYSTEM_PROMPT_V2).toContain('便于事后逐项核对');
+  });
+
+  it('工程师提示词含输出前需求覆盖自检指令', () => {
+    expect(ENGINEER_BASE_PROMPT_V2).toContain('需求覆盖自检');
+    expect(ENGINEER_BASE_PROMPT_V2).toContain('每一条 must 功能都有对应的真实实现');
+    expect(ENGINEER_BASE_PROMPT_V2).toContain('宁可少交付也不要用假实现凑数');
+  });
+
+  it('审查者第 3 维度要求逐条核对功能清单，缺失即 fail', () => {
+    expect(REVIEWER_SYSTEM_PROMPT_V2).toContain('逐条核对功能清单');
+    expect(REVIEWER_SYSTEM_PROMPT_V2).toContain('缺失即 fail');
+  });
+
+  it('原有功能规划铁律与核心约束不受增强影响（回归锚点）', () => {
+    expect(ANALYST_SYSTEM_PROMPT_V2).toContain('功能最多 6 条');
+    expect(ANALYST_SYSTEM_PROMPT_V2).toContain('游戏类应用必须有游戏结束判定');
+    expect(ENGINEER_BASE_PROMPT_V2).toContain('生产级应用铁律');
+  });
+});
+
 describe('token 增量观测（chars/4 近似，方案 §4.5 口径）', () => {
   it('单次生成系统提示词合计在可控区间（防稀释护栏）', () => {
     const approxTokens = (s: string) => Math.ceil(s.length / 4);

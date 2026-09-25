@@ -51,6 +51,20 @@ import {
   REVIEWER_SYSTEM_PROMPT_V2,
   buildEngineerSystemPromptV2,
 } from './prompts-v2.js';
+import {
+  shouldTriggerWebSearch,
+  performWebSearch,
+  formatSearchResultsForContext,
+  buildSearchingNotice,
+  readWebSearchConfig,
+} from './utils/webSearch.js';
+import {
+  extractRequirementItems,
+  checkRequirementCoverage,
+  mergeCodeText,
+  buildCoverageNotice,
+  type RequirementCoverageReport,
+} from './utils/requirementCoverage.js';
 
 /**
  * 对话轮次输入（从前端传入，用于构建多轮上下文）。
@@ -402,7 +416,8 @@ export interface TokenStats {
 export interface LLMEvent {
   type: LLMEventType;
   payload: {
-    phase?: 'analysis' | 'generate' | 'review' | 'diagnose';
+    // search：在线查询阶段（生成前预处理，phase 仅出现在 stage/delta 事件）
+    phase?: 'search' | 'analysis' | 'generate' | 'review' | 'diagnose';
     text?: string;
     analysis?: string; // 分析/诊断结果文本（analyze 与 diagnose 意图、diff 模式空变更的 done 载荷；存在时前端作为对话内容展示，不进入应用流程）
     features?: unknown; // 功能清单
@@ -428,6 +443,8 @@ export interface LLMEvent {
     changes?: ChangeList;
     /** 变更摘要（diff 模式 done 事件携带，与 changes.summary 一致，供前端快速访问） */
     changeSummary?: string;
+    /** 需求覆盖核对报告（done 事件携带；未核对或全量覆盖时可能缺省/为空报告） */
+    coverage?: RequirementCoverageReport;
   };
 }
 
@@ -460,6 +477,8 @@ interface PendingSession {
   framework?: 'html' | 'react-cdn' | 'vue-cdn';
   /** 是否使用 diff 模式（modify 意图）：输出 JSON 变更清单而非完整文件 */
   useDiffMode?: boolean;
+  /** 在线查询结果上下文块（生成前搜索命中时预构建，批准后注入工程师 prompt） */
+  searchContextBlock?: string;
   createdAt: Date;
 }
 
@@ -891,6 +910,31 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
     // 阶段 1：分析（create 意图的完整流水线）
     onEvent({ type: 'stage', payload: { phase: 'analysis', intent } });
 
+    // 在线查询预处理（能力 1）：分析师之前检测外部技术信号，命中则搜索并
+    // 构建参考资料上下文块。搜索失败静默降级（不阻塞、不报错），用户在
+    // search 阶段看到"正在查询相关资料"通知。
+    let searchContextBlock = '';
+    {
+      const searchConfig = readWebSearchConfig();
+      const searchTrigger = shouldTriggerWebSearch(prompt);
+      if (searchConfig.enabled && searchTrigger.shouldSearch) {
+        onEvent({ type: 'stage', payload: { phase: 'search', intent } });
+        onEvent({
+          type: 'delta',
+          payload: { text: buildSearchingNotice(searchTrigger.queries), phase: 'search' },
+        });
+        const outcome = await performWebSearch(searchTrigger.queries, searchConfig);
+        if (outcome.ok) {
+          searchContextBlock = formatSearchResultsForContext(outcome, searchTrigger.queries[0]);
+          console.info(
+            `[generateWithStages] 在线查询完成: ${outcome.results.length} 条结果（provider=${outcome.provider}，触发原因: ${searchTrigger.reasons.join(',')}）`
+          );
+        } else {
+          console.info(`[generateWithStages] 在线查询跳过: ${outcome.error ?? '未知原因'}`);
+        }
+      }
+    }
+
     // 构建分析师消息
     const analysisMessages: ChatMessage[] = [
       { role: 'system', content: ANALYST_SYSTEM_PROMPT },
@@ -912,6 +956,7 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
 
     const userContent = [
       globalPrefSection,
+      searchContextBlock,
       chatContextBlock ? `${prompt}\n\n## 此前的对话上下文\n${chatContextBlock}` : prompt,
     ].filter(Boolean).join('\n\n');
     analysisMessages.push({ role: 'user', content: userContent });
@@ -1013,6 +1058,7 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
       globalPreferences,
       analysisUsage: analysisResult.usage,
       framework: selectedFramework,
+      searchContextBlock,
       createdAt: new Date(),
     });
 
@@ -1088,7 +1134,7 @@ export async function continueAfterApproval(
   };
 
   try {
-    const { prompt, currentHtml, currentFiles, features, chatContextBlock, chatTurns, originalRequest } = session;
+    const { prompt, currentHtml, currentFiles, features, chatContextBlock, chatTurns, originalRequest, searchContextBlock } = session;
     const framework = session.framework ?? 'html';
     const useDiffMode = session.useDiffMode && currentFiles && Object.keys(currentFiles).length > 0;
 
@@ -1159,9 +1205,12 @@ export async function continueAfterApproval(
     } else {
       // 首次生成模式
       const frameworkHint = getFrameworkHint(framework);
+      // 在线查询参考资料（能力 1）：生成前搜索命中时注入，辅助技术选型与
+      // API 用法决策；来源 URL 禁止进入生成代码（格式化块尾已附约束）
+      const searchSection = searchContextBlock ? `${searchContextBlock}\n\n` : '';
       generateMessages.push({
         role: 'user',
-        content: `${preferenceSection}## 功能清单\n${featureListStr}\n\n## 用户需求\n${prompt}\n\n## 目标框架\n使用 **${framework}** 模式：${frameworkHint}\n\n请生成完整的多文件项目。`,
+        content: `${preferenceSection}${searchSection}## 功能清单\n${featureListStr}\n\n## 用户需求\n${prompt}\n\n## 目标框架\n使用 **${framework}** 模式：${frameworkHint}\n\n请生成完整的多文件项目。`,
       });
     }
 
@@ -1957,6 +2006,31 @@ export async function continueAfterApproval(
       };
     })();
 
+    // 需求覆盖核对（能力 2）：对照分析师功能清单逐项核对生成结果。
+    // 仅对全量生成/迭代生效（diff 模式只交付增量文件，核对无意义）；
+    // 核对是启发式检索，零 LLM 成本；未覆盖项经 warning + delta 提醒，
+    // 报告随 done 事件下发，绝不因核对结果拦截交付。
+    let coverageReport: RequirementCoverageReport | undefined;
+    if (!useDiffMode) {
+      const requirementItems = extractRequirementItems(session.features);
+      if (requirementItems.length > 0) {
+        coverageReport = checkRequirementCoverage(requirementItems, mergeCodeText(finalFiles));
+        const coverageNotice = buildCoverageNotice(coverageReport);
+        if (coverageNotice) {
+          console.warn(
+            `[continueAfterApproval] 需求覆盖不全: ${coverageReport.coveredCount}/${coverageReport.total}`,
+            coverageReport.uncovered.map((u) => `${u.id}:${u.name}`).join('; ')
+          );
+          onEvent({ type: 'warning', payload: { message: coverageNotice } });
+          onEvent({ type: 'delta', payload: { text: `\n${coverageNotice}\n`, phase: 'generate' } });
+        } else {
+          console.info(
+            `[continueAfterApproval] 需求覆盖核对通过: ${coverageReport.coveredCount}/${coverageReport.total}`
+          );
+        }
+      }
+    }
+
     // 完成：同时返回 html（向后兼容）和 files（多文件结构）
     onEvent({
       type: 'done',
@@ -1967,6 +2041,8 @@ export async function continueAfterApproval(
         // diff 模式：携带变更清单与摘要
         changes: changeList,
         changeSummary: changeList?.summary,
+        // 需求覆盖核对报告（能力 2）
+        coverage: coverageReport,
       },
     });
 
