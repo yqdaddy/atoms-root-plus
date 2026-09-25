@@ -18,25 +18,29 @@ import {
 /* ---------------- 格式转换 ---------------- */
 
 /**
- * 后端 stage 到前端 PipelineStage 映射
+ * 后端 stage 到前端 PipelineStage 映射。
+ * search（在线查询）为生成前预处理，前端归入 analyzing 态，由 STAGE_MESSAGES 提供专属文案。
  */
 const STAGE_MAP: Record<string, PipelineStage> = {
   analysis: 'analyzing',
   generate: 'generating',
   review: 'reviewing',
   diagnose: 'analyzing',
+  search: 'analyzing',
 };
 
 /**
  * 后端 stage 到前端 DeltaPhase 映射
  * review 阶段的输出也归入 generate phase；
- * diagnose 阶段的输出归入 analyze phase（思考区展示）
+ * diagnose 阶段的输出归入 analyze phase（思考区展示）；
+ * search 阶段的查询通知归入 analyze phase（思考区展示，避免混入代码面板）
  */
 const STAGE_TO_PHASE: Record<string, DeltaPhase> = {
   analysis: 'analyze',
   generate: 'generate',
   review: 'generate',
   diagnose: 'analyze',
+  search: 'analyze',
 };
 
 /**
@@ -47,6 +51,7 @@ const STAGE_MESSAGES: Record<string, string> = {
   generate: '正在生成代码...',
   review: '正在审查代码...',
   diagnose: '正在诊断问题...',
+  search: '正在检索资料...',
 };
 
 /* ---------------- SSE 解析 ---------------- */
