@@ -5,7 +5,7 @@
  * - extractRequirementItems：标准 features 数组归一化、raw 文本回退拆行、
  *   无效输入容错
  * - extractCoverageSignals：引号命名、领域动作词、英文技术词、中文滑窗、
- *   信号词数量上限
+ *   信号词数量上限、四字滑窗泛化词过滤（MINOR-2 回归）
  * - checkItemCoverage：动作词实现痕迹命中、原文信号命中、动作词无痕迹
  *   不误判、无信号不误判（宁漏报不误报）
  * - checkRequirementCoverage：批量统计与报告结构
@@ -119,6 +119,74 @@ describe('extractCoverageSignals：信号词提炼', () => {
 
   it('空条目返回空信号', () => {
     expect(extractCoverageSignals({ id: 'F1', name: '', description: '', priority: 'must' })).toEqual([]);
+  });
+});
+
+describe('四字滑窗泛化词过滤（MINOR-2 回归）', () => {
+  const unrelatedCode = '<!DOCTYPE html><html><body><h1>hello</h1><p>与需求无关的演示页</p></body></html>';
+
+  it('任务清单管理：代码无对应字样时不再产生泛化信号', () => {
+    const item: RequirementItem = { id: 'F1', name: '任务清单管理', description: '', priority: 'must' };
+    // "任务清单/清单管理/任务清/单管"等整词与碎片全部命中泛化过滤，不应残留信号
+    expect(extractCoverageSignals(item)).toEqual([]);
+  });
+
+  it('任务清单管理：代码无对应字样时不进入未覆盖提醒（无信号不误判）', () => {
+    const item: RequirementItem = { id: 'F1', name: '任务清单管理', description: '', priority: 'must' };
+    const entry = checkItemCoverage(item, unrelatedCode);
+    expect(entry.covered).toBe(true);
+
+    const report = checkRequirementCoverage([item], unrelatedCode);
+    expect(report.uncovered).toHaveLength(0);
+    expect(buildCoverageNotice(report)).toBeNull();
+  });
+
+  it('其他四字级泛化需求名同样不产信号（含"用户管理系统"类碎片）', () => {
+    for (const name of ['任务清单', '信息管理', '用户管理', '清单管理', '用户管理系统']) {
+      const signals = extractCoverageSignals({ id: 'F1', name, description: '', priority: 'nice' });
+      expect(signals, `泛化名「${name}」不应产生滑窗信号`).toEqual([]);
+    }
+  });
+
+  it('数据统计：无滑窗碎片，仅保留动作词"统计"（走实现痕迹防线）', () => {
+    const signals = extractCoverageSignals({ id: 'F1', name: '数据统计', description: '', priority: 'nice' });
+    // "统计"是领域动作词（需求 3 防线）：需代码有 count/total/stat/sum 痕迹才算覆盖
+    expect(signals).toEqual(['统计']);
+
+    const item: RequirementItem = { id: 'F1', name: '数据统计', description: '', priority: 'nice' };
+    expect(checkItemCoverage(item, unrelatedCode).covered).toBe(false); // 无统计痕迹 → 按设计提醒
+    expect(checkItemCoverage(item, 'const total = items.reduce((s, x) => s + x, 0);').covered).toBe(true);
+  });
+
+  it('泛化名 + 具体动作描述：仍要求代码有实现痕迹（防线不变）', () => {
+    const item: RequirementItem = { id: 'F1', name: '任务清单管理', description: '支持导出', priority: 'must' };
+    // 代码只有"任务清单"字样文案、无 export/download 等实现痕迹 → 不得判覆盖
+    const code = '<div>任务清单如下</div>';
+    const entry = checkItemCoverage(item, code);
+    expect(entry.covered).toBe(false);
+  });
+
+  it('泛化名 + 具体动作描述：代码有实现痕迹时正常判覆盖', () => {
+    const item: RequirementItem = { id: 'F1', name: '任务清单管理', description: '支持导出', priority: 'must' };
+    const code = 'function exportCSV() { download(toCSV(rows)); }';
+    const entry = checkItemCoverage(item, code);
+    expect(entry.covered).toBe(true);
+    expect(entry.matchedSignals).toContain('导出');
+  });
+
+  it('含具体功能词的需求仍正常检出（泛化过滤不误伤）', () => {
+    const item: RequirementItem = { id: 'F1', name: '记账清单', description: '', priority: 'must' };
+    const signals = extractCoverageSignals(item);
+    expect(signals).toContain('记账');
+    expect(signals).not.toContain('清单');
+    const entry = checkItemCoverage(item, '<h1>记账</h1>');
+    expect(entry.covered).toBe(true);
+  });
+
+  it('窗口去"的/中/等"缀后命中词表的跳过，具体词保留', () => {
+    const signals = extractCoverageSignals({ id: 'F1', name: '看板管理等', description: '', priority: 'nice' });
+    expect(signals).toContain('看板');        // 具体词保留
+    expect(signals).not.toContain('管理等'); // 去"等"后命中"管理" → 跳过
   });
 });
 

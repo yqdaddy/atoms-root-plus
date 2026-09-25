@@ -94,7 +94,8 @@ export function extractRequirementItems(features: unknown): RequirementItem[] {
  * 1. 引号/书名号内的显式命名（"记为 X"、《X》）
  * 2. 领域动作词组（增删改查、拖拽、导出等），命中即作为强信号
  * 3. 英文/数字技术词（localStorage、Chart 等）原样作为信号
- * 4. 中文功能名按 2-6 字滑窗抽取候选词（过滤通用词）
+ * 4. 中文功能名按 2-4 字滑窗抽取候选词（先经泛化词过滤再入选：
+ *    窗口与泛化区段相交、或窗口本身/去缀形态命中泛化词表的均跳过）
  *
  * 返回至多 5 个信号词，供 checkItemCoverage 在代码中检索。
  */
@@ -122,13 +123,17 @@ export function extractCoverageSignals(item: RequirementItem): string[] {
     if (!TECH_IGNORE.has(lower)) signals.add(w);
   }
 
-  // 4. 中文滑窗（仅当信号不足时补充）
+  // 4. 中文滑窗（仅当信号不足时补充；产物先经泛化词过滤再入选，防长窗口绕过词表）
   if (signals.size < 3) {
     const chinese = item.name.replace(/[^一-龥]/g, '');
+    const genericSpans = collectGenericCharSpans(chinese);
     for (let len = Math.min(4, chinese.length); len >= 2 && signals.size < 5; len--) {
       for (let i = 0; i + len <= chinese.length && signals.size < 5; i++) {
         const sub = chinese.slice(i, i + len);
-        if (!STOPWORDS.has(sub) && !GENERIC_NAME_WORDS.has(sub)) signals.add(sub);
+        if (STOPWORDS.has(sub)) continue;
+        if (overlapsGenericSpan(i, len, genericSpans)) continue;
+        if (hitsGenericNameWord(sub)) continue;
+        signals.add(sub);
       }
     }
   }
@@ -142,8 +147,64 @@ const STOPWORDS = new Set([
   '进行', '使用', '并且', '然后', '以及', '或者', '同时', '的时候', '情况下',
 ]);
 
-/** 需求名中的通用词（滑窗候选时排除，如"清单""管理"单独出现无区分度） */
-const GENERIC_NAME_WORDS = new Set(['应用', '页面', '管理', '清单', '系统', '模块', '视图']);
+/**
+ * 需求名中的泛化词（滑窗候选时排除，单独出现无区分度）。
+ * 覆盖 2 字级基础词与 4 字级常见泛化需求词；4 字级按实际误报样例
+ * 增补（如"任务清单管理"被拆出"任务清单"绕过旧过滤），不做无限堆砌。
+ */
+const GENERIC_NAME_WORDS = new Set([
+  // 2 字级
+  '应用', '页面', '管理', '清单', '系统', '模块', '视图',
+  // 4 字级常见泛化需求词
+  '任务清单', '清单管理', '数据统计', '信息管理', '用户管理',
+]);
+
+/**
+ * 标记需求名中被泛化词命中的字符下标集合（支持重叠出现，长词优先）。
+ * 泛化区段内的任何滑窗碎片（如"用户管理系统"里的"理系统"）都无检索
+ * 区分度，与其相交的候选一并排除，避免碎片信号造成未覆盖误报。
+ */
+function collectGenericCharSpans(chinese: string): Set<number> {
+  const spans = new Set<number>();
+  const words = Array.from(GENERIC_NAME_WORDS).sort((a, b) => b.length - a.length);
+  for (const word of words) {
+    let from = 0;
+    for (;;) {
+      const idx = chinese.indexOf(word, from);
+      if (idx === -1) break;
+      for (let k = idx; k < idx + word.length; k++) spans.add(k);
+      from = idx + 1;
+    }
+  }
+  return spans;
+}
+
+/** 滑窗 [start, start+len) 是否与泛化字符区段相交 */
+function overlapsGenericSpan(start: number, len: number, spans: Set<number>): boolean {
+  for (let k = start; k < start + len; k++) {
+    if (spans.has(k)) return true;
+  }
+  return false;
+}
+
+/**
+ * 滑窗候选词本身是否命中泛化词表（含去缀形态）。
+ * 命中口径为双向包含：候选词是词表词（"管理"）、包含词表词
+ * （"清单管理"含"清单"），或是某词表词的片段（"任务清"是"任务清单"
+ * 的前缀）。比对前先去掉首尾的"的/中/等"等缀（"管理中"→"管理"）；
+ * 去缀后不足 2 字的形态不参与比对，避免误杀。
+ */
+function hitsGenericNameWord(candidate: string): boolean {
+  const stripped = candidate.replace(/^[的中等]+/, '').replace(/[的中等]+$/, '');
+  const forms = candidate === stripped ? [candidate] : [candidate, stripped];
+  for (const form of forms) {
+    if (form.length < 2) continue;
+    for (const word of GENERIC_NAME_WORDS) {
+      if (form === word || form.includes(word) || word.includes(form)) return true;
+    }
+  }
+  return false;
+}
 
 /** 技术词忽略（大小写归一后） */
 const TECH_IGNORE = new Set(['the', 'and', 'for', 'with', 'api']);
