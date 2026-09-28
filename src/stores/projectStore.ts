@@ -616,6 +616,8 @@ if (typeof window !== 'undefined') {
   if (store.currentId && !store.currentProject) {
     const project = store.loadProject(store.currentId);
     if (project) {
+      // 加载项目的版本历史（修复：刷新后版本丢失）
+      store.loadVersionsFromStorage(store.currentId);
       useProjectStore.setState({ currentProject: project });
     }
   }
