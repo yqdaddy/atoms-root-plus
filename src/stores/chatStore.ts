@@ -39,6 +39,21 @@ export interface StreamBuffer {
   stageMessage: string;
   /** 是否等待用户批准（approval_required 时设为 true，批准后继续生成时设为 false） */
   awaitingApproval: boolean;
+  /** 是否等待用户澄清（clarification_required 时设为 true） */
+  awaitingClarification: boolean;
+  /** 澄清问题列表 */
+  clarificationQuestions: Array<{
+    id: string;
+    question: string;
+    options?: string[];
+    required: boolean;
+  }> | null;
+  /** 澄清原因 */
+  clarificationReason: string | null;
+  /** 澄清对应的 sessionId */
+  clarificationSessionId: string | null;
+  /** 待澄清的功能清单 */
+  pendingFeatureList: import('../services/ai/types').FeatureList | null;
   /** 文件生成进度列表（工具参数流式渲染） */
   files: FileGenerationStatus[];
   /** 当前正在生成的文件路径 */
@@ -81,6 +96,14 @@ interface ChatActions {
   resetStreamBuffer: () => void;
   /** 设置等待批准状态 */
   setAwaitingApproval: (awaiting: boolean) => void;
+  /** 设置等待澄清状态（Phase 2） */
+  setAwaitingClarification: (
+    awaiting: boolean,
+    questions?: Array<{ id: string; question: string; options?: string[]; required: boolean }>,
+    reason?: string,
+    sessionId?: string,
+    featureList?: import('../services/ai/types').FeatureList
+  ) => void;
   /** 更新文件生成状态 */
   updateFileStatus: (path: string, status: FileGenerationStatus['status'], charCount?: number, lineCount?: number) => void;
   /** 设置审查检查结果（用于折叠摘要展示） */
@@ -100,6 +123,11 @@ const initialStreamBuffer: StreamBuffer = {
   repairText: '',
   stageMessage: '',
   awaitingApproval: false,
+  awaitingClarification: false,
+  clarificationQuestions: null,
+  clarificationReason: null,
+  clarificationSessionId: null,
+  pendingFeatureList: null,
   files: [],
   activeFilePath: null,
   intent: null,
@@ -278,6 +306,19 @@ export const useChatStore = create<ChatStore>()((set) => ({
       streamBuffer: {
         ...state.streamBuffer,
         awaitingApproval: awaiting,
+      },
+    }));
+  },
+
+  setAwaitingClarification: (awaiting, questions, reason, sessionId, featureList) => {
+    set((state) => ({
+      streamBuffer: {
+        ...state.streamBuffer,
+        awaitingClarification: awaiting,
+        clarificationQuestions: questions || null,
+        clarificationReason: reason || null,
+        clarificationSessionId: sessionId || null,
+        pendingFeatureList: featureList || null,
       },
     }));
   },

@@ -184,16 +184,20 @@ function processSSEEvent(
       case 'stage': {
         const backendStage = payload.phase as string;
         const frontendStage = STAGE_MAP[backendStage] || 'analyzing';
-        const message = STAGE_MESSAGES[backendStage] || `${backendStage} 阶段`;
-        console.log('[liveEngine] stage 事件:', { backendStage, frontendStage, message, intent: payload.intent });
+        // 优先使用后端传来的 message（修复轮有专属文案），否则使用默认映射
+        const message = payload.message || STAGE_MESSAGES[backendStage] || `${backendStage} 阶段`;
+        // 优先使用后端传来的 attempt（修复轮为 2+），否则默认为 1
+        const attempt = payload.attempt ?? 1;
+        console.log('[liveEngine] stage 事件:', { backendStage, frontendStage, message, attempt, intent: payload.intent, meta: payload.meta });
         event = {
           type: 'stage',
           payload: {
             runId,
             stage: frontendStage,
-            attempt: 1,
+            attempt,
             message,
             ...(payload.intent ? { intent: payload.intent } : {}),
+            ...(payload.meta ? { meta: payload.meta } : {}),
           },
         };
         break;
@@ -296,6 +300,34 @@ function processSSEEvent(
             sessionId: payload.sessionId || '',
             analysis: payload.analysis || '',
             features: payload.features || { raw: '' },
+          },
+        };
+        break;
+      }
+      case 'clarification_required': {
+        // Phase 2：意图澄清机制
+        event = {
+          type: 'clarification_required',
+          payload: {
+            runId,
+            sessionId: payload.sessionId || '',
+            reason: payload.reason || '需要更多信息',
+            questions: payload.questions || [],
+            featureList: payload.featureList || { appTitle: '', appType: 'other', summary: '', features: [], interactions: [], assumptions: [] },
+          },
+        };
+        break;
+      }
+      case 'engineer_pause': {
+        // Phase 3：工程师阶段暂停（结对编程）
+        event = {
+          type: 'engineer_pause',
+          payload: {
+            runId,
+            sessionId: payload.sessionId || '',
+            currentFiles: payload.currentFiles || {},
+            pauseReason: payload.pauseReason || 'checkpoint',
+            message: payload.message || '生成已暂停',
           },
         };
         break;
@@ -472,10 +504,14 @@ export function createLiveEngine(): AIEngine {
 /**
  * 批准分析结果并继续生成。
  * 调用后端 /api/llm/approve 端点继续生成流程。
+ * @param sessionId 会话 ID
+ * @param onEvent 事件处理器
+ * @param supplementaryInfo 可选的补充信息（Phase 2：澄清后的用户回答）
  */
 export async function approveAndContinue(
   sessionId: string,
   onEvent: StreamEventHandler,
+  supplementaryInfo?: string,
 ): Promise<void> {
   cancelActiveRun();
 
@@ -485,7 +521,7 @@ export async function approveAndContinue(
   });
 
   try {
-    console.log('[liveEngine] 批准后继续生成', { sessionId });
+    console.log('[liveEngine] 批准后继续生成', { sessionId, hasSupplementaryInfo: !!supplementaryInfo });
 
     // 使用 apiFetch 统一拦截 401
     const response = await apiFetch('/api/llm/approve', {
@@ -493,7 +529,7 @@ export async function approveAndContinue(
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ sessionId }),
+      body: JSON.stringify({ sessionId, supplementaryInfo }),
       signal: controller.signal,
     });
 
@@ -504,6 +540,134 @@ export async function approveAndContinue(
           runId: `r_${Date.now()}`,
           code: 'PARSE_FAILED',
           message: `批准失败（HTTP ${response.status}）`,
+          retryable: true,
+          fallbackToDemo: false,
+        },
+      });
+      return;
+    }
+
+    if (!response.body) {
+      onEvent({
+        type: 'error',
+        payload: {
+          runId: `r_${Date.now()}`,
+          code: 'NETWORK_TIMEOUT',
+          message: '后端返回了空响应体',
+          retryable: true,
+          fallbackToDemo: false,
+        },
+      });
+      return;
+    }
+
+    // 解析 SSE 流
+    await parseSSEStream(response, onEvent, controller.signal);
+
+  } catch (error) {
+    if (controller.signal.aborted) {
+      onEvent({
+        type: 'error',
+        payload: {
+          runId: `r_${Date.now()}`,
+          code: 'CANCELLED',
+          message: '已停止生成',
+          retryable: false,
+          fallbackToDemo: false,
+        },
+      });
+      return;
+    }
+
+    onEvent({
+      type: 'error',
+      payload: {
+        runId: `r_${Date.now()}`,
+        code: 'NETWORK_TIMEOUT',
+        message: '无法连接后端服务',
+        retryable: true,
+        fallbackToDemo: false,
+        detail: error instanceof Error ? error.message : String(error),
+      },
+    });
+
+  } finally {
+    unregister();
+  }
+}
+
+/**
+ * Phase 3：工程师中断
+ * 调用后端 /api/llm/interrupt 端点中断生成
+ * 后端会抢救已生成的文件，返回给前端应用
+ * @param sessionId 服务端会话 ID（从 approval_required 事件获取）
+ */
+export async function interruptEngineer(
+  sessionId: string
+): Promise<{
+  success: boolean;
+  rescuedFiles: Record<string, { path: string; content: string; language: string }>;
+  rescuedCount: number;
+} | null> {
+  try {
+    const response = await apiFetch('/api/llm/interrupt', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ sessionId }),
+    });
+
+    if (!response.ok) {
+      console.error('[liveEngine] interrupt 请求失败:', response.status);
+      return null;
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('[liveEngine] interrupt 网络错误:', error);
+    return null;
+  }
+}
+
+/**
+ * Phase 3：继续生成（结对编程）
+ * 调用后端 /api/llm/continue 端点继续生成
+ * @param sessionId 服务端会话 ID
+ * @param userFeedback 用户反馈
+ * @param onEvent 事件处理器
+ */
+export async function continueWithFeedback(
+  sessionId: string,
+  userFeedback: string,
+  onEvent: StreamEventHandler,
+): Promise<void> {
+  cancelActiveRun();
+
+  const controller = new AbortController();
+  const unregister = registerActiveRun(() => {
+    controller.abort();
+  });
+
+  try {
+    console.log('[liveEngine] 继续生成', { sessionId, userFeedback: userFeedback.slice(0, 50) });
+
+    const response = await apiFetch('/api/llm/continue', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ sessionId, userFeedback }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      onEvent({
+        type: 'error',
+        payload: {
+          runId: `r_${Date.now()}`,
+          code: 'PARSE_FAILED',
+          message: `继续生成失败（HTTP ${response.status}）`,
           retryable: true,
           fallbackToDemo: false,
         },

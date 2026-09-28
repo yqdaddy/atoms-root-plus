@@ -82,6 +82,22 @@ export interface FeatureList {
   features: FeatureItem[];
   interactions: string[];
   assumptions: string[];
+  /** 澄清需求（Phase 2：意图澄清机制） */
+  clarificationNeeded?: {
+    /** 为什么需要澄清 */
+    reason: string;
+    /** 需要用户回答的问题列表 */
+    questions: Array<{
+      /** 问题 ID */
+      id: string;
+      /** 问题内容 */
+      question: string;
+      /** 可选的建议选项 */
+      options?: string[];
+      /** 是否必须回答 */
+      required: boolean;
+    }>;
+  };
 }
 
 /** 审查者产出的单条检查结论 */
@@ -183,15 +199,48 @@ export interface ApprovalRequiredPayload {
   features: FeatureList | { raw: string };
 }
 
+/** clarification_required 事件负载：需要用户澄清（Phase 2：意图澄清机制） */
+export interface ClarificationPayload {
+  runId: string;
+  sessionId: string;
+  /** 为什么需要澄清 */
+  reason: string;
+  /** 需要用户回答的问题 */
+  questions: Array<{
+    id: string;
+    question: string;
+    options?: string[];
+    required: boolean;
+  }>;
+  /** 当前已解析的功能清单（部分） */
+  featureList: FeatureList;
+}
+
+/** engineer_pause 事件负载：工程师阶段暂停，等待用户反馈（Phase 3：结对编程） */
+export interface EngineerPausePayload {
+  runId: string;
+  sessionId: string;
+  /** 当前已生成的文件（部分） */
+  currentFiles: Record<string, { path: string; content: string; language: string; updatedAt?: string }>;
+  /** 暂停原因：checkpoint（检查点） | user_interrupt（用户中断） | need_guidance（需要指导） */
+  pauseReason: 'checkpoint' | 'user_interrupt' | 'need_guidance';
+  /** 暂停原因说明 */
+  message: string;
+}
+
 /**
  * 统一流式事件信封。
  * 时序约定：一个 run 内事件严格有序；done 与 error 互斥且必为末事件；
  * delta.phase 与当前 stage 对应（repair 阶段的 delta 属于 generating 态的 attempt=2）。
  * approval_required 表示分析完成，等待用户批准后继续。
+ * clarification_required 表示需要用户澄清后才能继续分析（Phase 2）。
+ * engineer_pause 表示工程师阶段暂停，等待用户反馈后继续（Phase 3：结对编程）。
  */
 export type StreamEvent =
   | { type: 'stage'; payload: StageEventPayload }
   | { type: 'delta'; payload: DeltaEventPayload }
+  | { type: 'clarification_required'; payload: ClarificationPayload }
+  | { type: 'engineer_pause'; payload: EngineerPausePayload }
   | { type: 'approval_required'; payload: ApprovalRequiredPayload }
   | { type: 'done'; payload: GenerateResult }
   | { type: 'error'; payload: ErrorEventPayload };

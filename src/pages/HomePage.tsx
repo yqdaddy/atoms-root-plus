@@ -14,7 +14,7 @@ import { saveShare, getShareUrl } from '../utils/share';
 import { deployProject } from '../utils/deploy';
 import { ApiError } from '../services/apiClient';
 import { getAIAPI, type StreamEvent, type GenerateOptions, validateGeneratedHtml, type DemoTemplateId, type FeatureList } from '../services/ai';
-import { approveAndContinue } from '../services/ai/liveEngine';
+import { approveAndContinue, interruptEngineer, continueWithFeedback } from '../services/ai/liveEngine';
 import { cancelActiveRun } from '../services/ai/activeRun';
 import { ENTRY_FILE_PATH, type ProjectFramework, type ChatMessage as ProjectChatMessage, type FileNode as ProjectFileNode, type ChangeList } from '../types/project';
 import { loadMemoryForGeneration, isRecallQuery, generateRecallResponse, extractAndUpdateGlobalPreferences } from '../services/memory';
@@ -24,6 +24,7 @@ import SandboxFrame from '../components/SandboxFrame';
 import ExportZipButton, { useZipExport } from '../components/ExportZipButton';
 import { FileTreePanel, type TreeNode, buildTree } from '../components/FileTree';
 import { RequirementPanel } from '../components/RequirementPanel';
+import { ClarificationPanel } from '../components/ClarificationPanel';
 import { VersionHistory } from '../components/VersionHistory';
 import { useOptimizerStore } from '../stores/optimizerStore';
 import type { ConfirmedRequirement, OptimizedRequirement } from '../services/ai/optimizer';
@@ -77,7 +78,7 @@ const TEMPLATE_CHIPS: { id: DemoTemplateId; label: string; prompt: string; icon:
 ];
 
 /** 消息状态（用于 UI 展示，与持久化解耦） */
-type MessageStatus = 'processing' | 'done' | 'error' | 'waiting_approval';
+type MessageStatus = 'processing' | 'done' | 'error' | 'waiting_approval' | 'awaiting_clarification';
 
 /** UI 消息（扩展自持久化的 ChatMessage，添加临时 UI 状态） */
 interface UIMessage {
@@ -340,6 +341,16 @@ export default function HomePage() {
   // F-001: 首页登录守卫
   const { user } = useAuthStore();
   const isLoggedIn = !!user;
+
+  // Phase 3：工程师暂停状态（结对编程）
+  const [engineerPaused, setEngineerPaused] = useState<{
+    sessionId: string;
+    currentFiles: Record<string, { path: string; content: string; language: string }>;
+    message: string;
+  } | null>(null);
+
+  // Phase 3：服务端会话 ID（从 approval_required 事件获取，用于调用 /interrupt 和 /continue）
+  const serverSessionIdRef = useRef<string | null>(null);
 
   // 流式输出状态
   const streamBuffer = useChatStore((state) => state.streamBuffer);
@@ -847,6 +858,8 @@ export default function HomePage() {
           // 分析完成，直接继续生成，无需等待批准
           const sessionId = event.payload.sessionId;
           if (sessionId) {
+            // Phase 3：保存服务端会话 ID，供工程师暂停时调用 /interrupt
+            serverSessionIdRef.current = sessionId;
             console.debug('[HomePage] 分析完成，自动继续生成');
             // 保持生成状态
             setIsGenerating(true);
@@ -865,6 +878,60 @@ export default function HomePage() {
               setPendingMessageId(null);
             });
           }
+          break;
+        }
+        case 'clarification_required': {
+          // Phase 2：意图澄清机制
+          const { sessionId, reason, questions } = event.payload;
+          console.debug('[HomePage] 需要澄清:', reason, questions);
+
+          // 设置等待澄清状态
+          useChatStore.getState().setAwaitingClarification(
+            true,
+            questions,
+            reason,
+            sessionId,
+            event.payload.featureList
+          );
+
+          // 暂停生成状态（但不结束）
+          setIsGenerating(false);
+          setMessageUIState(prev => prev ? { ...prev, status: 'awaiting_clarification' } : null);
+          break;
+        }
+        case 'engineer_pause': {
+          // Phase 3：工程师阶段暂停（结对编程）
+          const { sessionId, currentFiles, message } = event.payload;
+          console.debug('[HomePage] 工程师暂停:', message, Object.keys(currentFiles));
+
+          // 保存暂停状态
+          setEngineerPaused({ sessionId, currentFiles, message });
+
+          // 暂停生成状态
+          setIsGenerating(false);
+          setMessageUIState(prev => prev ? { ...prev, status: 'processing' } : null);
+
+          // 将已生成的文件应用到项目
+          if (Object.keys(currentFiles).length > 0) {
+            const typedFiles: Record<string, ProjectFileNode> = {};
+            for (const [path, file] of Object.entries(currentFiles)) {
+              typedFiles[path] = {
+                path: file.path,
+                content: file.content,
+                language: (file.language === 'typescript' ? 'javascript' : file.language) as 'html' | 'javascript' | 'css' | 'json' | 'text',
+                updatedAt: new Date().toISOString(),
+              };
+            }
+            updateFiles(typedFiles, ENTRY_FILE_PATH);
+          }
+
+          // 添加提示消息
+          addMessage({
+            role: 'assistant',
+            content: `生成已暂停：${message}\n\n已生成 ${Object.keys(currentFiles).length} 个文件，可以查看并给出修改意见。`,
+            runId: useChatStore.getState().streamBuffer.runId ?? undefined,
+            intentType: streamBuffer.intent?.type,
+          });
           break;
         }
       }
@@ -1171,6 +1238,181 @@ export default function HomePage() {
     // 重新生成
     void runGeneration(lastUserMessage, lastUserMessage, { intentOverride });
   }, [currentProject?.chat, finishGeneration, setIntent, runGeneration]);
+
+  /**
+   * Phase 2：处理澄清回答
+   * 用户回答问题后，将答案附加到原始需求，继续生成
+   */
+  const handleClarificationAnswer = useCallback((answers: Record<string, string>) => {
+    const sessionId = useChatStore.getState().streamBuffer.clarificationSessionId;
+    if (!sessionId) {
+      toast.error('会话已过期，请重新开始');
+      return;
+    }
+
+    setIsGenerating(true);
+
+    // 构建补充需求
+    const answerParts: string[] = [];
+    const questions = useChatStore.getState().streamBuffer.clarificationQuestions || [];
+    for (const q of questions) {
+      const answer = answers[q.id];
+      if (answer && answer !== '__custom__') {
+        answerParts.push(`${q.question} ${answer}`);
+      }
+    }
+
+    const supplementaryInfo = answerParts.length > 0 ? `\n\n补充信息：${answerParts.join('；')}` : '';
+
+    // 清除澄清状态
+    useChatStore.getState().setAwaitingClarification(false);
+
+    // 继续生成（复用 approveAndContinue 流程）
+    approveAndContinue(sessionId, handleStreamEvent, supplementaryInfo).catch((error) => {
+      console.error('[HomePage] 澄清后继续生成失败:', error);
+      const errorMsg = '生成过程发生异常，请重试';
+      setError(errorMsg);
+      revertProjectStatusAfterFailure();
+      toast.error(errorMsg);
+      setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
+      addMessage({ role: 'assistant', content: errorMsg, runId: useChatStore.getState().streamBuffer.runId ?? undefined });
+
+      setIsGenerating(false);
+      setPendingMessageId(null);
+    });
+  }, [handleStreamEvent, setError, addMessage]);
+
+  /**
+   * Phase 2：跳过澄清，直接生成
+   */
+  const handleClarificationSkip = useCallback(() => {
+    const sessionId = useChatStore.getState().streamBuffer.clarificationSessionId;
+    if (!sessionId) {
+      toast.error('会话已过期，请重新开始');
+      return;
+    }
+
+    setIsGenerating(true);
+
+    // 清除澄清状态
+    useChatStore.getState().setAwaitingClarification(false);
+
+    // 继续生成
+    approveAndContinue(sessionId, handleStreamEvent).catch((error) => {
+      console.error('[HomePage] 跳过澄清后继续生成失败:', error);
+      const errorMsg = '生成过程发生异常，请重试';
+      setError(errorMsg);
+      revertProjectStatusAfterFailure();
+      toast.error(errorMsg);
+      setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
+      addMessage({ role: 'assistant', content: errorMsg, runId: useChatStore.getState().streamBuffer.runId ?? undefined });
+
+      setIsGenerating(false);
+      setPendingMessageId(null);
+    });
+  }, [handleStreamEvent, setError, addMessage]);
+
+  /**
+   * Phase 3：工程师暂停（用户主动中断）
+   */
+  const handleEngineerPause = useCallback(() => {
+    const serverSessionId = serverSessionIdRef.current;
+
+    // 有服务端会话 ID：调用 /interrupt 抢救文件并保留会话
+    if (serverSessionId) {
+      interruptEngineer(serverSessionId).then((result) => {
+        // 取消前端流
+        cancelActiveRun();
+        finishGeneration();
+        setIsGenerating(false);
+
+        const rescuedFiles = result?.rescuedFiles ?? {};
+        const rescuedCount = Object.keys(rescuedFiles).length;
+
+        // 应用抢救出的文件到项目
+        if (rescuedCount > 0) {
+          const typedFiles: Record<string, ProjectFileNode> = {};
+          for (const [path, file] of Object.entries(rescuedFiles)) {
+            typedFiles[path] = {
+              path: file.path,
+              content: file.content,
+              language: (file.language === 'typescript' ? 'javascript' : file.language) as 'html' | 'javascript' | 'css' | 'json' | 'text',
+              updatedAt: new Date().toISOString(),
+            };
+          }
+          updateFiles(typedFiles, ENTRY_FILE_PATH);
+        }
+
+        // 设置暂停状态
+        setEngineerPaused({
+          sessionId: serverSessionId,
+          currentFiles: rescuedFiles,
+          message: '用户主动暂停',
+        });
+
+        toast.info(rescuedCount > 0
+          ? `已暂停生成，抢救出 ${rescuedCount} 个文件`
+          : '已暂停生成'
+        );
+      }).catch((error) => {
+        console.error('[HomePage] 中断失败:', error);
+        toast.error('中断失败，请重试');
+      });
+      return;
+    }
+
+    // 无服务端会话 ID：降级为本地取消
+    cancelActiveRun();
+    finishGeneration();
+    setIsGenerating(false);
+    setEngineerPaused(null);
+    toast.info('已停止生成');
+  }, [finishGeneration, updateFiles]);
+
+  /**
+   * Phase 3：继续生成（用户反馈后）
+   */
+  const handleEngineerContinue = useCallback((userFeedback: string) => {
+    if (!engineerPaused) {
+      toast.error('未找到暂停状态');
+      return;
+    }
+
+    setIsGenerating(true);
+    setEngineerPaused(null);
+
+    // 添加用户反馈消息
+    addMessage({ role: 'user', content: userFeedback, intentType: 'modify' });
+
+    // 优先使用 /continue 端点（会话保留时）
+    const serverSessionId = serverSessionIdRef.current;
+    if (serverSessionId && serverSessionId === engineerPaused.sessionId) {
+      continueWithFeedback(
+        serverSessionId,
+        userFeedback,
+        handleStreamEvent
+      ).catch((error) => {
+        console.error('[HomePage] 继续生成失败:', error);
+        const errorMsg = '继续生成失败，将以修改模式重试';
+        toast.error(errorMsg);
+        setIsGenerating(false);
+        // 降级：走正常修改流程
+        void runGeneration(userFeedback, userFeedback, { intentOverride: 'modify' });
+      });
+    } else {
+      // 会话过期：走正常修改流程
+      void runGeneration(userFeedback, userFeedback, { intentOverride: 'modify' });
+    }
+  }, [engineerPaused, handleStreamEvent, addMessage, runGeneration]);
+
+  /**
+   * Phase 3：放弃继续，结束本次生成
+   */
+  const handleEngineerCancel = useCallback(() => {
+    setEngineerPaused(null);
+    finishGeneration();
+    toast.info('已结束本次生成');
+  }, [finishGeneration]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1552,6 +1794,17 @@ export default function HomePage() {
               />
             )}
 
+            {/* Phase 2：澄清面板 */}
+            {streamBuffer.awaitingClarification && streamBuffer.clarificationQuestions && (
+              <ClarificationPanel
+                reason={streamBuffer.clarificationReason || '需要更多信息'}
+                questions={streamBuffer.clarificationQuestions}
+                onAnswer={handleClarificationAnswer}
+                onSkip={handleClarificationSkip}
+                isProcessing={isGenerating}
+              />
+            )}
+
             {/* 需求确认面板：优化器流式分析中 / 待确认 / 优化失败 */}
             {(isOptimizing || optimizerResult || optimizerError) && (
               <RequirementPanel
@@ -1748,20 +2001,96 @@ export default function HomePage() {
 
           {/* Input area */}
           <div className="p-4 border-t border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
-            {/* 停止按钮：生成中时显示 */}
-            {isGenerating && (
+            {/* Phase 3：工程师暂停面板 */}
+            {engineerPaused && (
+              <div className="mb-3 p-4 rounded-xl bg-[var(--color-bg-base)] border border-[var(--color-border-default)]">
+                <div className="flex items-start gap-3 mb-3">
+                  <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center shrink-0">
+                    <Icon icon="lucide:pause" width={16} height={16} className="text-amber-500" />
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="text-[14px] font-medium text-[var(--color-text-primary)] mb-1">生成已暂停</h4>
+                    <p className="text-[13px] text-[var(--color-text-secondary)]">
+                      {engineerPaused.message}。已生成 {Object.keys(engineerPaused.currentFiles).length} 个文件。
+                    </p>
+                  </div>
+                </div>
+
+                {/* 已生成的文件列表 */}
+                {Object.keys(engineerPaused.currentFiles).length > 0 && (
+                  <div className="mb-3 p-2 rounded-lg bg-[var(--color-bg-surface)]">
+                    <div className="text-[11px] text-[var(--color-text-tertiary)] mb-1">已生成的文件：</div>
+                    <div className="flex flex-wrap gap-1">
+                      {Object.keys(engineerPaused.currentFiles).map((path) => (
+                        <span key={path} className="text-[11px] px-1.5 py-0.5 rounded bg-[var(--color-bg-base)] text-[var(--color-text-secondary)]">
+                          {path.split('/').pop()}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 继续生成输入框 */}
+                <div className="space-y-2">
+                  <textarea
+                    placeholder="输入修改意见继续生成，或点击'放弃'结束本次生成"
+                    className="w-full bg-[var(--color-bg-surface)] border border-[var(--color-border-default)] rounded-lg px-3 py-2 text-[13px] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] resize-none outline-none focus:border-[var(--color-border-strong)] transition-colors"
+                    rows={2}
+                    id="engineer-feedback-input"
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        const textarea = document.getElementById('engineer-feedback-input') as HTMLTextAreaElement;
+                        const feedback = textarea?.value?.trim();
+                        if (feedback) {
+                          handleEngineerContinue(feedback);
+                        } else {
+                          toast.info('请输入修改意见');
+                        }
+                      }}
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] transition-colors"
+                    >
+                      <Icon icon="lucide:play" width={14} height={14} />
+                      <span className="text-[13px] font-medium">继续生成</span>
+                    </button>
+                    <button
+                      onClick={handleEngineerCancel}
+                      className="px-4 py-2 rounded-lg text-[13px] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-base)] transition-colors"
+                    >
+                      放弃
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 停止/暂停按钮：生成中时显示 */}
+            {isGenerating && !engineerPaused && (
               <button
                 onClick={() => {
-                  cancelActiveRun();
-                  finishGeneration();
-                  setIsGenerating(false);
-                  setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
-                  toast.info('已停止生成');
+                  // Phase 3：工程师阶段显示"暂停"按钮
+                  if (streamBuffer.stage === 'generating') {
+                    handleEngineerPause();
+                  } else {
+                    // 其他阶段显示"停止"按钮
+                    cancelActiveRun();
+                    finishGeneration();
+                    setIsGenerating(false);
+                    setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
+                    toast.info('已停止生成');
+                  }
                 }}
-                className="w-full mb-3 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
+                className={`w-full mb-3 flex items-center justify-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+                  streamBuffer.stage === 'generating'
+                    ? 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20'
+                    : 'bg-red-500/10 text-red-500 hover:bg-red-500/20'
+                }`}
               >
-                <Icon icon="lucide:square" width={14} height={14} />
-                <span className="text-[13px] font-medium">停止生成</span>
+                <Icon icon={streamBuffer.stage === 'generating' ? 'lucide:pause' : 'lucide:square'} width={14} height={14} />
+                <span className="text-[13px] font-medium">
+                  {streamBuffer.stage === 'generating' ? '暂停生成' : '停止生成'}
+                </span>
               </button>
             )}
 

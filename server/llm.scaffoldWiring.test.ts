@@ -311,9 +311,9 @@ describe('D-3 审查修复循环', () => {
     expect(deltaText).not.toContain('仍未全部解决');
   });
 
-  it('复审仍 fail → 两轮修复耗尽后降级交付，无 error 事件，delta 输出人话提示', async () => {
-    // 修复产物仍有缺陷（结构校验能过的语法缺陷）→ 两轮修复后复审仍 fail
-    // → 轮数封顶（MAX_REPAIR_ROUNDS=2）→ 按现状交付
+  it('复审仍 fail → 三轮修复耗尽后降级交付，无 error 事件，delta 输出人话提示', async () => {
+    // 修复产物仍有缺陷（结构校验能过的语法缺陷）→ 三轮修复后复审仍 fail
+    // → 轮数封顶（MAX_REPAIR_ROUNDS=3）→ 按现状交付
     const { stage2Events, fetchMock } = await runCreateFlow({
       framework: 'react-cdn',
       responses: [
@@ -324,21 +324,23 @@ describe('D-3 审查修复循环', () => {
         REVIEW_FAIL_JSON,
         reactCalculatorProject(true),
         REVIEW_FAIL_JSON,
+        reactCalculatorProject(true),
+        REVIEW_FAIL_JSON,
       ],
     });
 
     expect(stage2Events.find((e) => e.type === 'error')).toBeUndefined();
-    // 分析师 + 工程师 + 审查者 + 修复×2 + 复审×2 = 7 次（轮数封顶 2，不追加第 3 轮）
-    expect(fetchMock).toHaveBeenCalledTimes(7);
+    // 分析师 + 工程师 + 审查者 + 修复×3 + 复审×3 = 9 次（轮数封顶 3）
+    expect(fetchMock).toHaveBeenCalledTimes(9);
 
     const done = stage2Events.find((e) => e.type === 'done');
     expect(done).toBeDefined();
     const deltaText = joinedDeltaText(stage2Events);
     expect(deltaText).toContain('自动修复中');
-    expect(deltaText).toContain('第 1/2 轮');
-    expect(deltaText).toContain('第 2/2 轮');
-    expect(deltaText).not.toContain('第 3');
-    expect(deltaText).toContain('2 轮后仍未全部解决');
+    expect(deltaText).toContain('第 1/3 轮');
+    expect(deltaText).toContain('第 2/3 轮');
+    expect(deltaText).toContain('第 3/3 轮');
+    expect(deltaText).toContain('3 轮后仍未全部解决');
     expect(deltaText).toContain('按现状交付');
   });
 

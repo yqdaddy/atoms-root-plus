@@ -13,8 +13,12 @@ import {
   continueAfterApproval,
   cancelGeneration,
   streamChatCompletion,
+  getPendingSession,
+  pauseEngineerSession,
+  continueWithFeedback,
   type LLMEvent,
 } from '../llm.js';
+import type { PendingSession } from '../llm.js';
 import {
   OPTIMIZER_SYSTEM_PROMPT,
   renderOptimizerUserPrompt,
@@ -134,8 +138,8 @@ llmRouter.post('/generate', async (c) => {
             data: JSON.stringify(event.payload),
           });
 
-          // done、error 或 approval_required 后关闭流
-          if (event.type === 'done' || event.type === 'error' || event.type === 'approval_required') {
+          // done、error、approval_required 或 clarification_required 后关闭流
+          if (event.type === 'done' || event.type === 'error' || event.type === 'approval_required' || event.type === 'clarification_required') {
             closed = true;
             break;
           }
@@ -165,13 +169,15 @@ llmRouter.post('/generate', async (c) => {
  * POST /api/llm/approve
  * 批准分析结果并继续生成
  *
- * Body: { sessionId: string }
+ * Body: { sessionId: string, supplementaryInfo?: string }
+ * supplementaryInfo 为 Phase 2 澄清机制中用户的回答
  *
  * SSE 事件流：继续返回 generate、review、done 事件
  */
 llmRouter.post('/approve', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const sessionId = body.sessionId;
+  const supplementaryInfo = typeof body.supplementaryInfo === 'string' ? body.supplementaryInfo : undefined;
 
   if (typeof sessionId !== 'string') {
     return c.json({ error: 'sessionId 为必填字段' }, 400);
@@ -188,8 +194,8 @@ llmRouter.post('/approve', async (c) => {
       eventQueue.push(event);
     };
 
-    // 继续生成
-    const continuePromise = continueAfterApproval(sessionId, onEvent, c.req.raw.signal);
+    // 继续生成（Phase 2：支持补充信息）
+    const continuePromise = continueAfterApproval(sessionId, onEvent, c.req.raw.signal, undefined, supplementaryInfo);
 
     // 轮询事件队列并发送
     const sendEvents = async () => {
@@ -243,6 +249,106 @@ llmRouter.post('/cancel', async (c) => {
 
   const cancelled = cancelGeneration(requestId);
   return c.json({ success: cancelled, message: cancelled ? '请求已取消' : '未找到进行中的请求' });
+});
+
+/**
+ * POST /api/llm/interrupt
+ * Phase 3：工程师阶段中断（结对编程）
+ * 用户主动中断生成，抢救已完成的文件，保留会话供反馈后继续
+ *
+ * Body: { sessionId: string }
+ *
+ * Response: { success: boolean, rescuedFiles: Record<string, FileNode>, rescuedCount: number }
+ */
+llmRouter.post('/interrupt', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const sessionId = body.sessionId;
+
+  if (typeof sessionId !== 'string') {
+    return c.json({ error: 'sessionId 为必填字段' }, 400);
+  }
+
+  // 暂停工程师生成：标记会话 + 取消生成 + 抢救已完成文件
+  const rescuedFiles = pauseEngineerSession(sessionId);
+
+  return c.json({
+    success: true,
+    message: '已暂停生成',
+    rescuedFiles,
+    rescuedCount: Object.keys(rescuedFiles).length,
+  });
+});
+
+/**
+ * POST /api/llm/continue
+ * Phase 3：继续生成（结对编程）
+ * 用户反馈后继续生成，将反馈作为新的修改需求（diff 模式增量修改）
+ *
+ * Body: { sessionId: string, userFeedback: string }
+ *
+ * SSE 事件流：继续返回 generate、review、done 事件
+ */
+llmRouter.post('/continue', async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const sessionId = body.sessionId;
+  const userFeedback = body.userFeedback;
+
+  if (typeof sessionId !== 'string') {
+    return c.json({ error: 'sessionId 为必填字段' }, 400);
+  }
+
+  if (typeof userFeedback !== 'string' || !userFeedback.trim()) {
+    return c.json({ error: 'userFeedback 为必填字段' }, 400);
+  }
+
+  // 返回 SSE 流
+  return streamSSE(c, async (stream) => {
+    const eventQueue: LLMEvent[] = [];
+    let closed = false;
+
+    // 事件处理函数
+    const onEvent = (event: LLMEvent) => {
+      if (closed) return;
+      eventQueue.push(event);
+    };
+
+    // 用户反馈后继续生成
+    const continuePromise = continueWithFeedback(sessionId, userFeedback, onEvent, c.req.raw.signal);
+
+    // 轮询事件队列并发送
+    const sendEvents = async () => {
+      while (!closed) {
+        if (eventQueue.length > 0) {
+          const event = eventQueue.shift()!;
+
+          await stream.writeSSE({
+            event: event.type,
+            data: JSON.stringify(event.payload),
+          });
+
+          // done 或 error 后关闭流
+          if (event.type === 'done' || event.type === 'error') {
+            closed = true;
+            break;
+          }
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+    };
+
+    try {
+      await Promise.all([continuePromise, sendEvents()]);
+    } catch (error) {
+      if (!closed) {
+        const message = error instanceof Error ? error.message : '未知错误';
+        await stream.writeSSE({
+          event: 'error',
+          data: JSON.stringify({ error: message }),
+        });
+      }
+    }
+  });
 });
 
 /* ---------------- 提示词优化器 ---------------- */

@@ -395,8 +395,9 @@ const DIAGNOSE_SYSTEM_PROMPT = `你是 Litpp 平台的问题诊断工程师。�
  * warning：非致命异常通知（当前仅截断抢救）。前端未知事件类型会安全忽略，
  * 该事件为协议预留，供前端后续展示抢救提示。
  * retry：重试进度通知。API 调用失败重试时发送，前端可在思考区展示重试状态。
+ * engineer_pause：工程师阶段暂停，等待用户反馈（Phase 3：结对编程）。
  */
-export type LLMEventType = 'stage' | 'delta' | 'approval_required' | 'done' | 'error' | 'warning' | 'retry';
+export type LLMEventType = 'stage' | 'delta' | 'approval_required' | 'engineer_pause' | 'done' | 'error' | 'warning' | 'retry';
 
 /** 意图信息（SSE stage 事件携带，供前端展示识别结果与纠正入口） */
 export interface IntentInfo {
@@ -449,9 +450,9 @@ export interface LLMEvent {
 }
 
 /**
- * 待批准的会话
+ * 待批准的会话（Phase 3：工程师暂停支持）
  */
-interface PendingSession {
+export interface PendingSession {
   /** 关联的请求 ID，用于取消时清理会话 */
   requestId?: string;
   prompt: string;
@@ -479,6 +480,15 @@ interface PendingSession {
   useDiffMode?: boolean;
   /** 在线查询结果上下文块（生成前搜索命中时预构建，批准后注入工程师 prompt） */
   searchContextBlock?: string;
+  /** Phase 3：工程师暂停状态 */
+  engineerPaused?: {
+    /** 暂停原因 */
+    reason: 'checkpoint' | 'user_interrupt' | 'need_guidance';
+    /** 已生成的文件 */
+    files: Record<string, { path: string; content: string; language: FileLanguage }>;
+    /** 暂停轮次的 usage */
+    usage?: LLMUsage;
+  };
   createdAt: Date;
 }
 
@@ -497,6 +507,103 @@ export function getPendingSession(sessionId: string): PendingSession | undefined
  */
 export function deletePendingSession(sessionId: string): boolean {
   return pendingSessions.delete(sessionId);
+}
+
+/* ---------------- Phase 3：结对编程（工程师暂停 / 继续） ---------------- */
+
+/**
+ * 工程师阶段累积输出快照（sessionId → 累积 JSON 文本）。
+ * 工程师阶段原始输出是 files/changes JSON，逐 token 转发被抑制（MAJOR-D1），
+ * 前端无法拿到部分生成的文件；这里在服务端持续快照，供用户中断时抢救
+ * 已完成的文件。生成解析成功或会话取消时清理。
+ */
+const engineerAccumulatedOutputs = new Map<string, string>();
+
+/**
+ * Phase 3：抢救工程师阶段已生成的文件（结对编程）。
+ * 从累积输出中解析：完整 JSON 直接解析；截断 JSON 抢救已完成部分
+ * （repairTruncatedMultiFileOutput）。无论解析成败都清理快照。
+ * @returns 抢救出的文件记录；无可用输出时返回空对象
+ */
+export function rescueEngineerFiles(sessionId: string): Record<string, { path: string; content: string; language: FileLanguage }> {
+  const accumulated = engineerAccumulatedOutputs.get(sessionId);
+  engineerAccumulatedOutputs.delete(sessionId);
+  if (!accumulated || accumulated.trim().length === 0) {
+    return {};
+  }
+
+  try {
+    const parsed = parseOutput(accumulated);
+    if (parsed.type !== 'conversation' && parsed.files.length > 0) {
+      console.info(`[rescueEngineerFiles] 完整输出解析成功: ${parsed.files.length} 个文件`);
+      return toFileNodeRecord({ files: parsed.files });
+    }
+  } catch {
+    // 完整解析失败（多为截断），走抢救路径
+  }
+
+  const rescued = repairTruncatedMultiFileOutput(accumulated);
+  if (rescued) {
+    console.info(`[rescueEngineerFiles] 截断抢救成功: ${rescued.files.length} 个已完成文件`);
+    return toFileNodeRecord(rescued);
+  }
+
+  console.info('[rescueEngineerFiles] 无可抢救的已完成文件');
+  return {};
+}
+
+/**
+ * Phase 3：暂停工程师生成（结对编程，用户主动中断）。
+ * 时序关键：先标记会话 engineerPaused（abort 的 catch 分支据此保留会话），
+ * 再取消进行中的生成，最后抢救累积输出中的已完成文件。
+ * @returns 抢救出的文件记录
+ */
+export function pauseEngineerSession(sessionId: string): Record<string, { path: string; content: string; language: FileLanguage }> {
+  // 1. 抢救已完成文件（此刻生成可能仍在进行，快照是当前时刻的最新状态）
+  const rescuedFiles = rescueEngineerFiles(sessionId);
+
+  // 2. 标记暂停（abort 的 AbortError catch 分支检查此标记决定是否保留会话）
+  const session = pendingSessions.get(sessionId);
+  if (session) {
+    session.engineerPaused = {
+      reason: 'user_interrupt',
+      files: rescuedFiles,
+    };
+    console.info(`[pauseEngineerSession] 会话 ${sessionId} 已标记暂停，抢救 ${Object.keys(rescuedFiles).length} 个文件`);
+  } else {
+    console.info(`[pauseEngineerSession] 会话 ${sessionId} 不存在（可能未进入工程师阶段或已过期）`);
+  }
+
+  // 3. 取消进行中的生成（触发 continueAfterApproval 的 AbortError 分支）
+  cancelGeneration(sessionId);
+
+  return rescuedFiles;
+}
+
+/**
+ * Phase 3：用户反馈后继续生成（结对编程）。
+ * 将用户反馈注入会话作为新的修改需求，以 diff 模式增量修改已生成的文件。
+ * 会话不存在（过期/清理）时报错，由前端降级为普通 modify 请求。
+ */
+export async function continueWithFeedback(
+  sessionId: string,
+  userFeedback: string,
+  onEvent: (event: LLMEvent) => void,
+  abortSignal?: AbortSignal
+): Promise<void> {
+  const session = pendingSessions.get(sessionId);
+  if (!session) {
+    onEvent({ type: 'error', payload: { message: '暂停会话已过期，请以修改模式重新提交反馈' } });
+    return;
+  }
+
+  // 清除暂停标记，反馈成为新的修改需求，走 diff 模式增量修改
+  session.engineerPaused = undefined;
+  session.prompt = userFeedback;
+  session.useDiffMode = true;
+
+  console.info(`[continueWithFeedback] 会话 ${sessionId} 以反馈继续生成: ${userFeedback.slice(0, 50)}`);
+  await continueAfterApproval(sessionId, onEvent, abortSignal);
 }
 
 /**
@@ -1042,6 +1149,51 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
       features = { raw: analysisText };
     }
 
+    // Phase 2：意图澄清机制
+    // 检查是否需要澄清，如果有 questions 则发送 clarification_required 事件
+    const featureList = features as { clarificationNeeded?: { reason: string; questions: unknown[] } };
+    if (
+      featureList &&
+      typeof featureList === 'object' &&
+      featureList.clarificationNeeded &&
+      Array.isArray(featureList.clarificationNeeded.questions) &&
+      featureList.clarificationNeeded.questions.length > 0
+    ) {
+      const sessionId = crypto.randomUUID();
+      pendingSessions.set(sessionId, {
+        requestId,
+        prompt,
+        currentHtml,
+        currentFiles,
+        analysisResult: analysisResult.content,
+        features,
+        chatContextBlock,
+        chatTurns,
+        originalRequest,
+        preferences,
+        globalPreferences,
+        analysisUsage: analysisResult.usage,
+        framework: selectedFramework,
+        searchContextBlock,
+        createdAt: new Date(),
+      });
+
+      onEvent({
+        type: 'clarification_required',
+        payload: {
+          runId: requestId,
+          sessionId,
+          reason: featureList.clarificationNeeded.reason,
+          questions: featureList.clarificationNeeded.questions,
+          featureList: features as import('./types.js').FeatureList,
+        },
+      });
+
+      // 暂停等待用户回答
+      // 用户回答后调用 continueAfterApproval（与 approval_required 共用同一流程）
+      return;
+    }
+
     // 发送批准请求事件
     const sessionId = crypto.randomUUID();
     pendingSessions.set(sessionId, {
@@ -1098,12 +1250,14 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
  * 批准后继续生成（多文件模式）
  * @param intent 意图信息（modify 直通模式由 runDirectModifyPipeline 传入，
  *               附着到 stage 事件供前端展示；批准流程入口不传）
+ * @param supplementaryInfo 补充信息（Phase 2：澄清机制中用户的回答）
  */
 export async function continueAfterApproval(
   sessionId: string,
   onEvent: (event: LLMEvent) => void,
   abortSignal?: AbortSignal,
-  intent?: IntentResult
+  intent?: IntentResult,
+  supplementaryInfo?: string
 ): Promise<void> {
   const session = pendingSessions.get(sessionId);
   if (!session) {
@@ -1141,9 +1295,14 @@ export async function continueAfterApproval(
     // 阶段 2：生成
     onEvent({ type: 'stage', payload: { phase: 'generate', ...(intent ? { intent } : {}) } });
 
-    const featureListStr = typeof features === 'string'
-      ? features
-      : JSON.stringify(features, null, 2);
+    // Phase 2：如果有补充信息，附加到功能清单
+    const enrichedFeatures = supplementaryInfo
+      ? { ...(typeof features === 'object' ? features : {}), supplementaryInfo }
+      : features;
+
+    const featureListStr = typeof enrichedFeatures === 'string'
+      ? enrichedFeatures
+      : JSON.stringify(enrichedFeatures, null, 2);
 
     // 判断是否为迭代模式
     const isIteration = currentFiles && Object.keys(currentFiles).length > 0;
@@ -1311,12 +1470,14 @@ export async function continueAfterApproval(
       // 消息（实测 104,026 字符裸 JSON 入库）。这里只累积不转发：原始 JSON
       // 仅进入解析管线，绝不作为消息内容出站；聊天区流式进度由阶段事件、
       // 重试/降级提示（协议不变）与循环后的交付摘要提供。
+      // Phase 3：累积文本同时快照到模块级 Map，用户中断时抢救已完成文件。
       // 注意：校验拦截、重试与策略切换逻辑不在本改动范围内，原样保留。
       let accumulatedOutput = '';
       const result = await streamChatCompletionWithUsage(
         retryMessages,
         (text) => {
           accumulatedOutput += text;
+          engineerAccumulatedOutputs.set(sessionId, accumulatedOutput);
         },
         combinedSignal,
         callOptions
@@ -1697,6 +1858,9 @@ export async function continueAfterApproval(
       retryCount++;
     }
 
+    // Phase 3：生成已收敛（成功或重试耗尽），累积输出快照完成使命，清理防泄漏
+    engineerAccumulatedOutputs.delete(sessionId);
+
     // 处理 multiFileOutput（如果解析成功且需要转换为 finalFiles）
     if (multiFileOutput && !finalFiles) {
       const mergeBase = isIteration && session.originalFiles ? session.originalFiles : currentFiles;
@@ -1787,15 +1951,15 @@ export async function continueAfterApproval(
       //   分析师        1 次（固定）
       //   工程师       ≤3 次（与第 1 层格式重试 / 第 2 层结构重试共享预算，MAX_PARSE_ATTEMPTS=3）
       //   审查者        1 次（固定；diff 模式 0 次）
-      //   修复工程师   ≤2 次（MAX_REPAIR_ROUNDS=2，每轮 1 次）
-      //   复审         ≤2 次（每轮修复应用后 1 次，与修复轮数一一对应）
+      //   修复工程师   ≤3 次（MAX_REPAIR_ROUNDS=3，每轮 1 次）
+      //   复审         ≤3 次（每轮修复应用后 1 次，与修复轮数一一对应）
       //   ─────────────────────────────────
-      //   总计         ≤9 次（非 diff 全链路极限；正常收敛流程 3-5 次）
+      //   总计         ≤11 次（非 diff 全链路极限；正常收敛流程 3-5 次）
       // 能进入审查说明前两层已收敛（格式合法、结构规则通过），本层只处理
       // 模型可自修的质量缺陷（如悬空语法、功能缺失），不与前两层叠加触发。
       // 降级铁律：任何一轮失败（网络 / 解析 / 校验）都保留已有产物按现状交付，
       // 绝不让修复循环把 done 变成 error。
-      const MAX_REPAIR_ROUNDS = 2;
+      const MAX_REPAIR_ROUNDS = 3;
       let currentVerdict = parseReviewVerdict(reviewResult.content);
       let repairRound = 0;
       // 循环终态：converged=复审通过或无修复轮发生（默认值，D-7 修复：首审直接
@@ -1810,6 +1974,25 @@ export async function continueAfterApproval(
         currentVerdict && !currentVerdict.pass && currentVerdict.repairInstructions.length > 0
       ) {
         repairRound += 1;
+
+        // 发送 stage 事件：告知前端进入修复轮
+        onEvent({
+          type: 'stage',
+          payload: {
+            phase: 'generate',
+            ...(intent ? { intent } : {}),
+            attempt: repairRound + 1,
+            message: `审查未通过，正在进行第 ${repairRound} 轮修复`,
+            meta: {
+              repairReason: currentVerdict.repairInstructions
+                .map(r => r.issue)
+                .slice(0, 3)
+                .join('; '),
+            },
+          },
+        });
+
+        // 发送 delta 文本通知（聊天区可见）
         onEvent({ type: 'delta', payload: { text: `\n[审查未通过，自动修复中（第 ${repairRound}/${MAX_REPAIR_ROUNDS} 轮）]\n`, phase: 'review' } });
 
         // 行级定位渲染（D-6）：结构化指令输出"文件 第 N 行：缺陷"，
@@ -2050,8 +2233,12 @@ export async function continueAfterApproval(
     pendingSessions.delete(sessionId);
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      // 取消时也要清理会话
-      pendingSessions.delete(sessionId);
+      // Phase 3：工程师暂停场景（pauseEngineerSession 已标记 engineerPaused）保留会话，
+      // 供用户反馈后继续生成（continueWithFeedback）；普通取消仍清理会话
+      const session = pendingSessions.get(sessionId);
+      if (!(session && session.engineerPaused)) {
+        pendingSessions.delete(sessionId);
+      }
       onEvent({ type: 'error', payload: { message: '请求已取消' } });
     } else {
       const message = error instanceof Error ? error.message : '未知错误';

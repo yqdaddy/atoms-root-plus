@@ -512,8 +512,8 @@ describe('D-6 多轮修复、行级定位与修复自检', () => {
 
     // 只进入第 1 轮（收敛即停），无降级提示
     const deltaText = joinedDeltaText(events);
-    expect(deltaText).toContain('第 1/2 轮');
-    expect(deltaText).not.toContain('第 2/2 轮');
+    expect(deltaText).toContain('第 1/3 轮');
+    expect(deltaText).not.toContain('第 2/3 轮');
     expect(deltaText).not.toContain('仍未全部解决');
 
     const done = events.find((e) => e.type === 'done');
@@ -542,8 +542,8 @@ describe('D-6 多轮修复、行级定位与修复自检', () => {
 
     // 两轮 delta 都出现，且第 2 轮修复请求携带复审者的新缺陷定位
     const deltaText = joinedDeltaText(events);
-    expect(deltaText).toContain('第 1/2 轮');
-    expect(deltaText).toContain('第 2/2 轮');
+    expect(deltaText).toContain('第 1/3 轮');
+    expect(deltaText).toContain('第 2/3 轮');
     expect(requestBodies[5]).toContain('/src/App.jsx 第 3 行：缺少空状态展示');
 
     // 收敛交付，无降级
@@ -552,7 +552,29 @@ describe('D-6 多轮修复、行级定位与修复自检', () => {
     expect(done).toBeDefined();
   });
 
-  it('i. 两轮耗尽仍 fail → 降级交付，无 error 事件，文案声明真实轮数', async () => {
+  it('h2. 修复轮发送 stage 事件，携带 attempt 和 repairReason', async () => {
+    const { events } = await runCreateFlow({
+      framework: 'react-cdn',
+      responses: [
+        FEATURES_JSON,
+        calcProject(true),
+        REVIEW_FAIL_STRUCT,
+        calcProject(false),
+        REVIEW_PASS,
+      ],
+    });
+
+    // 第 1 轮修复的 stage 事件
+    const stageEvents = events.filter((e) => e.type === 'stage');
+    const repairStage = stageEvents.find((e) => e.payload.attempt === 2);
+    expect(repairStage).toBeDefined();
+    expect(repairStage!.payload.attempt).toBe(2);
+    expect(repairStage!.payload.message).toContain('审查未通过');
+    expect(repairStage!.payload.message).toContain('第 1 轮修复');
+    expect(repairStage!.payload.meta?.repairReason).toContain('悬空 const 声明导致语法错误');
+  });
+
+  it('i. 三轮耗尽仍 fail → 降级交付，无 error 事件，文案声明真实轮数', async () => {
     const { events, fetchMock } = await runCreateFlow({
       framework: 'react-cdn',
       responses: [
@@ -563,17 +585,19 @@ describe('D-6 多轮修复、行级定位与修复自检', () => {
         REVIEW_FAIL_STRUCT_R2,
         calcProject(false),
         REVIEW_FAIL_STRUCT_R2,
+        calcProject(false),
+        REVIEW_FAIL_STRUCT_R2,
       ],
     });
 
     expect(events.find((e) => e.type === 'error')).toBeUndefined();
-    // 分析师 + 工程师 + 审查者 + 修复×2 + 复审×2 = 7 次（封顶，不追加第 3 轮）
-    expect(fetchMock).toHaveBeenCalledTimes(7);
+    // 分析师 + 工程师 + 审查者 + 修复×3 + 复审×3 = 9 次（三轮封顶）
+    expect(fetchMock).toHaveBeenCalledTimes(9);
 
     const deltaText = joinedDeltaText(events);
-    expect(deltaText).toContain('2 轮后仍未全部解决');
+    expect(deltaText).toContain('3 轮后仍未全部解决');
     expect(deltaText).toContain('按现状交付');
-    expect(deltaText).not.toContain('第 3');
+    expect(deltaText).toContain('第 3/3 轮');
 
     // 降级交付的是最后一轮修复产物（悬空 const 已移除），不是最初带伤产物
     const done = events.find((e) => e.type === 'done');
