@@ -397,7 +397,7 @@ const DIAGNOSE_SYSTEM_PROMPT = `你是 Litpp 平台的问题诊断工程师。�
  * retry：重试进度通知。API 调用失败重试时发送，前端可在思考区展示重试状态。
  * engineer_pause：工程师阶段暂停，等待用户反馈（Phase 3：结对编程）。
  */
-export type LLMEventType = 'stage' | 'delta' | 'approval_required' | 'engineer_pause' | 'done' | 'error' | 'warning' | 'retry';
+export type LLMEventType = 'stage' | 'delta' | 'approval_required' | 'clarification_required' | 'engineer_pause' | 'done' | 'error' | 'warning' | 'retry';
 
 /** 意图信息（SSE stage 事件携带，供前端展示识别结果与纠正入口） */
 export interface IntentInfo {
@@ -417,8 +417,12 @@ export interface TokenStats {
 export interface LLMEvent {
   type: LLMEventType;
   payload: {
+    /** 请求 ID（stage/done/error 等事件携带） */
+    runId?: string;
     // search：在线查询阶段（生成前预处理，phase 仅出现在 stage/delta 事件）
     phase?: 'search' | 'analysis' | 'generate' | 'review' | 'diagnose';
+    /** 轮次（stage 事件携带，第几轮修复） */
+    attempt?: number;
     text?: string;
     analysis?: string; // 分析/诊断结果文本（analyze 与 diagnose 意图、diff 模式空变更的 done 载荷；存在时前端作为对话内容展示，不进入应用流程）
     features?: unknown; // 功能清单
@@ -429,6 +433,8 @@ export interface LLMEvent {
     rescuedFiles?: string[]; // 截断抢救成功时，被恢复的文件路径列表（warning 事件）
     /** 意图识别结果（首个 stage 事件附带） */
     intent?: IntentInfo;
+    /** 元数据（stage 事件携带，如 repairReason） */
+    meta?: Record<string, unknown>;
     /** 重试事件字段 */
     retry?: {
       attempt: number;
@@ -446,6 +452,17 @@ export interface LLMEvent {
     changeSummary?: string;
     /** 需求覆盖核对报告（done 事件携带；未核对或全量覆盖时可能缺省/为空报告） */
     coverage?: RequirementCoverageReport;
+    /** 澄清原因（clarification_required 事件携带） */
+    reason?: string;
+    /** 澄清问题列表（clarification_required 事件携带） */
+    questions?: Array<{
+      id: string;
+      question: string;
+      options?: string[];
+      required: boolean;
+    }>;
+    /** 功能清单（clarification_required 事件携带） */
+    featureList?: unknown;
   };
 }
 
@@ -534,7 +551,7 @@ export function rescueEngineerFiles(sessionId: string): Record<string, { path: s
 
   try {
     const parsed = parseOutput(accumulated);
-    if (parsed.type !== 'conversation' && parsed.files.length > 0) {
+    if (parsed.type !== 'conversation' && parsed.files && parsed.files.length > 0) {
       console.info(`[rescueEngineerFiles] 完整输出解析成功: ${parsed.files.length} 个文件`);
       return toFileNodeRecord({ files: parsed.files });
     }
@@ -1184,8 +1201,13 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
           runId: requestId,
           sessionId,
           reason: featureList.clarificationNeeded.reason,
-          questions: featureList.clarificationNeeded.questions,
-          featureList: features as import('./types.js').FeatureList,
+          questions: featureList.clarificationNeeded.questions as Array<{
+            id: string;
+            question: string;
+            options?: string[];
+            required: boolean;
+          }>,
+          featureList: features,
         },
       });
 

@@ -139,7 +139,7 @@ describe('Phase 2: 意图澄清机制', () => {
   it('有 questions 时发送 clarification_required 事件并暂停，不发 approval_required', async () => {
     const { stage1Events, fetchMock } = await runAnalysisOnly([FEATURES_WITH_QUESTIONS]);
 
-    const clarification = stage1Events.find((e) => e.type === 'clarification_required');
+    const clarification = stage1Events.find((e) => (e.type as string) === 'clarification_required');
     expect(clarification).toBeDefined();
 
     // payload 结构符合 ClarificationPayload 协议
@@ -159,7 +159,7 @@ describe('Phase 2: 意图澄清机制', () => {
 
   it('用户回答后应继续生成，回答内容进入工程师请求', async () => {
     const { stage1Events } = await runAnalysisOnly([FEATURES_WITH_QUESTIONS]);
-    const clarification = stage1Events.find((e) => e.type === 'clarification_required');
+    const clarification = stage1Events.find((e) => (e.type as string) === 'clarification_required');
     expect(clarification).toBeDefined();
     const sessionId = (clarification!.payload as Record<string, unknown>).sessionId as string;
 

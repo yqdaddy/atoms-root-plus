@@ -139,7 +139,7 @@ llmRouter.post('/generate', async (c) => {
           });
 
           // done、error、approval_required 或 clarification_required 后关闭流
-          if (event.type === 'done' || event.type === 'error' || event.type === 'approval_required' || event.type === 'clarification_required') {
+          if ((event.type as string) === 'done' || (event.type as string) === 'error' || (event.type as string) === 'approval_required' || (event.type as string) === 'clarification_required') {
             closed = true;
             break;
           }
