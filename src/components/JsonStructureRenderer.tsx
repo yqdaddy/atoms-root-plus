@@ -375,8 +375,27 @@ interface ReviewCheckItem {
 interface ReviewReport {
   pass: boolean;
   checks: ReviewCheckItem[];
-  repairInstructions?: string[];
+  /** 修复指令条目：契约期望纯字符串，但模型输出可能漂移为 {file,line,issue} 对象 */
+  repairInstructions?: unknown[];
   missingFiles?: string[];
+}
+
+/**
+ * 修复指令条目格式化：把字符串或 {file,line,issue} 对象统一转为文本。
+ * 对象直接作为 React child 渲染会抛"Objects are not valid as a React child"，
+ * 导致整条完成消息渲染为失败占位卡。
+ */
+function formatRepairInstruction(instruction: unknown): string {
+  if (typeof instruction === 'string') return instruction;
+  if (typeof instruction === 'object' && instruction !== null) {
+    const item = instruction as { file?: unknown; line?: unknown; issue?: unknown };
+    const file = typeof item.file === 'string' ? item.file : '';
+    const line = typeof item.line === 'number' ? String(item.line) : '';
+    const issue = typeof item.issue === 'string' ? item.issue : '';
+    const location = [file, line].filter(Boolean).join(':');
+    return [location, issue].filter(Boolean).join(' ') || '修复建议内容为空';
+  }
+  return String(instruction);
 }
 
 /** 审查报告卡片组件 */
@@ -466,7 +485,7 @@ function ReviewReportCard({ data }: { data: ReviewReport }) {
                 key={i}
                 className="text-[12px] text-[var(--color-text-secondary)] pl-4 relative before:content-['•'] before:absolute before:left-0 before:text-amber-600"
               >
-                {instruction}
+                {formatRepairInstruction(instruction)}
               </li>
             ))}
           </ul>

@@ -635,6 +635,12 @@ export interface GenerateOptions {
   /** 原始需求（首次用户输入），用于标注"用户最初需求" */
   originalRequest?: string;
   abortSignal?: AbortSignal;
+  /**
+   * 服务端任务运行 ID（后台任务驱动模式）：路由层创建任务行后传入，作为
+   * activeControllers 注册键与 pendingSession 关联键。缺省时内部生成 UUID，
+   * 兼容直调 generateWithStages 的既有调用方与测试。
+   */
+  runId?: string;
   onEvent: (event: LLMEvent) => void;
   /** 强制指定意图（可选透传，白名单与前端契约一致） */
   intentOverride?: 'create' | 'modify' | 'analyze' | 'diagnose';
@@ -711,6 +717,40 @@ export function cancelGeneration(requestId: string): boolean {
   }
 
   return controller != null;
+}
+
+/**
+ * 取消一个服务端运行任务（按 runId），覆盖任务生命周期的两个阶段：
+ * - 生成直通阶段（analyze/diagnose/conversation/modify 与 create 的分析阶段）：
+ *   控制器以 runId 注册；
+ * - 批准后继续阶段（continueAfterApproval）：控制器以 sessionId 注册，经
+ *   pendingSession 的 requestId 反查。
+ * 同时清理关联的待批准/澄清/暂停会话（取消语义下会话不应保留）。
+ */
+export function cancelRun(runId: string): boolean {
+  let cancelled = false;
+
+  const directController = activeControllers.get(runId);
+  if (directController) {
+    directController.abort();
+    activeControllers.delete(runId);
+    cancelled = true;
+  }
+
+  for (const [sessionId, session] of pendingSessions.entries()) {
+    if (session.requestId === runId) {
+      const sessionController = activeControllers.get(sessionId);
+      if (sessionController) {
+        sessionController.abort();
+        activeControllers.delete(sessionId);
+        cancelled = true;
+      }
+      pendingSessions.delete(sessionId);
+      break;
+    }
+  }
+
+  return cancelled;
 }
 
 /**
@@ -962,9 +1002,11 @@ export function isCompleteHtmlDocument(html: string): boolean {
  * @param waitForApproval - 是否等待批准（默认 true）
  */
 export async function generateWithStages(options: GenerateOptions): Promise<void> {
-  const { prompt, currentHtml, currentFiles, chatTurns, originalRequest, abortSignal, onEvent, preferences, globalPreferences, intentOverride, framework = 'html', explicitFramework } = options;
+  const { prompt, currentHtml, currentFiles, chatTurns, originalRequest, abortSignal, onEvent, preferences, globalPreferences, intentOverride, framework = 'html', explicitFramework, runId } = options;
 
-  const requestId = crypto.randomUUID();
+  // 任务驱动模式：路由层传入 runId 作为任务标识（任务表主键与取消键）；
+  // 直调模式（既有测试等）退回内部生成 UUID，行为不变
+  const requestId = runId ?? crypto.randomUUID();
   const controller = new AbortController();
 
   // 注册可取消
@@ -1248,8 +1290,17 @@ export async function generateWithStages(options: GenerateOptions): Promise<void
     // 注意：这里不继续执行，等待用户批准
     // 批准后调用 continueGeneration
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      onEvent({ type: 'error', payload: { message: '请求已取消' } });
+    // 用户取消的两条错误路径：AbortError（读流中断）与 withRetry 重试退避中
+    // sleep 抛出的 Error('请求已取消')（该消息仅在取消信号触发时出现）。
+    if (
+      error instanceof Error &&
+      (error.name === 'AbortError' || error.message === '请求已取消')
+    ) {
+      // RC4-BUG-002：用户发起的中止不产生任何事件。error 事件会被任务录制器
+      // 落库为 failed 终态（DB 实证：暂停/取消后 run 记为 failed，重开项目回放
+      // 失败卡）。终态归属 /cancel 路由的 cancelRunTask（先于 abort 传播同步落
+      // cancelled，录制器终态后忽略迟到事件）；前端取消 UX 由本地停止链路负责。
+      // 分析阶段无会话可标注，静默返回即可。
     } else if (error instanceof DegradationTriggeredError) {
       // 降级事件：连续容量错误
       onEvent({
@@ -1403,6 +1454,10 @@ export async function continueAfterApproval(
     let generateResult: { content: string; usage?: LLMUsage } | undefined;
     let finalFiles: Record<string, { path: string; content: string; language: FileLanguage; updatedAt: string }> | undefined;
     let changeList: ChangeList | undefined;
+    // RC5-MINOR-002：applyChanges 的实际应用计数（含 action:create 的文件级变更）。
+    // 交付摘要的 appliedEdits 契约是"实际应用"口径；曾误传 changeList 声明的
+    // edits 总数，action:create 变更无 edits 数组导致成功案例显示"已应用 0 处"。
+    let appliedEditCount: number | undefined;
     let multiFileOutput: MultiFileOutput | undefined;
     // 本次 LLM 实际触碰（生成/修改）的文件路径，E_CDN_DOMAIN 扫描范围（D-8/D-9）。
     // diff 与 changes 容错路径设置为此轮变更实际声明的文件集合（multiFileOutput
@@ -1419,9 +1474,31 @@ export async function continueAfterApproval(
     const MAX_PARSE_ATTEMPTS = MAX_RETRY_ATTEMPTS;
     // 重试循环：多维度策略切换
     let currentDiagnosis: FailureDiagnosis | undefined;
+
+    /**
+     * RC4-BUG-001：工程师阶段重试循环中对话式输出的统一处置。
+     * 首轮（retryCount === 0）对话 = 模型主动的澄清/追问，照旧按对话优雅交付
+     * （a2d9eae 回归保护）；重试轮的对话 = 模型规避格式契约的"意图升级"（DB
+     * 实证 run 4f48d86f：模型输出"需求是整体重构……建议生成完整文件"却不产出
+     * 文件，对话 done 把 run 提前终局，重试预算作废，重构产物静默丢失）。
+     * 返回 true = 已按格式规避处置（对话文本透传思考区），调用方须置
+     * shouldRetry/formatErrorHint 转入重试，不得对话交付；
+     * 返回 false = 维持调用方原有对话交付路径（首轮或预算已耗尽）。
+     */
+    const handleConversationEscape = (content: string): boolean => {
+      if (!(retryCount > 0 && retryCount < MAX_PARSE_ATTEMPTS - 1)) return false;
+      const prose = sanitizeEngineerChatContent(content).trim().slice(0, 600);
+      if (prose) {
+        onEvent({ type: 'delta', payload: { text: `\n${prose}\n`, phase: 'generate' } });
+      }
+      return true;
+    };
+
     for (let attempt = 0; attempt < MAX_PARSE_ATTEMPTS; attempt++) {
       // 每轮尝试重置触碰集，防止上一轮失败尝试的残留污染本轮扫描范围
       cdnTouchedPaths = undefined;
+      // RC4-BUG-001：标记本轮对话规避是否已处置（增强解析命中后防标准解析重复处置）
+      let conversationEscaped = false;
 
       // 策略选择：根据失败诊断和尝试次数选择策略
       let currentStrategy: RetryStrategy | undefined;
@@ -1521,77 +1598,94 @@ export async function continueAfterApproval(
 
           // 空变更检查
           if (changeList.changes.length === 0) {
-            console.info('[continueAfterApproval] diff 输出为空变更，转对话模式:', changeList.summary);
-            pendingSessions.delete(sessionId);
-            onEvent({
-              type: 'done',
-              payload: {
-                html: '',
-                files: {},
-                analysis: changeList.summary || '本次未对代码做任何修改：未能确定需要变更的内容，请补充更具体的需求。',
-                stats: result.usage ? {
-                  inputTokens: result.usage.prompt_tokens,
-                  outputTokens: result.usage.completion_tokens,
-                } : undefined,
-              },
-            });
-            return;
+            // RC5-BUG-001：重试轮的空变更是模型规避格式契约的旁路（真实事故
+            // run d40ff5e7：输出 changes:[] + "请提供完整的新文件内容"，run 无
+            // 产物终局，本分支在三个对话回落防护点之外）。预算内转格式失败重试，
+            // 提示词明确要求产出实际文件变更或全量文件；首轮澄清语义
+            //（a2d9eae 保护）与预算耗尽轮照旧诚实对话兜底。
+            if (handleConversationEscape(changeList.summary || '')) {
+              parseSuccess = false;
+              shouldRetry = true;
+              formatErrorHint = '上一轮输出空变更清单（changes:[]）而未修改任何文件。若需求需要新增文件，必须为每个新文件输出完整内容（action:create）；若是对现有文件的修改，必须输出行级编辑。不要用空清单或"请提供内容"类说辞规避交付';
+              console.info('[continueAfterApproval] diff 空变更命中意图升级，预算内转格式重试');
+            } else {
+              console.info('[continueAfterApproval] diff 输出为空变更，转对话模式:', changeList.summary);
+              pendingSessions.delete(sessionId);
+              onEvent({
+                type: 'done',
+                payload: {
+                  html: '',
+                  files: {},
+                  analysis: changeList.summary || '本次未对代码做任何修改：未能确定需要变更的内容，请补充更具体的需求。',
+                  stats: result.usage ? {
+                    inputTokens: result.usage.prompt_tokens,
+                    outputTokens: result.usage.completion_tokens,
+                  } : undefined,
+                },
+              });
+              return;
+            }
           }
 
-          console.info(
-            `[continueAfterApproval] diff 解析成功: ${changeList.changes.length} 个文件, ${changeList.changes.reduce((sum, c) => sum + c.edits.length, 0)} 处编辑`
-          );
+          // 应用变更（空变更转重试时 parseSuccess 已复位，跳过应用段）
+          if (parseSuccess) {
+            console.info(
+              `[continueAfterApproval] diff 解析成功: ${changeList.changes.length} 个文件, ${changeList.changes.reduce((sum, c) => sum + c.edits.length, 0)} 处编辑`
+            );
 
-          // 应用变更
-          const mergeBase = session.originalFiles ?? currentFiles ?? {};
-          const { newFiles, appliedCount, skippedCount, skippedEdits, errors } = applyChanges(mergeBase, changeList.changes);
+            const mergeBase = session.originalFiles ?? currentFiles ?? {};
+            const { newFiles, appliedCount, skippedCount, skippedEdits, errors } = applyChanges(mergeBase, changeList.changes);
+            // RC5-MINOR-002：交付摘要用实际应用口径（applyChanges 的返回值），
+            // 而非 changeList 声明的 edits 数（action:create 无 edits 数组）
+            appliedEditCount = appliedCount;
 
-          if (errors.length > 0) {
-            console.warn('[continueAfterApproval] 部分编辑未成功应用:', errors.join('; '));
-          }
+            if (errors.length > 0) {
+              console.warn('[continueAfterApproval] 部分编辑未成功应用:', errors.join('; '));
+            }
 
-          console.info(`[continueAfterApproval] 已应用 ${appliedCount} 处编辑，跳过 ${skippedCount} 处`);
+            console.info(`[continueAfterApproval] 已应用 ${appliedCount} 处编辑，跳过 ${skippedCount} 处`);
 
-          if (appliedCount === 0) {
-            // F2 诚实路径：全部编辑因与现有内容不符未应用 → 不交付"伪修改"，
-            // 复用空变更的对话模式语义，明示未应用数量
-            console.warn('[continueAfterApproval] diff 编辑全部未应用，转对话模式:', skippedEdits.join('; '));
-            pendingSessions.delete(sessionId);
-            onEvent({
-              type: 'done',
-              payload: {
-                html: '',
-                files: {},
-                analysis: changeList.summary
-                  ? `${changeList.summary}（${skippedCount} 处修改因与现有内容不符未应用，代码未变更；请补充更具体的需求后重试。）`
-                  : `本次修改未能应用：${skippedCount} 处变更与现有代码内容不一致，已按原样保留；请补充更具体的需求后重试。`,
-                stats: result.usage ? {
-                  inputTokens: result.usage.prompt_tokens,
-                  outputTokens: result.usage.completion_tokens,
-                } : undefined,
-              },
-            });
-            return;
-          }
+            if (appliedCount === 0) {
+              // F2 诚实路径：全部编辑因与现有内容不符未应用 → 不交付"伪修改"，
+              // 复用空变更的对话模式语义，明示未应用数量
+              console.warn('[continueAfterApproval] diff 编辑全部未应用，转对话模式:', skippedEdits.join('; '));
+              pendingSessions.delete(sessionId);
+              onEvent({
+                type: 'done',
+                payload: {
+                  html: '',
+                  files: {},
+                  analysis: changeList.summary
+                    ? `${changeList.summary}（${skippedCount} 处修改因与现有内容不符未应用，代码未变更；请补充更具体的需求后重试。）`
+                    : `本次修改未能应用：${skippedCount} 处变更与现有代码内容不一致，已按原样保留；请补充更具体的需求后重试。`,
+                  stats: result.usage ? {
+                    inputTokens: result.usage.prompt_tokens,
+                    outputTokens: result.usage.completion_tokens,
+                  } : undefined,
+                },
+              });
+              return;
+            }
 
-          if (skippedCount > 0) {
-            // 部分应用：warning 明示跳过数量与位置，用户可据此决定是否重试
-            const skipNotice = `已应用 ${appliedCount} 处修改，另有 ${skippedCount} 处因与现有内容不符未应用（${skippedEdits.join('、')}）；如结果不符预期可点击重试。`;
-            console.warn('[continueAfterApproval] 部分编辑被跳过:', skipNotice);
-            onEvent({ type: 'warning', payload: { message: skipNotice } });
-          }
+            if (skippedCount > 0) {
+              // 部分应用：warning 明示跳过数量与位置，用户可据此决定是否重试
+              const skipNotice = `已应用 ${appliedCount} 处修改，另有 ${skippedCount} 处因与现有内容不符未应用（${skippedEdits.join('、')}）；如结果不符预期可点击重试。`;
+              console.warn('[continueAfterApproval] 部分编辑被跳过:', skipNotice);
+              onEvent({ type: 'warning', payload: { message: skipNotice } });
+            }
 
-          const now = new Date().toISOString();
-          // CDN 扫描范围 = 本轮变更实际声明的文件（finalFiles 是合并后的全量，不能作范围）
-          cdnTouchedPaths = changeList.changes.map((c) => c.file);
-          finalFiles = {};
-          for (const [path, file] of Object.entries(newFiles)) {
-            finalFiles[path] = {
-              path: file.path,
-              content: file.content,
-              language: file.language,
-              updatedAt: now,
-            };
+            const now = new Date().toISOString();
+            // CDN 扫描范围 = 本轮变更实际声明的文件（finalFiles 是合并后的全量，不能作范围）
+            cdnTouchedPaths = changeList.changes.map((c) => c.file);
+            finalFiles = {};
+            for (const [path, file] of Object.entries(newFiles)) {
+              finalFiles[path] = {
+                path: file.path,
+                content: file.content,
+                language: file.language,
+                updatedAt: now,
+              };
+            }
           }
         } catch (diffError) {
           const errorMsg = diffError instanceof Error ? diffError.message : 'diff 解析失败';
@@ -1617,24 +1711,34 @@ export async function continueAfterApproval(
           try {
             const parseResult = parseOutput(generatedOutput);
             if (parseResult.type === 'conversation') {
-              pendingSessions.delete(sessionId);
-              onEvent({ type: 'delta', payload: { text: parseResult.content || '', phase: 'generate' } });
-              onEvent({
-                type: 'done',
-                payload: {
-                  html: '',
-                  files: {},
-                  analysis: parseResult.content,
-                  stats: result.usage ? {
-                    inputTokens: result.usage.prompt_tokens,
-                    outputTokens: result.usage.completion_tokens,
-                  } : undefined,
-                },
-              });
-              return;
+              // RC4-BUG-001：重试轮的对话式输出是模型规避格式契约的"意图升级"
+              // （如"建议生成完整文件"），预算内转格式失败重试而非对话交付，
+              // 否则 run 被无产物 done 提前终局，用户产物静默丢失
+              if (handleConversationEscape(parseResult.content || generatedOutput)) {
+                console.info('[continueAfterApproval] diff 解析回落命中对话式输出，预算内转格式重试');
+                shouldRetry = true;
+                formatErrorHint = '上一轮输出对话文本而非约定的变更清单 JSON';
+              } else {
+                pendingSessions.delete(sessionId);
+                onEvent({ type: 'delta', payload: { text: parseResult.content || '', phase: 'generate' } });
+                onEvent({
+                  type: 'done',
+                  payload: {
+                    html: '',
+                    files: {},
+                    analysis: parseResult.content,
+                    stats: result.usage ? {
+                      inputTokens: result.usage.prompt_tokens,
+                      outputTokens: result.usage.completion_tokens,
+                    } : undefined,
+                  },
+                });
+                return;
+              }
+            } else {
+              multiFileOutput = { files: parseResult.files! };
+              parseSuccess = true;
             }
-            multiFileOutput = { files: parseResult.files! };
-            parseSuccess = true;
           } catch {
             const rescued = repairTruncatedMultiFileOutput(generatedOutput);
             if (!rescued) {
@@ -1668,6 +1772,47 @@ export async function continueAfterApproval(
               const parseResult = parseOutput(JSON.stringify(enhancedResult.data));
 
               if (parseResult.type === 'conversation') {
+                // RC4-BUG-001：重试轮的对话式输出是意图升级，预算内转格式重试
+                if (handleConversationEscape(parseResult.content || generatedOutput)) {
+                  conversationEscaped = true;
+                  shouldRetry = true;
+                  formatErrorHint = '上一轮输出对话文本而非约定的 JSON 结构';
+                } else {
+                  console.log('[continueAfterApproval] 检测到纯文本对话内容，跳过代码生成');
+                  pendingSessions.delete(sessionId);
+                  onEvent({
+                    type: 'done',
+                    payload: {
+                      html: '',
+                      files: {},
+                      analysis: sanitizeEngineerChatContent(parseResult.content || generatedOutput),
+                      stats: result.usage ? {
+                        inputTokens: result.usage.prompt_tokens,
+                        outputTokens: result.usage.completion_tokens,
+                      } : undefined,
+                    },
+                  });
+                  return;
+                }
+              } else {
+                multiFileOutput = { files: parseResult.files! };
+                parseSuccess = true;
+              }
+            }
+          }
+
+          // 标准 parseOutput 解析（如果容错解析未成功）
+          // RC4-BUG-001：conversationEscaped 表示增强解析已处置过对话规避，
+          // 此处跳过避免重复处置（重复透传对话文本 / 重复置同一重试标记）
+          if (!parseSuccess && !conversationEscaped) {
+            const parseResult = parseOutput(generatedOutput);
+
+            if (parseResult.type === 'conversation') {
+              // RC4-BUG-001：重试轮的对话式输出是意图升级，预算内转格式重试
+              if (handleConversationEscape(parseResult.content || generatedOutput)) {
+                shouldRetry = true;
+                formatErrorHint = '上一轮输出对话文本而非约定的 JSON 结构';
+              } else {
                 console.log('[continueAfterApproval] 检测到纯文本对话内容，跳过代码生成');
                 pendingSessions.delete(sessionId);
                 onEvent({
@@ -1675,6 +1820,8 @@ export async function continueAfterApproval(
                   payload: {
                     html: '',
                     files: {},
+                    // MAJOR-D1：analysis 作为 assistant 消息整段入库，回落值不得是
+                    // 工程阶段原始输出（裸 JSON），经交付安全化处理
                     analysis: sanitizeEngineerChatContent(parseResult.content || generatedOutput),
                     stats: result.usage ? {
                       inputTokens: result.usage.prompt_tokens,
@@ -1684,38 +1831,10 @@ export async function continueAfterApproval(
                 });
                 return;
               }
-
+            } else {
               multiFileOutput = { files: parseResult.files! };
               parseSuccess = true;
             }
-          }
-
-          // 标准 parseOutput 解析（如果容错解析未成功）
-          if (!parseSuccess) {
-            const parseResult = parseOutput(generatedOutput);
-
-            if (parseResult.type === 'conversation') {
-              console.log('[continueAfterApproval] 检测到纯文本对话内容，跳过代码生成');
-              pendingSessions.delete(sessionId);
-              onEvent({
-                type: 'done',
-                payload: {
-                  html: '',
-                  files: {},
-                  // MAJOR-D1：analysis 作为 assistant 消息整段入库，回落值不得是
-                  // 工程阶段原始输出（裸 JSON），经交付安全化处理
-                  analysis: sanitizeEngineerChatContent(parseResult.content || generatedOutput),
-                  stats: result.usage ? {
-                    inputTokens: result.usage.prompt_tokens,
-                    outputTokens: result.usage.completion_tokens,
-                  } : undefined,
-                },
-              });
-              return;
-            }
-
-            multiFileOutput = { files: parseResult.files! };
-            parseSuccess = true;
           }
         } catch (parseError) {
           const errorMsg = parseError instanceof Error ? parseError.message : '输出解析失败';
@@ -1752,6 +1871,8 @@ export async function continueAfterApproval(
 
               const mergeBase = session.originalFiles ?? currentFiles;
               const { newFiles, appliedCount, skippedCount, skippedEdits, errors } = applyChanges(mergeBase, toleratedList.changes);
+              // RC5-MINOR-002：同 diff 路径，交付摘要用实际应用口径
+              appliedEditCount = appliedCount;
               if (appliedCount > 0) {
                 if (errors.length > 0) {
                   console.warn('[continueAfterApproval] changes 格式容错：部分编辑未成功应用:', errors.join('; '));
@@ -1909,9 +2030,9 @@ export async function continueAfterApproval(
           mode: useDiffMode ? 'diff' : 'create',
           deliveredFilePaths: Object.keys(finalFiles),
           changedFilePaths: changeList?.changes.map((c) => c.file),
-          appliedEdits: changeList
-            ? changeList.changes.reduce((sum, c) => sum + c.edits.length, 0)
-            : undefined,
+          // RC5-MINOR-002：实际应用口径（applyChanges 计数），action:create 的
+          // 文件级变更同样计入；不再是 changeList 声明的 edits 数组长度
+          appliedEdits: appliedEditCount,
           changeSummary: changeList?.summary,
           retriesUsed: retryCount,
           strategySwitchRetries: MAX_PARSE_ATTEMPTS - 1,
@@ -2254,14 +2375,34 @@ export async function continueAfterApproval(
     // 清理会话
     pendingSessions.delete(sessionId);
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      // Phase 3：工程师暂停场景（pauseEngineerSession 已标记 engineerPaused）保留会话，
-      // 供用户反馈后继续生成（continueWithFeedback）；普通取消仍清理会话
-      const session = pendingSessions.get(sessionId);
-      if (!(session && session.engineerPaused)) {
+    // 用户取消的两条错误路径：streamChat 内部的 AbortError（读流中断），
+    // 以及 withRetry 对中止 fetch 分类重试后 sleep 抛出的 Error('请求已取消')
+    // （DB 实证 run f82f4a9d 的 error 字段即该消息，name 是 'Error'）。
+    // 该消息唯一来源是取消信号（sleep 仅在 signal.aborted 时抛出），可安全
+    // 等同用户取消语义。
+    if (
+      error instanceof Error &&
+      (error.name === 'AbortError' || error.message === '请求已取消')
+    ) {
+      // RC4-BUG-002：用户发起的中止不发终局 error 事件（会被任务录制器落库为
+      // failed，重开项目回放失败卡）。终态归属 /cancel 的 cancelRunTask（同步
+      // 落 cancelled）；暂停场景任务必须保持 running 供 /continue 续跑，仅发
+      // 非终局的 engineer_pause 事件把任务行 stage 标注为等待点（恢复链路按
+      // engineer_paused 给出"生成已暂停"中性文案）。
+      const pausedSession = pendingSessions.get(sessionId);
+      if (pausedSession && pausedSession.engineerPaused) {
+        onEvent({
+          type: 'engineer_pause',
+          payload: {
+            sessionId,
+            currentFiles: pausedSession.engineerPaused.files,
+            pauseReason: pausedSession.engineerPaused.reason,
+            message: '生成已暂停，等待你的反馈',
+          },
+        });
+      } else {
         pendingSessions.delete(sessionId);
       }
-      onEvent({ type: 'error', payload: { message: '请求已取消' } });
     } else {
       const message = error instanceof Error ? error.message : '未知错误';
       onEvent({ type: 'error', payload: { message } });

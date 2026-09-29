@@ -15,10 +15,11 @@ import {
   createProjectApi,
   updateProjectApi,
   deleteProjectApi,
+  fetchProject,
   initializeSync,
   mergeProjects,
 } from '../services/storage/apiSync';
-import { persistProjectDetail } from '../services/storage/localPersistence';
+import { persistProjectDetail, persistProjectDetailChecked } from '../services/storage/localPersistence';
 
 /** 生成 UUID v4（兼容非安全上下文，如局域网 HTTP） */
 function generateId(): string {
@@ -94,6 +95,12 @@ interface ProjectActions {
   updateProjectName: (name: string) => void;
   /** 更新当前项目状态 */
   updateProjectStatus: (status: Project['status']) => void;
+  /**
+   * 显式落盘当前项目：本地写回（带校验与失败告警）+ 服务端补投递（PUT 失败自动补建）。
+   * 生成 done 应用链路收尾调用：常规路径上 addMessage/updateFiles 已各自持久化，
+   * 这里兜住"批量写回部分失败"的静默丢失，把本地失守显式暴露并保证服务端有副本。
+   */
+  flushProjectDetail: () => void;
   /** 更新当前项目入口文件内容（单文件模式，向后兼容） */
   updateEntryFile: (html: string) => void;
   /** 更新当前项目的多文件（多文件模式） */
@@ -186,12 +193,33 @@ export const useProjectStore = create<ProjectStore>()(
         if (currentProject?.id === id) return;
         const project = loadProject(id);
         if (project) {
+          // 中断残留的生成任务与界面状态（与 newProject 同款）：生成归属旧项目，
+          // 切换后旧流不得继续写入新 currentProject；仅中断本地消费，服务端任务
+          // 不受影响，回到原项目时由恢复链路按 active 查询重建生成中 UI
+          cancelActiveRun();
+          useChatStore.setState({ isGenerating: false, error: null, currentInput: '' });
+          useChatStore.getState().resetStreamBuffer();
           loadVersionsFromStorage(id);
           set({ currentId: id, currentProject: project });
-        } else {
-          // 详情已丢失的孤儿摘要：清理出列表，避免点击无响应
-          deleteProject(id);
+          return;
         }
+        // 本地明细缺失但摘要存在（存储写入失败/迁移隔离/跨端合并等）：服务端往往
+        // 仍有完整数据。先尝试拉取详情回填，拉取失败才按孤儿清理，
+        // 严禁把服务端完好的项目误删（MAJOR-006）。
+        void (async () => {
+          const remote = await fetchProject(id);
+          if (!remote) {
+            // 服务端也没有：确属孤儿摘要，清理出列表，避免点击无响应
+            deleteProject(id);
+            return;
+          }
+          persistProjectDetail(remote);
+          const state = get();
+          // 用户在等待期间已转向其他项目：只回填数据，不劫持当前视图
+          if (state.currentProject !== null && state.currentId !== id) return;
+          state.loadVersionsFromStorage(id);
+          set({ currentId: id, currentProject: remote });
+        })();
       },
 
       updateProjectName: (name) => {
@@ -227,6 +255,21 @@ export const useProjectStore = create<ProjectStore>()(
               s.id === updated.id ? { ...s, status, updatedAt: updated.updatedAt } : s
             ),
           };
+        });
+      },
+
+      flushProjectDetail: () => {
+        const project = get().currentProject;
+        if (!project) return;
+        const localOk = persistProjectDetailChecked(project);
+        if (!localOk) {
+          // 本地失守（quota 超限等）：服务端副本成为恢复来源（配合打开项目的服务端回填）
+          console.warn('[projectStore] 项目本地落盘失败，服务端副本将作为恢复来源', project.id);
+        }
+        void updateProjectApi(project).then((ok) => {
+          if (!ok) {
+            console.warn('[projectStore] 项目服务端同步失败', project.id);
+          }
         });
       },
 

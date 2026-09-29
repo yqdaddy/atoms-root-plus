@@ -39,6 +39,8 @@ import { ImagePreview } from '../components/ImagePreview';
 import { CommandDropdown } from '../commands/CommandDropdown';
 import { parseCommandInput, executeCommand, type CommandContext } from '../commands/index';
 import { useKeybinding } from '../hooks/useKeybinding';
+import { useRunRecovery } from '../hooks/useRunRecovery';
+import { RunRecoveryBanner } from '../components/RunRecoveryBanner';
 import { MessageGroupContainer, groupMessages } from '../components/MessageGroup';
 import { looksStuck } from '../lib/progressEstimator';
 import { BuildGroup } from '../components/BuildGroup';
@@ -300,12 +302,14 @@ const INTENT_CONFIG: Record<string, { label: string; color: string; bgColor: str
 };
 
 /**
- * 生成失败后回退当前项目状态
+ * 生成失败/取消后标记项目状态为 error（列表徽章显示"生成失败"）。
+ * 终态口径：项目状态反映最近一次运行的真实结果，不按入口内容校验回退：
+ * 内容校验回退会让"旧应用仍在/空脚手架"的失败项目显示为已完成（RC4-MINOR-001）。
  */
-function revertProjectStatusAfterFailure(): void {
+function markProjectRunFailed(): void {
   const { currentProject, updateProjectStatus } = useProjectStore.getState();
-  const entryHtml = currentProject?.files[ENTRY_FILE_PATH]?.content ?? '';
-  updateProjectStatus(validateGeneratedHtml(entryHtml).ok ? 'ready' : 'draft');
+  if (!currentProject) return;
+  updateProjectStatus('error');
 }
 
 /**
@@ -770,8 +774,9 @@ export default function HomePage() {
   };
 
   // 处理生成事件
+  // meta.recovered：事件来自后台任务恢复回放（区别于实时 SSE），用于区分提示文案
   const handleStreamEvent = useCallback(
-    (event: StreamEvent) => {
+    (event: StreamEvent, meta?: { recovered?: boolean }) => {
       switch (event.type) {
         case 'stage':
           updateStage(event.payload.stage, event.payload.attempt, event.payload.message, event.payload.intent);
@@ -821,7 +826,7 @@ export default function HomePage() {
           // （analyze/diagnose 意图、分析师澄清、diff 模式空变更均走此分支）
           if (hasAnalysis && !hasFiles && !payload.html) {
             // 对话模式不改动项目文件，恢复生成前状态（runGeneration 已置为 generating）
-            revertProjectStatusAfterFailure();
+            markProjectRunFailed();
 
             // 将分析/诊断结果作为 assistant 消息保存（带上 runId 和 intentType）
             // 注意：使用 streamBuffer.runId 而不是 currentRunId state，确保获取最新值
@@ -928,7 +933,7 @@ export default function HomePage() {
                   runId: useChatStore.getState().streamBuffer.runId ?? undefined,
                   intentType: streamBuffer.intent?.type,
                 });
-                toast.success('生成完成');
+                toast.success(meta?.recovered ? '生成已完成' : '生成完成');
               } else {
                 const warningMsg = `生成完成，但代码存在 ${validation.issues.length} 个问题，可能影响功能`;
                 addMessage({
@@ -975,7 +980,7 @@ export default function HomePage() {
                 runId: useChatStore.getState().streamBuffer.runId ?? undefined,
                 intentType: streamBuffer.intent?.type,
               });
-              toast.success('生成完成');
+              toast.success(meta?.recovered ? '生成已完成' : '生成完成');
             } else {
               const warningMsg = `生成完成，但代码存在 ${validation.issues.length} 个问题，可能影响功能`;
               addMessage({
@@ -1000,7 +1005,7 @@ export default function HomePage() {
             const errorMsg = '生成的代码为空，请重试';
             console.error('[HomePage] HTML 为空');
             setError(errorMsg);
-            revertProjectStatusAfterFailure();
+            markProjectRunFailed();
             toast.error(errorMsg);
             setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
             addMessage({ role: 'assistant', content: errorMsg, runId: useChatStore.getState().streamBuffer.runId ?? undefined, intentType: streamBuffer.intent?.type });
@@ -1014,7 +1019,7 @@ export default function HomePage() {
         }
         case 'error':
           setError(event.payload.message);
-          revertProjectStatusAfterFailure();
+          markProjectRunFailed();
           toast.error(event.payload.message, 6000);
           // 更新 UI 状态为错误
           setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
@@ -1034,12 +1039,12 @@ export default function HomePage() {
             serverSessionIdRef.current = sessionId;
             // 保持生成状态
             setIsGenerating(true);
-            // 异步继续生成
-            approveAndContinue(sessionId, handleStreamEvent).catch((error) => {
+            // 异步继续生成（经 liveEventHandlerRef：续跑事件同样上报服务端 runId）
+            approveAndContinue(sessionId, liveEventHandlerRef.current).catch((error) => {
               console.error('[HomePage] 自动继续生成失败:', error);
               const errorMsg = '生成过程发生异常，请重试';
               setError(errorMsg);
-              revertProjectStatusAfterFailure();
+              markProjectRunFailed();
               toast.error(errorMsg);
               setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
               addMessage({ role: 'assistant', content: errorMsg, runId: useChatStore.getState().streamBuffer.runId ?? undefined });
@@ -1094,10 +1099,17 @@ export default function HomePage() {
             updateFiles(typedFiles, ENTRY_FILE_PATH);
           }
 
-          // 添加提示消息
+          // 添加提示消息：服务端暂停语义演进中，message 可能自带"生成已暂停"字样
+          // 或为空，拼接前去重并兜底，避免"生成已暂停：生成已暂停，等待你的反馈"式重复
+          const pauseDetail = typeof message === 'string' && message.trim().length > 0
+            ? message.trim()
+            : '等待你的反馈后可继续生成';
+          const pauseHeadline = pauseDetail.startsWith('生成已暂停')
+            ? pauseDetail
+            : `生成已暂停：${pauseDetail}`;
           addMessage({
             role: 'assistant',
-            content: `生成已暂停：${message}\n\n已生成 ${Object.keys(currentFiles).length} 个文件，可以查看并给出修改意见。`,
+            content: `${pauseHeadline}\n\n已生成 ${Object.keys(currentFiles).length} 个文件，可以查看并给出修改意见。`,
             runId: useChatStore.getState().streamBuffer.runId ?? undefined,
             intentType: streamBuffer.intent?.type,
           });
@@ -1108,6 +1120,59 @@ export default function HomePage() {
     [updateStage, appendDelta, updateEntryFile, updateFiles, updateProjectStatus, setError, addMessage]
   );
 
+  // 实时事件包装的 ref：handleStreamEvent 内部触发的续跑（如自动批准）需要在
+  // 自身定义之前引用包装器，因此经由 ref 取最新实例（声明顺序解耦）
+  const liveEventHandlerRef = useRef<(event: StreamEvent) => void>(handleStreamEvent);
+
+  // 后台生成任务恢复（PRD：docs/prd-background-runs.md）：
+  // 挂载时查询当前项目活跃任务，存在则恢复生成中 UI 并回放事件；
+  // done/error 经 handleStreamEvent 走现有应用链路，clarification/pause 恢复对应面板
+  const recovery = useRunRecovery({
+    projectId,
+    enabled: isLoggedIn,
+    onEvent: handleStreamEvent,
+    onGeneratingChange: setIsGenerating,
+  });
+
+  // 实时生成事件包装：先上报事件携带的服务端 runId（供停止时按 runId 取消后台任务），
+  // 再进入统一事件链路。恢复回放不经此包装（runId 在恢复会话中已知）。
+  const liveEventHandler = useCallback(
+    (event: StreamEvent) => {
+      recovery.reportRunId(event.payload.runId);
+      // 实时完成收尾：把服务端 runId 同步写入本机去重标记并向服务端领取，
+      // 与恢复回放共用同一去重键，防止“实时已应用、离开再回来又回放”的消息双写
+      if (event.type === 'done') {
+        recovery.notifyRunFinished();
+      }
+      handleStreamEvent(event);
+      if (event.type === 'done') {
+        // 完成即显式落盘（RC3-BUG-001）：addMessage/updateFiles 的常规持久化
+        // 可能批量部分失败且被静默吞掉，这里强制本地写回校验 + 服务端补投递
+        useProjectStore.getState().flushProjectDetail();
+      }
+    },
+    [recovery.reportRunId, recovery.notifyRunFinished, handleStreamEvent],
+  );
+
+  useEffect(() => {
+    liveEventHandlerRef.current = liveEventHandler;
+  }, [liveEventHandler]);
+
+  // 卸载收尾：本地生成中的流与状态不跨挂载存活。离开工作台（如去项目列表切换项目）
+  // 时仅中断本地 SSE 消费，不取消服务端任务；重挂载后由恢复链路按服务端 active
+  // 查询重建生成中 UI。不收尾会让 chatStore.isGenerating 残留为 true，
+  // 恢复入口被短路，页面在任务完成前零指示。
+  useEffect(() => {
+    return () => {
+      if (useChatStore.getState().isGenerating) {
+        cancelActiveRun();
+        // 先 finishGeneration（按当前 buffer.runId 清理 startTime 持久化）再重置 buffer
+        useChatStore.getState().finishGeneration();
+        useChatStore.getState().resetStreamBuffer();
+      }
+    };
+  }, []);
+
   /**
    * 执行一次三阶段流水线生成。
    * @param userMessage 展示在对话区的用户消息（原始需求）
@@ -1116,6 +1181,10 @@ export default function HomePage() {
    */
   const runGeneration = useCallback(async (userMessage: string, llmPrompt: string, opts?: { intentOverride?: 'create' | 'modify' | 'analyze' | 'diagnose'; images?: string[] | undefined }) => {
     if (!userMessage.trim() || isGenerating) return;
+
+    // 新发起生成前暂停可能存在的恢复轮询（如澄清面板挂起时直接发新消息），
+    // 避免恢复通道与新实时通道重复消费事件
+    recovery.suspend();
 
     setIsGenerating(true);
 
@@ -1206,11 +1275,11 @@ export default function HomePage() {
         projectId: project.id,
       };
 
-      await api.generateStream(llmPrompt, handleStreamEvent, generateOpts);
+      await api.generateStream(llmPrompt, liveEventHandler, generateOpts);
     } catch (error) {
       const errorMsg = '生成过程发生异常，请重试';
       setError(errorMsg);
-      revertProjectStatusAfterFailure();
+      markProjectRunFailed();
       setIsGenerating(false);
       toast.error(errorMsg);
       // 更新 UI 状态为错误
@@ -1226,12 +1295,24 @@ export default function HomePage() {
     apiKey,
     getEffectiveBaseURL,
     startGeneration,
-    handleStreamEvent,
+    liveEventHandler,
+    recovery.suspend,
     generatedHtml,
     selectedFramework,
     setError,
     addMessage,
   ]);
+
+  // 恢复失败的一键重试：以最近一条用户需求重新发起生成（AC-007）
+  const handleRecoveryRetry = useCallback(() => {
+    recovery.dismissFailure();
+    const lastUser = [...(currentProject?.chat ?? [])].reverse().find((m) => m.role === 'user');
+    if (!lastUser) {
+      toast.error('未找到原始需求，无法重试');
+      return;
+    }
+    void runGeneration(lastUser.content, lastUser.content);
+  }, [recovery.dismissFailure, currentProject?.chat, runGeneration]);
 
   // 清空图片
   const handleClearImages = useCallback(() => {
@@ -1367,8 +1448,9 @@ export default function HomePage() {
    * 意图纠正：取消当前生成，使用 intentOverride 重新调用 API
    */
   const handleIntentCorrect = useCallback((intentOverride: 'create' | 'modify' | 'analyze' | 'diagnose') => {
-    // 取消当前生成
+    // 取消当前生成（含后台任务：按 runId 服务端取消，显式取消是唯一终止途径）
     cancelActiveRun();
+    void recovery.stop({ cancelOnServer: true });
     finishGeneration();
     setIsGenerating(false);
 
@@ -1384,7 +1466,7 @@ export default function HomePage() {
 
     // 重新生成
     void runGeneration(lastUserMessage, lastUserMessage, { intentOverride });
-  }, [currentProject?.chat, finishGeneration, setIntent, runGeneration]);
+  }, [currentProject?.chat, finishGeneration, setIntent, runGeneration, recovery.stop]);
 
   /**
    * Phase 2：处理澄清回答
@@ -1396,6 +1478,9 @@ export default function HomePage() {
       toast.error('会话已过期，请重新开始');
       return;
     }
+
+    // 用户接管生成：暂停恢复轮询，避免与 /approve 实时通道重复消费事件（如双份 done）
+    recovery.suspend();
 
     setIsGenerating(true);
 
@@ -1414,12 +1499,12 @@ export default function HomePage() {
     // 清除澄清状态
     useChatStore.getState().setAwaitingClarification(false);
 
-    // 继续生成（复用 approveAndContinue 流程）
-    approveAndContinue(sessionId, handleStreamEvent, supplementaryInfo).catch((error) => {
+    // 继续生成（复用 approveAndContinue 流程；经 liveEventHandler 上报续跑 runId）
+    approveAndContinue(sessionId, liveEventHandler, supplementaryInfo).catch((error) => {
       console.error('[HomePage] 澄清后继续生成失败:', error);
       const errorMsg = '生成过程发生异常，请重试';
       setError(errorMsg);
-      revertProjectStatusAfterFailure();
+      markProjectRunFailed();
       toast.error(errorMsg);
       setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
       addMessage({ role: 'assistant', content: errorMsg, runId: useChatStore.getState().streamBuffer.runId ?? undefined });
@@ -1427,7 +1512,7 @@ export default function HomePage() {
       setIsGenerating(false);
       setPendingMessageId(null);
     });
-  }, [handleStreamEvent, setError, addMessage]);
+  }, [handleStreamEvent, setError, addMessage, recovery.suspend, liveEventHandler]);
 
   /**
    * Phase 2：跳过澄清，直接生成
@@ -1439,17 +1524,20 @@ export default function HomePage() {
       return;
     }
 
+    // 用户接管生成：暂停恢复轮询，避免与 /approve 实时通道重复消费事件
+    recovery.suspend();
+
     setIsGenerating(true);
 
     // 清除澄清状态
     useChatStore.getState().setAwaitingClarification(false);
 
-    // 继续生成
-    approveAndContinue(sessionId, handleStreamEvent).catch((error) => {
+    // 继续生成（经 liveEventHandler 上报续跑 runId）
+    approveAndContinue(sessionId, liveEventHandler).catch((error) => {
       console.error('[HomePage] 跳过澄清后继续生成失败:', error);
       const errorMsg = '生成过程发生异常，请重试';
       setError(errorMsg);
-      revertProjectStatusAfterFailure();
+      markProjectRunFailed();
       toast.error(errorMsg);
       setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
       addMessage({ role: 'assistant', content: errorMsg, runId: useChatStore.getState().streamBuffer.runId ?? undefined });
@@ -1457,7 +1545,7 @@ export default function HomePage() {
       setIsGenerating(false);
       setPendingMessageId(null);
     });
-  }, [handleStreamEvent, setError, addMessage]);
+  }, [handleStreamEvent, setError, addMessage, recovery.suspend, liveEventHandler]);
 
   /**
    * Phase 3：工程师暂停（用户主动中断）
@@ -1525,19 +1613,22 @@ export default function HomePage() {
       return;
     }
 
+    // 用户接管生成：暂停恢复轮询，避免与 /continue 实时通道重复消费事件
+    recovery.suspend();
+
     setIsGenerating(true);
     setEngineerPaused(null);
 
     // 添加用户反馈消息
     addMessage({ role: 'user', content: userFeedback, intentType: 'modify' });
 
-    // 优先使用 /continue 端点（会话保留时）
+    // 优先使用 /continue 端点（会话保留时；经 liveEventHandler 上报续跑 runId）
     const serverSessionId = serverSessionIdRef.current;
     if (serverSessionId && serverSessionId === engineerPaused.sessionId) {
       continueWithFeedback(
         serverSessionId,
         userFeedback,
-        handleStreamEvent
+        liveEventHandler
       ).catch((error) => {
         console.error('[HomePage] 继续生成失败:', error);
         const errorMsg = '继续生成失败，将以修改模式重试';
@@ -1550,7 +1641,7 @@ export default function HomePage() {
       // 会话过期：走正常修改流程
       void runGeneration(userFeedback, userFeedback, { intentOverride: 'modify' });
     }
-  }, [engineerPaused, handleStreamEvent, addMessage, runGeneration]);
+  }, [engineerPaused, handleStreamEvent, addMessage, runGeneration, recovery.suspend, liveEventHandler]);
 
   /**
    * Phase 3：放弃继续，结束本次生成
@@ -1569,15 +1660,25 @@ export default function HomePage() {
   };
 
   // 快捷键处理函数
+  // 统一停止入口：本地中断实时 SSE + 按 runId 取消后台任务（显式取消是唯一终止途径）。
+  // 覆盖两类会话：本页发起的实时生成（runId 来自首个事件上报）、恢复接续的后台任务。
+  const handleStopGeneration = useCallback((toastMessage: string = '已停止生成') => {
+    cancelActiveRun();
+    void recovery.stop({ cancelOnServer: true });
+    finishGeneration();
+    setIsGenerating(false);
+    // 用户显式终止：服务端任务随取消落 failed，项目状态如实标记，
+    // 不再停留在 generating，也不按内容校验回退为已完成（RC4-MINOR-001）
+    markProjectRunFailed();
+    setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
+    toast.info(toastMessage);
+  }, [recovery.stop, finishGeneration]);
+
   const handleCancel = useCallback(() => {
     if (isGenerating) {
-      cancelActiveRun();
-      finishGeneration();
-      setIsGenerating(false);
-      setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
-      toast.info('已停止生成');
+      handleStopGeneration();
     }
-  }, [isGenerating, finishGeneration]);
+  }, [isGenerating, handleStopGeneration]);
 
   const handleClearChat = useCallback(() => {
     if (!currentProject) {
@@ -1783,6 +1884,9 @@ export default function HomePage() {
         return '准备中';
     }
   }, [streamBuffer.stage, streamBuffer.activeFilePath, streamBuffer.files]);
+
+  // 停止/暂停按钮形态：恢复接续的后台任务无暂停语义（无本地会话可打断），仅显示停止
+  const isPauseButton = !recovery.isRecoveryRunActive && streamBuffer.stage === 'generating';
 
   return (
     <div className="h-screen flex flex-col bg-[var(--color-bg-base)]">
@@ -1993,12 +2097,8 @@ export default function HomePage() {
                     </p>
                     <button
                       onClick={() => {
-                        // 取消当前生成
-                        cancelActiveRun();
-                        finishGeneration();
-                        setIsGenerating(false);
-                        setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
-                        toast.info('已停止生成，请重新描述需求');
+                        // 取消当前生成（含按 runId 取消后台任务）
+                        handleStopGeneration('已停止生成，请重新描述需求');
                         // 输入框获得焦点
                         const textarea = document.querySelector('textarea');
                         if (textarea) {
@@ -2013,6 +2113,13 @@ export default function HomePage() {
                 </div>
               </div>
             )}
+
+            {/* 后台任务恢复提示条：恢复中提示 / 失败重试入口（PRD：生成任务与页面生命周期解耦） */}
+            <RunRecoveryBanner
+              state={recovery.state}
+              onRetry={handleRecoveryRetry}
+              onDismiss={recovery.dismissFailure}
+            />
 
             {/* 生成状态面板 */}
             {isGenerating && (
@@ -2228,27 +2335,22 @@ export default function HomePage() {
             {isGenerating && !engineerPaused && (
               <button
                 onClick={() => {
-                  // Phase 3：工程师阶段显示"暂停"按钮
-                  if (streamBuffer.stage === 'generating') {
+                  // Phase 3：工程师阶段显示"暂停"按钮（恢复接续的后台任务仅停止）
+                  if (isPauseButton) {
                     handleEngineerPause();
                   } else {
-                    // 其他阶段显示"停止"按钮
-                    cancelActiveRun();
-                    finishGeneration();
-                    setIsGenerating(false);
-                    setMessageUIState(prev => prev ? { ...prev, status: 'error' } : null);
-                    toast.info('已停止生成');
+                    handleStopGeneration();
                   }
                 }}
                 className={`w-full mb-3 flex items-center justify-center gap-2 px-4 py-2 rounded-lg transition-colors ${
-                  streamBuffer.stage === 'generating'
+                  isPauseButton
                     ? 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20'
                     : 'bg-red-500/10 text-red-500 hover:bg-red-500/20'
                 }`}
               >
-                <Icon icon={streamBuffer.stage === 'generating' ? 'lucide:pause' : 'lucide:square'} width={14} height={14} />
+                <Icon icon={isPauseButton ? 'lucide:pause' : 'lucide:square'} width={14} height={14} />
                 <span className="text-[13px] font-medium">
-                  {streamBuffer.stage === 'generating' ? '暂停生成' : '停止生成'}
+                  {isPauseButton ? '暂停生成' : '停止生成'}
                 </span>
               </button>
             )}

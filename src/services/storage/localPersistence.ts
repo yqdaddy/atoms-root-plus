@@ -51,6 +51,15 @@ function frameworkFromSummariesIndex(id: string): Project['framework'] {
  * 写回前与既有持久化值逐字段比对，缺失的字段用旧值补齐，防止把字段丢失固化到 localStorage。
  */
 export function persistProjectDetail(project: Project): void {
+  persistProjectDetailChecked(project);
+}
+
+/**
+ * 同 persistProjectDetail，但返回写回是否成功（失败时输出告警）。
+ * 供"完成即落盘"的显式链路使用：静默丢失会让本地与服务端同时缺数据且无从排查，
+ * 调用方需要知道结果以便告警并把服务端副本作为恢复来源。
+ */
+export function persistProjectDetailChecked(project: Project): boolean {
   try {
     const key = storageKey('projects', project.id);
     let data = project;
@@ -85,7 +94,10 @@ export function persistProjectDetail(project: Project): void {
       data,
     };
     localStorage.setItem(key, JSON.stringify(envelope));
-  } catch {
-    // 存储失败静默降级
+    return true;
+  } catch (error) {
+    // 存储失败（quota 超限等）：内存态仍可用，但必须让调用方知道本地已失守
+    console.warn('[localPersistence] 项目详情写回本地失败', project.id, error);
+    return false;
   }
 }

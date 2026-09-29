@@ -6,12 +6,13 @@
  * 安全：所有端点强制登录（requireAuth），防止匿名滥用 LLM API Key。
  */
 import { Hono } from 'hono';
-import { streamSSE } from 'hono/streaming';
+import { streamSSE, type SSEStreamingApi } from 'hono/streaming';
 import { requireAuth } from '../auth.js';
 import {
   generateWithStages,
   continueAfterApproval,
   cancelGeneration,
+  cancelRun,
   streamChatCompletion,
   getPendingSession,
   pauseEngineerSession,
@@ -19,6 +20,19 @@ import {
   type LLMEvent,
 } from '../llm.js';
 import type { PendingSession } from '../llm.js';
+import {
+  createRunRow,
+  createRunRecorder,
+  getRunRow,
+  getRunReplayView,
+  getActiveRunView,
+  getOrCreateRecorder,
+  getRunRecorder,
+  ackRun,
+  cancelRunTask,
+  RunAccessError,
+  type RunRecorder,
+} from '../runs.js';
 import {
   OPTIMIZER_SYSTEM_PROMPT,
   renderOptimizerUserPrompt,
@@ -34,24 +48,67 @@ export const llmRouter = new Hono<AppEnv>();
 llmRouter.use('*', requireAuth);
 
 /**
+ * SSE 事件泵（生成与连接解耦后的观察者）：
+ * 轮询事件队列推送 SSE；终止事件（done/error 等）推送后关闭观察。
+ * 写失败（客户端断连）向调用方抛出，调用方标记 closed 后退出循环——
+ * 生成链路是服务端自驱任务，断连只影响观察，不影响执行。
+ * isRunTerminal：任务终态探测（RC4-BUG-002）。取消路径不发终局事件
+ * （error 事件会把任务行污染为 failed），管线静默返回后泵凭此退出，
+ * 不依赖客户端断连兜底。
+ */
+async function pumpEventsToStream(
+  stream: SSEStreamingApi,
+  eventQueue: LLMEvent[],
+  state: { closed: boolean },
+  terminalTypes: readonly string[],
+  isRunTerminal?: () => boolean,
+): Promise<void> {
+  while (!state.closed) {
+    const event = eventQueue.shift();
+    if (event) {
+      await stream.writeSSE({
+        event: event.type,
+        data: JSON.stringify(event.payload),
+      });
+      if (terminalTypes.includes(event.type)) {
+        state.closed = true;
+        break;
+      }
+    } else {
+      if (isRunTerminal?.()) {
+        state.closed = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+}
+
+/**
  * POST /api/llm/generate
- * 生成应用代码（三阶段流式）
+ * 生成应用代码（三阶段流式，服务端任务驱动）
  *
  * Body: {
  *   prompt: string,
+ *   requestId?: string,           // 兼容旧客户端：取消同 ID 的进行中请求
  *   options?: {
  *     currentHtml?: string,         // 向后兼容：单文件模式
  *     currentFiles?: Record<string, { path: string; content: string; language: string }>, // 多文件模式
- *     projectId?: string            // 项目知识库：携带时把该登录用户在此项目下的资料注入 prompt 尾部
+ *     projectId?: string            // 项目知识库：携带时把该登录用户在此项目下的资料注入 prompt 尾部；
+ *                                   // 同时作为任务归属键（同项目同时只允许一个 running 任务，
+ *                                   // 新任务启动时旧 running 任务被取消）
  *   }
  * }
  *
+ * 服务端任务：本端点创建 generations 任务行并服务端自驱执行，客户端断连只影响
+ * SSE 观察，不影响生成；进度经 GET /api/llm/runs/* 恢复。
+ *
  * SSE 事件流：
- * - stage: { phase: 'analysis' | 'generate' | 'review' }
+ * - stage: { phase: 'analysis' | 'generate' | 'review', runId, ... }（首个事件携带服务端任务 runId）
  * - delta: { text: string, phase?: string }
- * - approval_required: { sessionId: string, analysis: string, features: object }
- * - done: { html: string, files?: Record<string, FileNode> }
- * - error: { message: string }
+ * - approval_required: { sessionId, analysis, features, runId }
+ * - done: { html, files?, runId, ... }
+ * - error: { message, runId }
  */
 llmRouter.post('/generate', async (c) => {
   // 解析请求体
@@ -91,7 +148,11 @@ llmRouter.post('/generate', async (c) => {
     typeof body.options?.projectId === 'string' && body.options.projectId
       ? body.options.projectId
       : undefined;
+  // requireAuth 已强制登录，此处仅做类型收窄（任务归属需要非空 userId）
   const sessionUser = c.get('user');
+  if (!sessionUser) {
+    return c.json({ error: '未登录' }, 401);
+  }
   const resourcesBlock =
     projectId && sessionUser
       ? buildProjectResourcesBlock(listProjectResources(projectId, sessionUser.id))
@@ -113,23 +174,48 @@ llmRouter.post('/generate', async (c) => {
   const { framework: userFramework, isExplicitlySet: isFrameworkExplicitlySet } = parseFramework(body.options?.framework);
   const requestId = body.requestId;
 
-  // 如果有 requestId，检查是否有进行中的请求并取消
+  // 兼容旧客户端：携带 requestId 时取消同 ID 的进行中请求
   if (typeof requestId === 'string') {
     cancelGeneration(requestId);
   }
 
-  // 返回 SSE 流
+  // 项目级并发约束：同一项目同时只允许一个 running 任务。新任务启动时取消
+  // 旧任务（中止其执行链路并把任务行标记为 cancelled），与前端"新提交隐式
+  // 取消旧任务"的既有语义一致，避免旧任务结果覆盖新任务。
+  if (projectId) {
+    const previous = getActiveRunView(projectId, sessionUser.id);
+    if (previous && previous.status === 'running') {
+      cancelRun(previous.runId);
+      cancelRunTask(previous.runId);
+    }
+  }
+
+  // 服务端任务：任务行先于生成创建（/cancel 在首个事件产生前即可定位任务）
+  const runId = crypto.randomUUID();
+  createRunRow({ runId, projectId: projectId ?? null, userId: sessionUser.id });
+  const recorder = createRunRecorder({ runId, userId: sessionUser.id, projectId: projectId ?? null });
+
+  // 返回 SSE 流（观察者）。生成不接收客户端连接信号（c.req.raw.signal 不再
+  // 直通生成链路）：断连只影响观察，任务在服务端继续执行，结果落任务表，
+  // 前端经 /api/llm/runs/* 恢复进度与结果。
   return streamSSE(c, async (stream) => {
     const eventQueue: LLMEvent[] = [];
-    let closed = false;
+    const pumpState = { closed: false };
 
-    // 事件处理函数
+    // 事件双写：任务记录（内存缓冲 + 节流落库，done/error 自动终态落库）+
+    // SSE 队列（在线时实时推送给观察者）
     const onEvent = (event: LLMEvent) => {
-      if (closed) return;
-      eventQueue.push(event);
+      // runId 注入（delta 高频事件除外）：前端从首个事件即可拿到服务端任务标识
+      if (event.type !== 'delta' && event.payload.runId === undefined) {
+        event.payload.runId = runId;
+      }
+      recorder.record(event);
+      if (!pumpState.closed) {
+        eventQueue.push(event);
+      }
     };
 
-    // 启动生成（异步执行）
+    // 服务端自驱生成
     const generatePromise = generateWithStages({
       prompt: enrichedPrompt,
       currentHtml: typeof currentHtml === 'string' ? currentHtml : undefined,
@@ -142,44 +228,28 @@ llmRouter.post('/generate', async (c) => {
       // 否则使用默认的 framework 参数，让意图识别决定
       explicitFramework: isFrameworkExplicitlySet ? userFramework : undefined,
       framework: userFramework,
+      runId,
       onEvent,
-      abortSignal: c.req.raw.signal, // 客户端断连时触发 abort
     });
+    // 生成链路内部已完整兜底（不 reject），此处防御未预期异常导致 unhandled rejection
+    void generatePromise.catch(() => {});
 
-    // 轮询事件队列并发送
-    const sendEvents = async () => {
-      while (!closed) {
-        if (eventQueue.length > 0) {
-          const event = eventQueue.shift()!;
-
-          await stream.writeSSE({
-            event: event.type,
-            data: JSON.stringify(event.payload),
-          });
-
-          // done、error、approval_required 或 clarification_required 后关闭流
-          if ((event.type as string) === 'done' || (event.type as string) === 'error' || (event.type as string) === 'approval_required' || (event.type as string) === 'clarification_required') {
-            closed = true;
-            break;
-          }
-        } else {
-          // 等待一小段时间再检查
-          await new Promise((resolve) => setTimeout(resolve, 10));
-        }
-      }
-    };
-
-    // 并行执行生成和发送
     try {
-      await Promise.all([generatePromise, sendEvents()]);
-    } catch (error) {
-      if (!closed) {
-        const message = error instanceof Error ? error.message : '未知错误';
-        await stream.writeSSE({
-          event: 'error',
-          data: JSON.stringify({ error: message }),
-        });
-      }
+      // done/error/approval_required/clarification_required 后关闭观察流；
+      // 任务行进入终态（如取消）时凭录制器状态退出，不依赖终局事件
+      await pumpEventsToStream(
+        stream,
+        eventQueue,
+        pumpState,
+        ['done', 'error', 'approval_required', 'clarification_required'],
+        () => {
+          const recorder = getRunRecorder(runId);
+          return !recorder || recorder.snapshot().status !== 'running';
+        },
+      );
+    } catch {
+      // 客户端断连等写失败：仅停止观察，服务端生成继续
+      pumpState.closed = true;
     }
   });
 });
@@ -202,71 +272,110 @@ llmRouter.post('/approve', async (c) => {
     return c.json({ error: 'sessionId 为必填字段' }, 400);
   }
 
-  // 返回 SSE 流
+  // 任务归属：批准续跑复用 /generate 创建的任务（runId 存于待批准会话）；
+  // 会话缺失 requestId（异常路径）时兜底新建任务行
+  const sessionUser = c.get('user');
+  if (!sessionUser) {
+    return c.json({ error: '未登录' }, 401);
+  }
+  const pending = getPendingSession(sessionId);
+  const runId = pending?.requestId ?? crypto.randomUUID();
+  const existingRow = getRunRow(runId);
+  if (existingRow) {
+    if (existingRow.userId !== sessionUser.id) {
+      return c.json({ error: '无权访问该任务' }, 403);
+    }
+  } else {
+    createRunRow({ runId, projectId: null, userId: sessionUser.id });
+  }
+
+  // 续写同一任务的事件序列：优先复用活跃录制器，否则从任务行恢复
+  let recorder: RunRecorder;
+  try {
+    recorder = getOrCreateRecorder({ runId, userId: sessionUser.id });
+  } catch (error) {
+    if (error instanceof RunAccessError) {
+      return c.json({ error: '无权访问该任务' }, 403);
+    }
+    throw error;
+  }
+
+  // 返回 SSE 流（观察者）：断连只影响观察，续跑在服务端继续并落任务表
   return streamSSE(c, async (stream) => {
     const eventQueue: LLMEvent[] = [];
-    let closed = false;
+    const pumpState = { closed: false };
 
-    // 事件处理函数
+    // 事件双写：任务记录 + SSE 队列（与 /generate 一致）
     const onEvent = (event: LLMEvent) => {
-      if (closed) return;
-      eventQueue.push(event);
-    };
-
-    // 继续生成（Phase 2：支持补充信息）
-    const continuePromise = continueAfterApproval(sessionId, onEvent, c.req.raw.signal, undefined, supplementaryInfo);
-
-    // 轮询事件队列并发送
-    const sendEvents = async () => {
-      while (!closed) {
-        if (eventQueue.length > 0) {
-          const event = eventQueue.shift()!;
-
-          await stream.writeSSE({
-            event: event.type,
-            data: JSON.stringify(event.payload),
-          });
-
-          // done 或 error 后关闭流
-          if (event.type === 'done' || event.type === 'error') {
-            closed = true;
-            break;
-          }
-        } else {
-          await new Promise((resolve) => setTimeout(resolve, 10));
-        }
+      if (event.type !== 'delta' && event.payload.runId === undefined) {
+        event.payload.runId = runId;
+      }
+      recorder.record(event);
+      if (!pumpState.closed) {
+        eventQueue.push(event);
       }
     };
+
+    // 继续生成（Phase 2：支持补充信息）。不传客户端连接信号
+    const continuePromise = continueAfterApproval(sessionId, onEvent, undefined, undefined, supplementaryInfo);
+    // 续跑链路内部已完整兜底，此处防御未预期异常导致 unhandled rejection
+    void continuePromise.catch(() => {});
 
     try {
-      await Promise.all([continuePromise, sendEvents()]);
-    } catch (error) {
-      if (!closed) {
-        const message = error instanceof Error ? error.message : '未知错误';
-        await stream.writeSSE({
-          event: 'error',
-          data: JSON.stringify({ error: message }),
-        });
-      }
+      // done 或 error 后关闭观察流；任务行进入终态（如取消）时凭录制器状态退出
+      await pumpEventsToStream(stream, eventQueue, pumpState, ['done', 'error'], () => {
+        const active = getRunRecorder(runId);
+        return !active || active.snapshot().status !== 'running';
+      });
+    } catch {
+      // 客户端断连等写失败：仅停止观察，服务端续跑继续
+      pumpState.closed = true;
     }
   });
 });
 
 /**
  * POST /api/llm/cancel
- * 取消进行中的生成请求
+ * 取消进行中的生成任务
  *
- * Body: { requestId: string }
+ * Body: { runId?: string, requestId?: string }
+ * - runId：服务端任务 ID（后台任务驱动模式，/generate 首个事件下发）
+ * - requestId：兼容旧客户端的请求 ID
+ *
+ * 任务型取消会同步把任务行标记为 cancelled（执行链路 abort 后到达的
+ * error 事件不会把状态改写为 failed）。
  */
 llmRouter.post('/cancel', async (c) => {
   const body = await c.req.json().catch(() => ({}));
-  const requestId = body.requestId;
+  const targetId =
+    typeof body.runId === 'string' && body.runId
+      ? body.runId
+      : typeof body.requestId === 'string'
+        ? body.requestId
+        : undefined;
 
-  if (typeof requestId !== 'string') {
-    return c.json({ error: 'requestId 为必填字段' }, 400);
+  if (typeof targetId !== 'string' || !targetId) {
+    return c.json({ error: 'runId 或 requestId 为必填字段' }, 400);
   }
 
-  const cancelled = cancelGeneration(requestId);
+  // 归属校验：目标任务行存在且不属于当前用户时拒绝
+  const sessionUser = c.get('user');
+  if (!sessionUser) {
+    return c.json({ error: '未登录' }, 401);
+  }
+  const row = getRunRow(targetId);
+  if (row && row.userId !== sessionUser.id) {
+    return c.json({ error: '无权访问该任务' }, 403);
+  }
+
+  // 1. 先落库取消终态（RC4-BUG-002）：cancelRunTask 同步把录制器置为 cancelled
+  //    终态，此后 abort 传播引发的任何迟到事件都会被录制器的终态守卫忽略，
+  //    杜绝"取消被竞态写成 failed"的窗口；
+  // 2. 再中止执行链路（直通阶段以 runId 注册的控制器 + 批准后以 sessionId 注册的控制器）
+  const taskCancelled = cancelRunTask(targetId);
+  const aborted = cancelRun(targetId);
+
+  const cancelled = aborted || taskCancelled;
   return c.json({ success: cancelled, message: cancelled ? '请求已取消' : '未找到进行中的请求' });
 });
 
@@ -320,54 +429,139 @@ llmRouter.post('/continue', async (c) => {
     return c.json({ error: 'userFeedback 为必填字段' }, 400);
   }
 
-  // 返回 SSE 流
+  // 任务归属：反馈续跑复用暂停前同一任务（与 /approve 同一解析逻辑）
+  const sessionUser = c.get('user');
+  if (!sessionUser) {
+    return c.json({ error: '未登录' }, 401);
+  }
+  const pending = getPendingSession(sessionId);
+  const runId = pending?.requestId ?? crypto.randomUUID();
+  const existingRow = getRunRow(runId);
+  if (existingRow) {
+    if (existingRow.userId !== sessionUser.id) {
+      return c.json({ error: '无权访问该任务' }, 403);
+    }
+  } else {
+    createRunRow({ runId, projectId: null, userId: sessionUser.id });
+  }
+
+  let recorder: RunRecorder;
+  try {
+    recorder = getOrCreateRecorder({ runId, userId: sessionUser.id });
+  } catch (error) {
+    if (error instanceof RunAccessError) {
+      return c.json({ error: '无权访问该任务' }, 403);
+    }
+    throw error;
+  }
+
+  // 返回 SSE 流（观察者）：断连只影响观察，续跑在服务端继续并落任务表
   return streamSSE(c, async (stream) => {
     const eventQueue: LLMEvent[] = [];
-    let closed = false;
+    const pumpState = { closed: false };
 
-    // 事件处理函数
+    // 事件双写：任务记录 + SSE 队列（与 /generate 一致）
     const onEvent = (event: LLMEvent) => {
-      if (closed) return;
-      eventQueue.push(event);
-    };
-
-    // 用户反馈后继续生成
-    const continuePromise = continueWithFeedback(sessionId, userFeedback, onEvent, c.req.raw.signal);
-
-    // 轮询事件队列并发送
-    const sendEvents = async () => {
-      while (!closed) {
-        if (eventQueue.length > 0) {
-          const event = eventQueue.shift()!;
-
-          await stream.writeSSE({
-            event: event.type,
-            data: JSON.stringify(event.payload),
-          });
-
-          // done 或 error 后关闭流
-          if (event.type === 'done' || event.type === 'error') {
-            closed = true;
-            break;
-          }
-        } else {
-          await new Promise((resolve) => setTimeout(resolve, 10));
-        }
+      if (event.type !== 'delta' && event.payload.runId === undefined) {
+        event.payload.runId = runId;
+      }
+      recorder.record(event);
+      if (!pumpState.closed) {
+        eventQueue.push(event);
       }
     };
+
+    // 用户反馈后继续生成。不传客户端连接信号
+    const continuePromise = continueWithFeedback(sessionId, userFeedback, onEvent, undefined);
+    // 续跑链路内部已完整兜底，此处防御未预期异常导致 unhandled rejection
+    void continuePromise.catch(() => {});
 
     try {
-      await Promise.all([continuePromise, sendEvents()]);
-    } catch (error) {
-      if (!closed) {
-        const message = error instanceof Error ? error.message : '未知错误';
-        await stream.writeSSE({
-          event: 'error',
-          data: JSON.stringify({ error: message }),
-        });
-      }
+      // done 或 error 后关闭观察流；任务行进入终态（如取消）时凭录制器状态退出
+      await pumpEventsToStream(stream, eventQueue, pumpState, ['done', 'error'], () => {
+        const active = getRunRecorder(runId);
+        return !active || active.snapshot().status !== 'running';
+      });
+    } catch {
+      // 客户端断连等写失败：仅停止观察，服务端续跑继续
+      pumpState.closed = true;
     }
   });
+});
+
+/* ---------------- 生成任务恢复端点（background runs） ---------------- */
+
+/**
+ * GET /api/llm/runs/active?projectId=<id>
+ * 查询当前登录用户在某项目下的活跃任务（断连后回来恢复进度的入口）。
+ *
+ * 优先级：
+ * 1. running 任务（含批准/澄清/暂停等待点）→ { run: { runId, projectId, status,
+ *    stage, startedAt, latestSeq, recentEvents } }
+ * 2. 无 running 但存在终态（succeeded/failed）未领取任务（applied_at IS NULL，
+ *    覆盖"离开期间已完成/已失败"时序）→ { run: { ..., recentEventTypes, finishedUnclaimed: true } }
+ *    结果经 GET /runs/:runId/events 取回，消费后 POST /runs/:runId/ack 领取
+ * 3. 都没有 → { run: null }
+ */
+llmRouter.get('/runs/active', (c) => {
+  const sessionUser = c.get('user');
+  if (!sessionUser) {
+    return c.json({ error: '未登录' }, 401);
+  }
+  const projectId = c.req.query('projectId');
+  if (!projectId) {
+    return c.json({ error: 'projectId 为必填参数' }, 400);
+  }
+  const run = getActiveRunView(projectId, sessionUser.id);
+  return c.json({ run });
+});
+
+/**
+ * POST /api/llm/runs/:runId/ack
+ * 领取终态任务（幂等）：置 applied_at，任务不再以 finishedUnclaimed 出现在
+ * /runs/active。cancelled 任务也可被 ack（前端用于清掉失败态）。
+ *
+ * Response: { success: true }；任务不存在 → 404，非属主 → 403
+ */
+llmRouter.post('/runs/:runId/ack', (c) => {
+  const sessionUser = c.get('user');
+  if (!sessionUser) {
+    return c.json({ error: '未登录' }, 401);
+  }
+  const runId = c.req.param('runId');
+  const row = getRunRow(runId);
+  if (!row) {
+    return c.json({ error: '任务不存在' }, 404);
+  }
+  if (row.userId !== sessionUser.id) {
+    return c.json({ error: '无权访问该任务' }, 403);
+  }
+  ackRun(runId, sessionUser.id);
+  return c.json({ success: true });
+});
+
+/**
+ * GET /api/llm/runs/:runId/events?after=<seq>
+ * 回放任务的进度事件（seq 之后的部分）与当前状态；succeeded 时附带完整
+ * resultFiles（events 中的 done 事件不携带重载荷 files，完整结果以此为准）。
+ *
+ * Response: { runId, status, stage, events: [{seq, type, payload, at}], resultFiles, error }
+ * - 任务不存在或不属于当前用户 → 404
+ */
+llmRouter.get('/runs/:runId/events', (c) => {
+  const sessionUser = c.get('user');
+  if (!sessionUser) {
+    return c.json({ error: '未登录' }, 401);
+  }
+  const runId = c.req.param('runId');
+  const afterRaw = Number(c.req.query('after') ?? '0');
+  const after = Number.isFinite(afterRaw) && afterRaw >= 0 ? Math.floor(afterRaw) : 0;
+
+  const view = getRunReplayView(runId, sessionUser.id, after);
+  if (!view) {
+    return c.json({ error: '任务不存在' }, 404);
+  }
+  return c.json(view);
 });
 
 /* ---------------- 提示词优化器 ---------------- */

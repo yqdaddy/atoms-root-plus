@@ -28,7 +28,7 @@ function StatusBadge({ status }: { status: ProjectSummary['status'] }) {
     draft: { label: '草稿', color: 'text-[var(--color-text-tertiary)] bg-[var(--color-bg-base)]' },
     generating: { label: '生成中', color: 'text-amber-500 bg-amber-500/10' },
     ready: { label: '已完成', color: 'text-green-500 bg-green-500/10' },
-    error: { label: '出错', color: 'text-red-500 bg-red-500/10' },
+    error: { label: '生成失败', color: 'text-red-500 bg-red-500/10' },
   };
   const c = config[status] || config.draft;
   return (

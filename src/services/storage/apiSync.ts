@@ -89,12 +89,22 @@ export async function fetchProject(id: string): Promise<Project | null> {
 }
 
 /**
+ * 确保同步闸门可用：闸门关闭时先做一次节流重探（30 秒缓存，见 checkApiHealth）。
+ * 背景：apiAvailable 由启动时的健康探测设定，若探测恰逢后端重启，
+ * 整个会话的创建/更新同步会被静默关闭且永不自愈（RC3-BUG-002 根因）。
+ */
+async function ensureApiAvailable(): Promise<boolean> {
+  if (apiAvailable) return true;
+  return checkApiHealth();
+}
+
+/**
  * 创建项目到服务端。
  * 客户端 id 随 body 上送：服务端校验为合法 UUID 后采用，
  * 本地与服务端身份一致，后续 PUT 直接命中（服务端契约见 server/routes/projects.ts）。
  */
 export async function createProjectApi(project: Project): Promise<string | null> {
-  if (!apiAvailable) return null;
+  if (!(await ensureApiAvailable())) return null;
 
   try {
     const response = await apiFetch(`${API_BASE}/api/projects`, {
@@ -115,22 +125,43 @@ export async function createProjectApi(project: Project): Promise<string | null>
   }
 }
 
-/**
- * 更新项目到服务端。
- */
-export async function updateProjectApi(project: Project): Promise<boolean> {
-  if (!apiAvailable) return false;
-
+async function putProject(project: Project): Promise<boolean> {
   try {
     const response = await apiFetch(`${API_BASE}/api/projects/${project.id}`, {
       method: 'PUT',
       body: JSON.stringify(project),
     });
-
     return response.ok;
   } catch {
     return false;
   }
+}
+
+/**
+ * 更新项目到服务端。
+ * PUT 失败时补建后重试一次：创建 POST 只在项目创建瞬间触发一次且无重试，
+ * 一旦丢失（后端重启/闸门关闭），后续 PUT 永远 404，项目将永远无法追平到服务端
+ * （RC3-BUG-002）。补建使用与 createProjectApi 相同的最小负载。
+ */
+export async function updateProjectApi(project: Project): Promise<boolean> {
+  if (!(await ensureApiAvailable())) return false;
+
+  if (await putProject(project)) return true;
+
+  try {
+    const response = await apiFetch(`${API_BASE}/api/projects`, {
+      method: 'POST',
+      body: JSON.stringify({
+        id: project.id,
+        name: project.name,
+        description: project.description,
+      }),
+    });
+    if (!response.ok) return false;
+  } catch {
+    return false;
+  }
+  return putProject(project);
 }
 
 /**

@@ -80,6 +80,8 @@ interface ChatState {
 interface ChatActions {
   /** 开始新的生成 */
   startGeneration: (runId: string) => void;
+  /** 恢复后台生成任务：以服务端 runId 与 startedAt 初始化生成中状态（区别于 startGeneration 的本地时钟） */
+  beginRecovery: (runId: string, stage: PipelineStage, startedAtMs: number) => void;
   /** 更新阶段 */
   updateStage: (stage: PipelineStage, attempt: number, message: string, intent?: IntentResult) => void;
   /** 追加 delta 文本（fileName/operation 用于文件级进度追踪） */
@@ -185,6 +187,26 @@ export const useChatStore = create<ChatStore>()((set) => ({
         stage: 'analyzing',
         attempt: 1,
         stageMessage: '正在分析功能...',
+        startTime,
+      },
+      isGenerating: true,
+      error: null,
+      reviewChecks: null,
+    });
+  },
+
+  beginRecovery: (runId, stage, startedAtMs) => {
+    // 时钟以服务端 startedAt 为准；同时写入 sessionStorage，
+    // 使恢复期间再次刷新时 F-002 的 restoreStartTime 仍能还原运行时钟
+    const startTime = startedAtMs > 0 ? startedAtMs : Date.now();
+    saveStartTime(runId, startTime);
+    set({
+      streamBuffer: {
+        ...initialStreamBuffer,
+        runId,
+        stage,
+        attempt: 1,
+        stageMessage: '正在恢复生成进度...',
         startTime,
       },
       isGenerating: true,

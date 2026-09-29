@@ -20,8 +20,9 @@ import {
 /**
  * 后端 stage 到前端 PipelineStage 映射。
  * search（在线查询）为生成前预处理，前端归入 analyzing 态，由 STAGE_MESSAGES 提供专属文案。
+ * 导出供后台任务恢复（runRecovery）复用：active run 的 stage 字段使用同一映射。
  */
-const STAGE_MAP: Record<string, PipelineStage> = {
+export const STAGE_MAP: Record<string, PipelineStage> = {
   analysis: 'analyzing',
   generate: 'generating',
   review: 'reviewing',
@@ -57,6 +58,16 @@ const STAGE_MESSAGES: Record<string, string> = {
 /* ---------------- SSE 解析 ---------------- */
 
 /**
+ * runId 引用容器。
+ * 后台任务契约：服务端事件可携带 runId；首个携带 runId 的事件到达后，
+ * 后续事件统一改用服务端 runId（供按 runId 取消、后台任务恢复等操作使用）。
+ * 服务端未携带时保持客户端生成的占位 runId（向后兼容）。
+ */
+export interface RunIdRef {
+  current: string;
+}
+
+/**
  * 解析后端返回的 SSE 事件流并进行格式转换。
  * 后端格式 → 前端格式转换：
  *   stage: { stage: 'analysis' } → { runId, stage: 'analyzing', attempt: 1, message }
@@ -72,7 +83,7 @@ async function parseSSEStream(
   const reader = response.body!.getReader();
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
-  const runId = `run-${Date.now()}`;
+  const runIdRef: RunIdRef = { current: `run-${Date.now()}` };
 
   // 当前事件的类型和数据
   let currentEventType = '';
@@ -86,12 +97,23 @@ async function parseSSEStream(
   let pendingDelta: Extract<StreamEvent, { type: 'delta' }> | null = null;
   const flushPendingDelta = (): void => {
     if (pendingDelta) {
-      onEvent(pendingDelta);
+      // 用户取消后不冲刷残余 delta（RC3-BUG-004）：终态由停止入口本地收尾，
+      // 迟到的增量文本不再写入已收尾的气泡
+      if (!signal.aborted) {
+        onEvent(pendingDelta);
+      }
       pendingDelta = null;
     }
   };
   const dispatchEvent = (event: StreamEvent | null): void => {
     if (!event) return;
+    // 用户取消后的事件静默（RC3-BUG-004）：abort 一旦生效，取消瞬间仍可能在途的
+    // 服务端事件一律不再派发，尤其是格式重试耗尽的终局 error（"生成结果格式不符
+    // 合要求，已自动重试 N 次仍未成功。请点击重试..."）。照常派发会把用户主动
+    // 取消误标为生成失败，并引导重试一个已放弃的任务。取消的本地终态由停止入口
+    // （HomePage.handleStopGeneration / useRunRecovery.stop，二者均已各自静默）负责
+    // 收尾，引擎层遵循现有设计不补写消息；done 同理，取消即放弃交付，不应用迟到结果。
+    if (signal.aborted) return;
     if (event.type === 'delta') {
       const pendingPayload = pendingDelta?.payload;
       if (pendingPayload && pendingPayload.phase === event.payload.phase) {
@@ -126,7 +148,7 @@ async function parseSSEStream(
       if (chunk.done) {
         // 处理最后一个事件（如果有）
         if (currentEventType && currentData) {
-          dispatchEvent(processSSEEvent(currentEventType, currentData, runId));
+          dispatchEvent(processSSEEvent(currentEventType, currentData, runIdRef));
         }
         // 冲刷尾部缓冲的合并 delta，保证 done 前文本完整
         flushPendingDelta();
@@ -147,7 +169,7 @@ async function parseSSEStream(
         } else if (line === '') {
           // 空行表示事件结束
           if (currentEventType && currentData) {
-            dispatchEvent(processSSEEvent(currentEventType, currentData, runId));
+            dispatchEvent(processSSEEvent(currentEventType, currentData, runIdRef));
           }
           currentEventType = '';
           currentData = '';
@@ -165,14 +187,21 @@ async function parseSSEStream(
 /**
  * 解析单个 SSE 事件为前端 StreamEvent。
  * 无法识别或需跳过的事件返回 null（由调用方决定派发时机，见 parseSSEStream 的合并逻辑）。
+ * 导出供后台任务恢复（runRecovery）复用：事件回放与实时流共用同一转换规则。
  */
-function processSSEEvent(
+export function processSSEEvent(
   eventType: string,
   eventData: string,
-  runId: string,
+  runIdRef: RunIdRef,
 ): StreamEvent | null {
   try {
     const payload = JSON.parse(eventData);
+
+    // 后台任务契约：事件携带服务端 runId 时优先采用，并刷新后续事件的 runId
+    if (typeof payload?.runId === 'string' && payload.runId.length > 0) {
+      runIdRef.current = payload.runId;
+    }
+    const runId = runIdRef.current;
 
     // 转换后端格式到前端格式
     let event: StreamEvent;
