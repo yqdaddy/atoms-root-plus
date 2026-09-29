@@ -79,7 +79,7 @@ function makeSSEResponse(fullContent: string): Response {
  * （模拟真实 fetch 的 abort 行为）。用于把 continueAfterApproval 固定在
  * 工程师生成进行中的状态。
  */
-function hangUntilAbort(signal: AbortSignal | undefined): Promise<Response> {
+function hangUntilAbort(signal: AbortSignal | null | undefined): Promise<Response> {
   return new Promise((_resolve, reject) => {
     const abortError = () => {
       const err = new Error('This operation was aborted');
@@ -112,7 +112,9 @@ async function startToApproval(fetchMock: ReturnType<typeof vi.fn>): Promise<str
   const approval = stage1Events.find((e) => e.type === 'approval_required');
   expect(approval).toBeDefined();
   void fetchMock;
-  return approval!.payload.sessionId;
+  const sessionId = approval!.payload.sessionId;
+  expect(sessionId).toBeTruthy();
+  return sessionId as string;
 }
 
 describe('RC4-BUG-002：用户取消/暂停不落 failed 终态', () => {
@@ -128,7 +130,7 @@ describe('RC4-BUG-002：用户取消/暂停不落 failed 终态', () => {
   it('暂停：AbortError 走 withRetry 后以"请求已取消"到达 catch，发 engineer_pause 不发 error', async () => {
     // 第 1 次调用 = 分析师；第 2 次起挂起直到 abort
     let call = 0;
-    const fetchMock = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn((_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
       call++;
       if (call === 1) return Promise.resolve(makeSSEResponse(FEATURES_JSON));
       return hangUntilAbort(init?.signal);
@@ -157,7 +159,7 @@ describe('RC4-BUG-002：用户取消/暂停不落 failed 终态', () => {
 
   it('取消：无 engineerPaused 标记时静默返回，不发任何终局事件', async () => {
     let call = 0;
-    const fetchMock = vi.fn((_url: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn((_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
       call++;
       if (call === 1) return Promise.resolve(makeSSEResponse(FEATURES_JSON));
       return hangUntilAbort(init?.signal);

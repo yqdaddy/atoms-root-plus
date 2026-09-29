@@ -463,6 +463,10 @@ export interface LLMEvent {
     }>;
     /** 功能清单（clarification_required 事件携带） */
     featureList?: unknown;
+    /** 暂停时已完成文件的快照（engineer_pause 事件携带，供续跑面板预填） */
+    currentFiles?: Record<string, { path: string; content: string; language: FileLanguage }>;
+    /** 暂停原因（engineer_pause 事件携带），与 PendingSession.engineerPaused.reason 同构 */
+    pauseReason?: 'checkpoint' | 'user_interrupt' | 'need_guidance';
   };
 }
 
