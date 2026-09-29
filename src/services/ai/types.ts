@@ -366,6 +366,12 @@ export interface GenerateOptions {
    * - vue-cdn：Vue 单文件组件，浏览器内编译
    */
   framework?: 'html' | 'react-cdn' | 'vue-cdn';
+  /**
+   * 项目知识库 ID（可选）。携带时服务端把该登录用户在此项目下的资料
+   * 以【项目参考资料】块拼入工程师 prompt 尾部（总量截断 32KB），
+   * 见 server/routes/llm.ts 与 server/routes/resources.ts。
+   */
+  projectId?: string;
 }
 
 /** 双引擎共同接口：同一事件协议，前端不感知引擎差异 */

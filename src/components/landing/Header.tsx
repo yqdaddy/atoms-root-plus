@@ -3,11 +3,13 @@
  * 设计规范: docs/design/landing-page-spec.md 4.1
  * 登录态适配: 未登录显示「登录 + 免费试用」，已登录显示「工作台」入口
  */
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../stores/authStore';
 
 export default function Header() {
   const user = useAuthStore((state) => state.user);
+  const { pathname } = useLocation();
+  const isGalleryActive = pathname.startsWith('/gallery');
 
   return (
     <header className="h-14 border-b border-[var(--color-border-default)] bg-[var(--color-bg-base)]">
@@ -39,6 +41,17 @@ export default function Header() {
             className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors duration-[var(--ease-standard)]"
           >
             文档
+          </Link>
+          <Link
+            to="/gallery"
+            aria-current={isGalleryActive ? 'page' : undefined}
+            className={`text-sm transition-colors duration-[var(--ease-standard)] ${
+              isGalleryActive
+                ? 'text-[var(--color-text-primary)]'
+                : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+            }`}
+          >
+            广场
           </Link>
         </nav>
 

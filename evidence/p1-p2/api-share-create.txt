@@ -1,0 +1,3 @@
+/api/share => {"id":"0npy3cfb","expiresAt":1791244204495}
+(抓取时间 2026-09-29 07:52，fetch hook 实捕)
+/share/0npy3cfb 已实测渲染共享应用（标题:我的计算器, 4 个文件）

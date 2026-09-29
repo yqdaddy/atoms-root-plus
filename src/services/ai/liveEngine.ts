@@ -391,6 +391,7 @@ async function runPipeline(
           preferences: options.preferences,
           globalPreferences: options.globalPreferences,
           framework: options.framework,
+          projectId: options.projectId,
         },
       }),
       signal: controller.signal,

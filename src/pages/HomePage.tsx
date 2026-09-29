@@ -43,6 +43,8 @@ import { MessageGroupContainer, groupMessages } from '../components/MessageGroup
 import { looksStuck } from '../lib/progressEstimator';
 import { BuildGroup } from '../components/BuildGroup';
 import { DiffModal } from '../components/DiffModal';
+import { ResourcesPanel } from '../components/ResourcesPanel';
+import { listResources } from '../services/projectResources';
 
 /** 图片限制配置 */
 const IMAGE_CONFIG = {
@@ -492,6 +494,9 @@ export default function HomePage() {
   // 重命名模态框
   const [showRenameModal, setShowRenameModal] = useState(false);
   const [renameValue, setRenameValue] = useState('');
+  // 项目资料面板（P2 知识库）与资料条数（驱动输入区注入徽标）
+  const [showResourcesPanel, setShowResourcesPanel] = useState(false);
+  const [resourceCount, setResourceCount] = useState(0);
   // 长对话滚动加载：初始显示 12 组，每次加载 12 组
   const INITIAL_VISIBLE_GROUPS = 12;
   const LOAD_STEP = 12;
@@ -658,6 +663,27 @@ export default function HomePage() {
       setRenameValue(currentProject.name);
     }
   }, [showRenameModal, currentProject]);
+
+  // 项目资料计数：切换项目或登录态变化时刷新（驱动输入区"将注入 N 份资料"徽标）。
+  // 拉取失败静默降级为 0（401 已由 apiClient 统一拦截提示）。
+  const projectId = currentProject?.id ?? null;
+  useEffect(() => {
+    if (!isLoggedIn || !projectId) {
+      setResourceCount(0);
+      return;
+    }
+    let cancelled = false;
+    listResources(projectId)
+      .then((items) => {
+        if (!cancelled) setResourceCount(items.length);
+      })
+      .catch(() => {
+        if (!cancelled) setResourceCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoggedIn, projectId]);
 
   const { createProject, updateEntryFile, updateFiles, updateProjectStatus, addMessage, saveVersion } = useProjectStore();
   const { startGeneration, updateStage, appendDelta, finishGeneration, setError, updateFileStatus, setReviewChecks, setIntent } = useChatStore();
@@ -1209,6 +1235,8 @@ export default function HomePage() {
         ...(memory.projectPreferences.length > 0 ? { preferences: memory.projectPreferences } : {}),
         ...(memory.globalPreferences ? { globalPreferences: memory.globalPreferences } : {}),
         ...(opts?.intentOverride ? { intentOverride: opts.intentOverride } : {}),
+        // 项目知识库：携带 projectId 时服务端把该项目的资料注入工程师 prompt
+        projectId: project.id,
       };
 
       // 调试日志：最终发送的 generateOpts
@@ -1217,6 +1245,7 @@ export default function HomePage() {
         hasCurrentFiles: !!generateOpts.currentFiles,
         hasChatTurns: !!generateOpts.chatTurns,
         chatTurnsLength: generateOpts.chatTurns?.length || 0,
+        projectId: generateOpts.projectId,
       });
 
       await api.generateStream(llmPrompt, handleStreamEvent, generateOpts);
@@ -1841,6 +1870,18 @@ export default function HomePage() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          {/* 项目资料面板入口：仅登录且存在当前项目时显示 */}
+          {isLoggedIn && currentProject && (
+            <button
+              onClick={() => setShowResourcesPanel(true)}
+              aria-label="资料"
+              title="项目资料"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[13px] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-base)] hover:text-[var(--color-text-primary)] transition-all duration-[140ms]"
+            >
+              <Icon icon="lucide:book-open" width={16} height={16} />
+              <span className="hidden sm:inline font-medium">资料</span>
+            </button>
+          )}
           {/* 积分显示（模拟） */}
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--color-bg-base)] text-[12px] text-[var(--color-text-secondary)]">
             <Icon icon="lucide:coins" width={14} height={14} />
@@ -2272,6 +2313,20 @@ export default function HomePage() {
               </div>
             )}
 
+            {/* 项目资料注入徽标：有资料时提示本次生成将携带，点击打开资料面板 */}
+            {isLoggedIn && currentProject && resourceCount > 0 && (
+              <div className="mb-2">
+                <button
+                  onClick={() => setShowResourcesPanel(true)}
+                  title="查看项目资料"
+                  className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[12px] text-[var(--color-accent)] bg-[var(--color-accent)]/10 hover:bg-[var(--color-accent)]/20 transition-colors duration-[80ms]"
+                >
+                  <Icon icon="lucide:file-text" width={12} height={12} />
+                  将注入 {resourceCount} 份资料
+                </button>
+              </div>
+            )}
+
             {/* 输入框容器：拖拽上传已停用（图片上传待接入多模态管线后启用） */}
             <div
               className="relative"
@@ -2682,6 +2737,16 @@ export default function HomePage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* 项目资料抽屉（P2 知识库）：增删后经 onCountChange 同步输入区徽标 */}
+      {currentProject && (
+        <ResourcesPanel
+          open={showResourcesPanel}
+          projectId={currentProject.id}
+          onClose={() => setShowResourcesPanel(false)}
+          onCountChange={setResourceCount}
+        />
       )}
     </div>
   );

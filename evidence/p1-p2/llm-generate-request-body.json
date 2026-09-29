@@ -1,0 +1,24 @@
+{
+  "_comment": "实测捕获的 POST /api/llm/generate 请求体（fetch hook，2026-09-29 07:53）。currentFiles 与 currentHtml 为项目全量文件内容，此处以占位省略；其余字段逐字保留。",
+  "prompt": "把计算器按钮圆角改为 12px",
+  "options": {
+    "currentHtml": "<!-- 项目当前 HTML 全文，约 2.4KB，此处省略 -->",
+    "currentFiles": {
+      "/index.html": "{'content': '...(省略)'}",
+      "/styles/main.css": "{'content': '...(省略)'}",
+      "/src/main.js": "{'content': '...(省略)'}",
+      "/README.md": "{'content': '...(省略)'}"
+    },
+    "chatTurns": [
+      { "role": "user", "content": "给页面加一个标题文字：我的计算器" },
+      { "role": "assistant", "content": "已应用 2 处修改，涉及 /index.html、/styles/main.css：将页面标题改为\"我的计算器\"并修正h1颜色为白色。\n变更已应用（diff 模式跳过审查）" },
+      { "role": "user", "content": "把计算器按钮圆角改为 12px" },
+      { "role": "assistant", "content": "按钮圆角已为 12px，无需修改" }
+    ],
+    "originalRequest": "给页面加一个标题文字：我的计算器",
+    "globalPreferences": {},
+    "framework": "html",
+    "projectId": "251584e3-98fc-48b5-bb96-3cc9cfe24374"
+  },
+  "_conclusion": "options.projectId 真实存在，值为复刻项目 251584e3-98fc-48b5-bb96-3cc9cfe24374。服务端 routes/llm.ts:90-99 读取该字段并以【项目参考资料】块注入工程师 prompt（vitest resources.test.ts 28/28 通过，含注入块与 32768 字符截断用例）。"
+}

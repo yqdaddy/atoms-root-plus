@@ -13,6 +13,7 @@ import atom from '../../assets/icons/lucide/atom.svg?raw';
 import alertCircle from '../../assets/icons/lucide/alert-circle.svg?raw';
 import alertTriangle from '../../assets/icons/lucide/alert-triangle.svg?raw';
 import arrowUp from '../../assets/icons/lucide/arrow-up.svg?raw';
+import bookOpen from '../../assets/icons/lucide/book-open.svg?raw';
 import bot from '../../assets/icons/lucide/bot.svg?raw';
 import box from '../../assets/icons/lucide/box.svg?raw';
 import calculator from '../../assets/icons/lucide/calculator.svg?raw';
@@ -21,8 +22,10 @@ import checkCircle from '../../assets/icons/lucide/check-circle.svg?raw';
 import chevronDown from '../../assets/icons/lucide/chevron-down.svg?raw';
 import chevronRight from '../../assets/icons/lucide/chevron-right.svg?raw';
 import chevronUp from '../../assets/icons/lucide/chevron-up.svg?raw';
+import clipboardList from '../../assets/icons/lucide/clipboard-list.svg?raw';
 import code from '../../assets/icons/lucide/code.svg?raw';
 import code2 from '../../assets/icons/lucide/code-2.svg?raw';
+import compass from '../../assets/icons/lucide/compass.svg?raw';
 import copy from '../../assets/icons/lucide/copy.svg?raw';
 import database from '../../assets/icons/lucide/database.svg?raw';
 import download from '../../assets/icons/lucide/download.svg?raw';
@@ -32,6 +35,8 @@ import file from '../../assets/icons/lucide/file.svg?raw';
 // import fileCode from '../../assets/icons/lucide/file-code.svg?raw';
 import fileCode2 from '../../assets/icons/lucide/file-code-2.svg?raw';
 import fileText from '../../assets/icons/lucide/file-text.svg?raw';
+import fileUp from '../../assets/icons/lucide/file-up.svg?raw';
+import folder from '../../assets/icons/lucide/folder.svg?raw';
 import folderPlus from '../../assets/icons/lucide/folder-plus.svg?raw';
 import gamepad2 from '../../assets/icons/lucide/gamepad-2.svg?raw';
 import gitCompare from '../../assets/icons/lucide/git-compare.svg?raw';
@@ -45,6 +50,7 @@ import layoutTemplate from '../../assets/icons/lucide/layout-template.svg?raw';
 import lightbulb from '../../assets/icons/lucide/lightbulb.svg?raw';
 import listChecks from '../../assets/icons/lucide/list-checks.svg?raw';
 import loaderCircle from '../../assets/icons/lucide/loader-circle.svg?raw';
+import logIn from '../../assets/icons/lucide/log-in.svg?raw';
 import logOut from '../../assets/icons/lucide/log-out.svg?raw';
 import maximize2 from '../../assets/icons/lucide/maximize-2.svg?raw';
 import menu from '../../assets/icons/lucide/menu.svg?raw';
@@ -62,6 +68,7 @@ import searchCode from '../../assets/icons/lucide/search-code.svg?raw';
 import send from '../../assets/icons/lucide/send.svg?raw';
 import settings from '../../assets/icons/lucide/settings.svg?raw';
 import share from '../../assets/icons/lucide/share.svg?raw';
+import share2 from '../../assets/icons/lucide/share-2.svg?raw';
 import shieldCheck from '../../assets/icons/lucide/shield-check.svg?raw';
 import smartphone from '../../assets/icons/lucide/smartphone.svg?raw';
 import sparkles from '../../assets/icons/lucide/sparkles.svg?raw';
@@ -91,6 +98,7 @@ const LOCAL_ICONS: Record<string, string> = {
   'alert-circle': alertCircle,
   'alert-triangle': alertTriangle,
   'arrow-up': arrowUp,
+  'book-open': bookOpen,
   bot,
   box,
   calculator,
@@ -99,8 +107,10 @@ const LOCAL_ICONS: Record<string, string> = {
   'chevron-down': chevronDown,
   'chevron-right': chevronRight,
   'chevron-up': chevronUp,
+  'clipboard-list': clipboardList,
   code,
   'code-2': code2,
+  compass,
   copy,
   database,
   download,
@@ -109,6 +119,8 @@ const LOCAL_ICONS: Record<string, string> = {
   file,
   'file-code-2': fileCode2,
   'file-text': fileText,
+  'file-up': fileUp,
+  folder,
   folderPlus,
   'gamepad-2': gamepad2,
   'git-compare': gitCompare,
@@ -122,6 +134,7 @@ const LOCAL_ICONS: Record<string, string> = {
   lightbulb,
   'list-checks': listChecks,
   'loader-circle': loaderCircle,
+  'log-in': logIn,
   'log-out': logOut,
   'maximize-2': maximize2,
   menu,
@@ -139,6 +152,7 @@ const LOCAL_ICONS: Record<string, string> = {
   send,
   settings,
   share,
+  'share-2': share2,
   'shield-check': shieldCheck,
   smartphone,
   sparkles,

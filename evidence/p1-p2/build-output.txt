@@ -1,0 +1,32 @@
+dist/assets/jetbrains-mono-cyrillic-400-normal-ugxPyKxw.woff       6.97 kB
+dist/assets/jetbrains-mono-latin-ext-400-normal-Bc8Ftmh3.woff2     7.33 kB
+dist/assets/jetbrains-mono-latin-ext-400-normal-fXTG6kC5.woff     10.12 kB
+dist/assets/space-grotesk-latin-ext-wght-normal-D9tNdqV9.woff2    18.94 kB
+dist/assets/jetbrains-mono-latin-400-normal-V6pRDFza.woff2        21.16 kB
+dist/assets/space-grotesk-latin-wght-normal-BhU9QXUp.woff2        22.28 kB
+dist/assets/jetbrains-mono-latin-400-normal-6-qcROiO.woff         27.49 kB
+dist/assets/index-rRnZaRPb.css                                    75.96 kB │ gzip:  20.53 kB
+dist/assets/share-B85-1tgg.js                                      0.61 kB │ gzip:   0.41 kB
+dist/assets/quarantine-Dcdz8ieL.js                                 1.04 kB │ gzip:   0.52 kB
+dist/assets/rolldown-runtime-Dd_uD5pT.js                           1.10 kB │ gzip:   0.62 kB
+dist/assets/gallery-DJq1nLqH.js                                    1.17 kB │ gzip:   0.64 kB
+dist/assets/project-Bn5mlDaq.js                                    1.74 kB │ gzip:   0.91 kB
+dist/assets/sandbox-D6VXshad.js                                    2.12 kB │ gzip:   0.99 kB
+dist/assets/Header-D7tWJr3G.js                                     3.24 kB │ gzip:   0.93 kB
+dist/assets/SharePage-D82hz8zQ.js                                  6.60 kB │ gzip:   2.12 kB
+dist/assets/AuthPage-CaS_6kPN.js                                  11.68 kB │ gzip:   2.93 kB
+dist/assets/GalleryPage-DBJWh01x.js                               16.59 kB │ gzip:   3.85 kB
+dist/assets/ProjectsPage-C6kqkHSf.js                              17.07 kB │ gzip:   4.26 kB
+dist/assets/LandingPage-BSInUIAW.js                               19.14 kB │ gzip:   3.39 kB
+dist/assets/vendor-icons-DXlZ2eyk.js                              38.64 kB │ gzip:  14.18 kB
+dist/assets/SandboxFrame-DpmcgQh4.js                              65.22 kB │ gzip:  19.70 kB
+dist/assets/index-DhRfhSj2.js                                    100.87 kB │ gzip:  30.61 kB
+dist/assets/zipExporter-GrGUzTuW.js                              104.18 kB │ gzip:  32.65 kB
+dist/assets/vendor-markdown-WEaG-a5m.js                          148.39 kB │ gzip:  44.57 kB
+dist/assets/esm-CGDBZkuy.js                                      201.43 kB │ gzip:  46.06 kB
+dist/assets/HomePage-Cpfdhgxh.js                                 355.64 kB │ gzip:  78.91 kB
+dist/assets/vendor-react-DvzFTMeu.js                             404.77 kB │ gzip: 123.12 kB
+
+✓ built in 1.44s
+
+[exited with code 0]

@@ -9,26 +9,18 @@ import { useProjectStore } from '../stores/projectStore';
 import { useAuthStore } from '../stores/authStore'; // F-002: 项目列表页守卫
 import type { ProjectSummary } from '../types/project';
 import { getFrameworkInfo } from '../components/FrameworkSelector';
-
-/** 格式化时间 */
-function formatTime(isoString: string): string {
-  const date = new Date(isoString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-
-  if (diffMins < 1) return '刚刚';
-  if (diffMins < 60) return `${diffMins} 分钟前`;
-  if (diffHours < 24) return `${diffHours} 小时前`;
-  if (diffDays < 7) return `${diffDays} 天前`;
-
-  return date.toLocaleDateString('zh-CN', {
-    month: 'short',
-    day: 'numeric',
-  });
-}
+import PublishModal from '../components/gallery/PublishModal';
+import Modal from '../components/Modal';
+import { toast } from '../components/Toast';
+import {
+  getLocallyPublishedMap,
+  markLocallyPublished,
+  removeLocallyPublished,
+  removeFromGallery,
+  type GalleryPublishedMap,
+} from '../services/gallery';
+import { ApiError } from '../services/apiClient';
+import { formatRelativeTime } from '../utils/formatTime';
 
 /** 状态标签 */
 function StatusBadge({ status }: { status: ProjectSummary['status'] }) {
@@ -49,14 +41,20 @@ function StatusBadge({ status }: { status: ProjectSummary['status'] }) {
 /** 项目卡片 */
 function ProjectCard({
   summary,
+  isPublished,
   onOpen,
   onDelete,
   onRename,
+  onPublish,
+  onUnpublish,
 }: {
   summary: ProjectSummary;
+  isPublished: boolean;
   onOpen: () => void;
   onDelete: () => void;
   onRename: () => void;
+  onPublish: () => void;
+  onUnpublish: () => void;
 }) {
   const [showMenu, setShowMenu] = useState(false);
 
@@ -113,6 +111,31 @@ function ProjectCard({
                   <Icon icon="lucide:pencil" width={14} height={14} />
                   重命名
                 </button>
+                {isPublished ? (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onUnpublish();
+                      setShowMenu(false);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-base)] hover:text-[var(--color-text-primary)]"
+                  >
+                    <Icon icon="lucide:eye-off" width={14} height={14} />
+                    取消发布
+                  </button>
+                ) : (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onPublish();
+                      setShowMenu(false);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-base)] hover:text-[var(--color-text-primary)]"
+                  >
+                    <Icon icon="lucide:share-2" width={14} height={14} />
+                    发布到广场
+                  </button>
+                )}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -130,6 +153,14 @@ function ProjectCard({
         </div>
         <div className="flex items-center gap-2">
           <StatusBadge status={summary.status} />
+          {isPublished && (
+            <span
+              className="text-[11px] px-2 py-0.5 rounded-full text-[var(--color-accent)] bg-[var(--color-accent)]/10"
+              title="已发布到广场"
+            >
+              已发布
+            </span>
+          )}
           {(() => {
             const fw = getFrameworkInfo(summary.framework);
             return fw ? (
@@ -142,8 +173,8 @@ function ProjectCard({
               </span>
             ) : null;
           })()}
-          <span className="text-[12px] text-[var(--color-text-tertiary)]">
-            {formatTime(summary.updatedAt)}
+          <span className="text-[12px] text-[var(--color-text-secondary)]">
+            {formatRelativeTime(new Date(summary.updatedAt))}
           </span>
         </div>
       </div>
@@ -164,6 +195,15 @@ export default function ProjectsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  // 发布到广场：待发布项目、本会话已发布映射（projectId → galleryId）与取消发布状态
+  const [publishTarget, setPublishTarget] = useState<{ id: string; name: string } | null>(null);
+  const [publishedMap, setPublishedMap] = useState<GalleryPublishedMap>(() => getLocallyPublishedMap());
+  const [unpublishTarget, setUnpublishTarget] = useState<{
+    projectId: string;
+    galleryId: string;
+    name: string;
+  } | null>(null);
+  const [isUnpublishing, setIsUnpublishing] = useState(false);
 
   // F-002: 项目列表页守卫 - 未登录时跳转到登录页
   useEffect(() => {
@@ -222,6 +262,48 @@ export default function ProjectsPage() {
     // 清空工作台状态：工作台回到干净欢迎界面，提交首个需求时才创建新项目记录
     newProject();
     navigate('/workspace');
+  };
+
+  // 发布成功：记录本会话已发布映射（含快照 id）并刷新卡片「已发布」徽标
+  const handlePublished = (projectId: string, galleryId: string) => {
+    markLocallyPublished(projectId, galleryId);
+    setPublishedMap((prev) => ({ ...prev, [projectId]: galleryId }));
+    setPublishTarget(null);
+  };
+
+  // 取消发布（AC-G1.2）：确认弹层内调用 DELETE（按 galleryId），成功后清理本地映射
+  const handleUnpublish = async () => {
+    if (!unpublishTarget || isUnpublishing) return;
+    const { projectId, galleryId } = unpublishTarget;
+    setIsUnpublishing(true);
+    try {
+      await removeFromGallery(galleryId);
+      removeLocallyPublished(projectId);
+      setPublishedMap((prev) => {
+        const next = { ...prev };
+        delete next[projectId];
+        return next;
+      });
+      toast.success('已从广场下架');
+      setUnpublishTarget(null);
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 404) {
+        // 自愈（BUG-3）：快照已不在广场（本地标记陈旧），清理标记让卡片回到可发布态
+        removeLocallyPublished(projectId);
+        setPublishedMap((prev) => {
+          const next = { ...prev };
+          delete next[projectId];
+          return next;
+        });
+        toast.info('作品已不在广场，已恢复可发布状态');
+        setUnpublishTarget(null);
+      } else if (!(e instanceof ApiError && e.status === 401)) {
+        // 401 由 apiClient 全局拦截（会话过期提示与跳转），不重复提示
+        toast.error('取消发布失败，请重试');
+      }
+    } finally {
+      setIsUnpublishing(false);
+    }
   };
 
   return (
@@ -283,9 +365,22 @@ export default function ProjectsPage() {
               <ProjectCard
                 key={summary.id}
                 summary={summary}
+                isPublished={publishedMap[summary.id] !== undefined}
                 onOpen={() => handleOpenProject(summary.id)}
                 onDelete={() => handleDeleteProject(summary.id, summary.name)}
                 onRename={() => handleRenameProject(summary.id, summary.name)}
+                onPublish={() => setPublishTarget({ id: summary.id, name: summary.name || '未命名项目' })}
+                onUnpublish={() => {
+                  // DELETE 按 gallery 快照 id 定位（services/gallery.ts 契约），projectId 仅用于清理本地标记
+                  const galleryId = publishedMap[summary.id];
+                  if (galleryId) {
+                    setUnpublishTarget({
+                      projectId: summary.id,
+                      galleryId,
+                      name: summary.name || '未命名项目',
+                    });
+                  }
+                }}
               />
             ))}
           </div>
@@ -332,6 +427,46 @@ export default function ProjectsPage() {
           </div>
         </div>
       )}
+
+      {/* 发布到广场弹窗 */}
+      <PublishModal
+        open={publishTarget !== null}
+        project={publishTarget}
+        onClose={() => setPublishTarget(null)}
+        onPublished={handlePublished}
+      />
+
+      {/* 取消发布确认弹层 */}
+      <Modal
+        open={unpublishTarget !== null}
+        onClose={() => {
+          if (!isUnpublishing) setUnpublishTarget(null);
+        }}
+        title="取消发布"
+        footer={
+          <>
+            <button
+              onClick={() => setUnpublishTarget(null)}
+              disabled={isUnpublishing}
+              className="px-4 py-2 rounded-[10px] text-[13px] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-text-primary)] disabled:opacity-60 transition-colors duration-[140ms]"
+            >
+              取消
+            </button>
+            <button
+              onClick={handleUnpublish}
+              disabled={isUnpublishing}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-[10px] bg-[var(--color-accent)] text-[var(--color-text-on-accent)] text-[13px] font-medium hover:bg-[var(--color-accent-hover)] disabled:opacity-60 disabled:cursor-not-allowed transition-colors duration-[140ms]"
+            >
+              {isUnpublishing && <Icon icon="lucide:loader-circle" width={14} height={14} className="animate-spin" />}
+              取消发布
+            </button>
+          </>
+        }
+      >
+        <p className="text-[14px] leading-[1.6] text-[var(--color-text-secondary)]">
+          确定取消发布「{unpublishTarget?.name}」吗？取消后该作品不再出现在广场，可随时重新发布。
+        </p>
+      </Modal>
     </div>
   );
 }

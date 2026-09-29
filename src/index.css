@@ -101,6 +101,30 @@ body {
   background: var(--color-text-tertiary);
 }
 
+/* 骨架屏 shimmer（design-system 1.5：仅有循环动画之一，1.6s，reduced-motion 停） */
+@keyframes skeleton-shimmer {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.skeleton-shimmer {
+  background-color: var(--color-bg-elevated);
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer {
+    animation: none;
+  }
+}
+
 /* Progress bar breathing animation (shine effect) */
 @keyframes tp-run-shine {
   0% {

@@ -13,6 +13,7 @@ const AuthPage = lazy(() => import('./pages/AuthPage'));
 const ProjectsPage = lazy(() => import('./pages/ProjectsPage'));
 const LandingPage = lazy(() => import('./components/landing/LandingPage'));
 const SharePage = lazy(() => import('./pages/SharePage'));
+const GalleryPage = lazy(() => import('./pages/GalleryPage'));
 
 /** 全屏加载占位符 */
 function PageLoader() {
@@ -60,6 +61,9 @@ function App() {
   // 分享预览路由（无需登录）
   if (path.startsWith('/share/')) {
     page = <SharePage />;
+  } else if (path === '/gallery') {
+    // 作品广场（公开路由，无需登录）
+    page = <GalleryPage />;
   } else if (path === '/login' || path === '/register') {
     page = <AuthPage mode={path === '/register' ? 'register' : 'login'} />;
   } else if (path === '/workspace') {

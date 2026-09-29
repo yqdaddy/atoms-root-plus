@@ -1,0 +1,19 @@
+
+ RUN  v3.2.7 /Users/zoe/Documents/zwork/atoms-root-plus
+
+stderr | server/routes/gallery.test.ts > 作品广场：发布快照 > 前置：注册用户 alice 并创建项目
+[auth] AUTH_SESSION_SECRET 未配置，使用默认值（仅限开发环境）
+
+stderr | server/routes/resources.test.ts > 项目知识库：CRUD > 前置：注册用户
+[auth] AUTH_SESSION_SECRET 未配置，使用默认值（仅限开发环境）
+
+ ✓ server/routes/gallery.test.ts (13 tests) 674ms
+ ✓ server/routes/resources.test.ts (15 tests) 388ms
+
+ Test Files  2 passed (2)
+      Tests  28 passed (28)
+   Start at  07:36:01
+   Duration  2.02s (transform 704ms, setup 0ms, collect 1.37s, tests 1.06s, environment 0ms, prepare 443ms)
+
+
+[exited with code 0]

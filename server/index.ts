@@ -16,6 +16,8 @@ import { llmRouter } from './routes/llm.js';
 import { authRouter } from './routes/auth.js';
 import { shareRouter } from './routes/share.js';
 import { deployRouter } from './routes/deploy.js';
+import { galleryRouter } from './routes/gallery.js';
+import { resourcesRouter } from './routes/resources.js';
 import { closeDatabase } from './db.js';
 
 // 获取 Git SHA（运行时）
@@ -72,6 +74,10 @@ app.route('/api/projects', projectsRouter);
 app.route('/api/llm', llmRouter);
 app.route('/api/share', shareRouter);
 app.route('/api/deploy', deployRouter);
+app.route('/api/gallery', galleryRouter);
+// 项目知识库资源挂在 /api/projects 路径下（/api/projects/:id/resources），
+// 与 projectsRouter 同前缀但路径段数不同，互不冲突
+app.route('/api/projects', resourcesRouter);
 
 // 优雅关闭
 process.on('SIGINT', () => {

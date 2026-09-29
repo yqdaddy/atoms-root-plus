@@ -25,6 +25,7 @@ import {
   getTemplateHintText,
   type OptimizerExistingContext,
 } from '../prompts.js';
+import { listProjectResources } from './resources.js';
 import type { AppEnv } from '../types.js';
 
 export const llmRouter = new Hono<AppEnv>();
@@ -40,7 +41,8 @@ llmRouter.use('*', requireAuth);
  *   prompt: string,
  *   options?: {
  *     currentHtml?: string,         // 向后兼容：单文件模式
- *     currentFiles?: Record<string, { path: string; content: string; language: string }> // 多文件模式
+ *     currentFiles?: Record<string, { path: string; content: string; language: string }>, // 多文件模式
+ *     projectId?: string            // 项目知识库：携带时把该登录用户在此项目下的资料注入 prompt 尾部
  *   }
  * }
  *
@@ -79,6 +81,23 @@ llmRouter.post('/generate', async (c) => {
   if (typeof currentHtml === 'string' && currentHtml.length > MAX_CURRENT_FILE_SIZE) {
     return c.json({ error: `currentHtml 超过大小上限（最多 ${MAX_CURRENT_FILE_SIZE} 字符）` }, 400);
   }
+
+  // 项目知识库注入（P2）：请求携带 options.projectId 且该登录用户在该项目下
+  // 有资料时，把资料以【项目参考资料】块拼进 prompt 尾部。prompt 会原样进入
+  // 工程师阶段的用户需求 / 修改需求字段，因此注入内容在工程师阶段可见。
+  // 拼接发生在 prompt 长度校验之后：资料不占用用户 prompt 长度预算；
+  // 资料块自身截断到 32KB，防止放大 LLM 请求体造成成本滥用。
+  const projectId =
+    typeof body.options?.projectId === 'string' && body.options.projectId
+      ? body.options.projectId
+      : undefined;
+  const sessionUser = c.get('user');
+  const resourcesBlock =
+    projectId && sessionUser
+      ? buildProjectResourcesBlock(listProjectResources(projectId, sessionUser.id))
+      : '';
+  const enrichedPrompt = prompt + resourcesBlock;
+
   const chatTurns = parseChatTurns(body.options?.chatTurns);
   const originalRequest = typeof body.options?.originalRequest === 'string' ? body.options.originalRequest : undefined;
   const intentOverride = parseIntentOverride(body.options?.intentOverride);
@@ -112,7 +131,7 @@ llmRouter.post('/generate', async (c) => {
 
     // 启动生成（异步执行）
     const generatePromise = generateWithStages({
-      prompt,
+      prompt: enrichedPrompt,
       currentHtml: typeof currentHtml === 'string' ? currentHtml : undefined,
       currentFiles: typeof currentFiles === 'object' && currentFiles !== null ? currentFiles : undefined,
       chatTurns,
@@ -468,6 +487,26 @@ function validateCurrentFiles(value: unknown): string | null {
     }
   }
   return null;
+}
+
+/** 项目资料注入块总长上限（字符）：与知识库总量限额（32KB）对齐 */
+const MAX_RESOURCES_BLOCK_LENGTH = 32_768;
+
+/**
+ * 组装【项目参考资料】注入块（追加到 prompt 尾部）。
+ * 空资料返回空串；块首为分隔标记，块尾附使用约束；
+ * 总长截断到 MAX_RESOURCES_BLOCK_LENGTH，防止放大 LLM 请求体。
+ */
+export function buildProjectResourcesBlock(
+  resources: ReadonlyArray<{ name: string; content: string }>,
+): string {
+  if (resources.length === 0) return '';
+  const parts = resources.map((r) => `### ${r.name}\n${r.content}`);
+  let block = `\n\n【项目参考资料】\n${parts.join('\n\n')}\n\n（以上为用户上传的项目资料，仅在相关时参考；与本次需求冲突时以本次需求为准。）`;
+  if (block.length > MAX_RESOURCES_BLOCK_LENGTH) {
+    block = block.slice(0, MAX_RESOURCES_BLOCK_LENGTH);
+  }
+  return block;
 }
 
 /**
