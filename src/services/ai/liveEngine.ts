@@ -72,7 +72,6 @@ async function parseSSEStream(
   const reader = response.body!.getReader();
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
-  let chunkCount = 0;
   const runId = `run-${Date.now()}`;
 
   // 当前事件的类型和数据
@@ -125,7 +124,6 @@ async function parseSSEStream(
       }
 
       if (chunk.done) {
-        console.log('[liveEngine] 流结束，共接收', chunkCount, '个数据块');
         // 处理最后一个事件（如果有）
         if (currentEventType && currentData) {
           dispatchEvent(processSSEEvent(currentEventType, currentData, runId));
@@ -135,9 +133,7 @@ async function parseSSEStream(
         break;
       }
 
-      chunkCount += 1;
       buffer += decoder.decode(chunk.value, { stream: true });
-
       // 逐行解析 SSE
       const lines = buffer.split('\n');
       // 保留最后一个不完整的行
@@ -188,7 +184,6 @@ function processSSEEvent(
         const message = payload.message || STAGE_MESSAGES[backendStage] || `${backendStage} 阶段`;
         // 优先使用后端传来的 attempt（修复轮为 2+），否则默认为 1
         const attempt = payload.attempt ?? 1;
-        console.log('[liveEngine] stage 事件:', { backendStage, frontendStage, message, attempt, intent: payload.intent, meta: payload.meta });
         event = {
           type: 'stage',
           payload: {
@@ -222,16 +217,6 @@ function processSSEEvent(
         const changeSummary = payload.changeSummary;
         // 从后端读取 token 统计，后端未返回时使用默认值
         const backendStats = payload.stats;
-        console.log('[liveEngine] done 事件:', {
-          htmlLength: html.length,
-          htmlPreview: html.slice(0, 200),
-          hasFiles: !!files,
-          fileCount: files ? Object.keys(files).length : 0,
-          hasAnalysis: !!analysis,
-          hasChanges: !!changes,
-          changeSummary,
-          stats: backendStats,
-        });
         event = {
           type: 'done',
           payload: {
@@ -273,7 +258,6 @@ function processSSEEvent(
         // 文案（含失败原因与策略切换标记），此处跳过渲染，避免聊天区文案重复（D-1）。
         const retry = payload.retry;
         if (retry) {
-          console.log('[liveEngine] retry 事件:', retry);
           if (retry.delayMs > 0) {
             event = {
               type: 'delta',
@@ -353,9 +337,6 @@ async function runPipeline(
   options: GenerateOptions,
   onEvent: StreamEventHandler,
 ): Promise<void> {
-  // 调试日志：framework 参数
-  console.log('[liveEngine] runPipeline framework 参数:', options.framework);
-
   // 新提交隐式取消进行中的旧任务
   cancelActiveRun();
 
@@ -365,14 +346,6 @@ async function runPipeline(
   });
 
   try {
-    console.log('[liveEngine] 发起请求到后端代理', {
-      prompt: prompt.slice(0, 50),
-      hasCurrentFiles: Boolean(options.currentFiles),
-      hasChatTurns: Boolean(options.chatTurns),
-      hasCurrentHtml: Boolean(options.currentHtml),
-      framework: options.framework,
-    });
-
     // 统一走反向代理：开发环境由 Vite 代理转发，生产环境同源直出
     // 使用 apiFetch 统一拦截 401
     const response = await apiFetch('/api/llm/generate', {
@@ -396,8 +369,6 @@ async function runPipeline(
       }),
       signal: controller.signal,
     });
-
-    console.log('[liveEngine] 后端响应状态', response.status, response.statusText);
 
     if (!response.ok) {
       const bodyText = await response.text().catch(() => '');
@@ -441,9 +412,9 @@ async function runPipeline(
     await parseSSEStream(response, onEvent, controller.signal);
 
   } catch (error) {
-    // 用户取消
+    // 用户取消（降级为 debug 级别，正常控制台不可见）
     if (controller.signal.aborted) {
-      console.log('[liveEngine] 用户取消');
+      console.debug('[liveEngine] 用户取消');
       onEvent({
         type: 'error',
         payload: {
@@ -522,8 +493,6 @@ export async function approveAndContinue(
   });
 
   try {
-    console.log('[liveEngine] 批准后继续生成', { sessionId, hasSupplementaryInfo: !!supplementaryInfo });
-
     // 使用 apiFetch 统一拦截 401
     const response = await apiFetch('/api/llm/approve', {
       method: 'POST',
@@ -651,8 +620,6 @@ export async function continueWithFeedback(
   });
 
   try {
-    console.log('[liveEngine] 继续生成', { sessionId, userFeedback: userFeedback.slice(0, 50) });
-
     const response = await apiFetch('/api/llm/continue', {
       method: 'POST',
       headers: {

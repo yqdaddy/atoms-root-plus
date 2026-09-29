@@ -793,13 +793,6 @@ export default function HomePage() {
           break;
         }
         case 'done': {
-          console.debug('[HomePage] done 事件:', {
-            htmlLength: event.payload.html?.length || 0,
-            htmlPreview: event.payload.html?.slice(0, 200) || '(empty)',
-            hasFiles: !!(event.payload as { files?: Record<string, ProjectFileNode> }).files,
-            hasChanges: !!(event.payload as { changes?: ChangeList }).changes,
-          });
-
           // 从流式文本解析审查者检查结果，折叠为单行摘要展示
           const doneBuffer = useChatStore.getState().streamBuffer;
           setReviewChecks(parseReviewChecks(doneBuffer.generateText + doneBuffer.repairText));
@@ -827,7 +820,6 @@ export default function HomePage() {
           // 对话模式：有 analysis 字段时，作为 assistant 消息展示
           // （analyze/diagnose 意图、分析师澄清、diff 模式空变更均走此分支）
           if (hasAnalysis && !hasFiles && !payload.html) {
-            console.debug('[HomePage] 对话模式，analysis 字段长度:', payload.analysis!.length);
             // 对话模式不改动项目文件，恢复生成前状态（runGeneration 已置为 generating）
             revertProjectStatusAfterFailure();
 
@@ -848,7 +840,6 @@ export default function HomePage() {
 
           // diff 模式：直接应用变更，无需用户确认
           if (hasChanges && hasFiles) {
-            console.debug('[HomePage] diff 模式，直接应用变更');
             const files = payload.files!;
 
             // 获取入口文件内容用于验证
@@ -907,7 +898,6 @@ export default function HomePage() {
           if (hasFiles) {
             // 多文件模式（非 diff 模式或 diff 解析失败后的降级）
             const files = payload.files!;
-            console.debug('[HomePage] 多文件模式，文件数:', Object.keys(files).length);
 
             // 获取入口文件内容用于验证
             const entryPath = (event.payload as { entryFile?: string }).entryFile ?? ENTRY_FILE_PATH;
@@ -960,13 +950,9 @@ export default function HomePage() {
             setMessageUIState(null);
           } else if (event.payload.html && event.payload.html.length > 0) {
             // 单文件模式（向后兼容）
-            console.debug('[HomePage] 单文件模式');
             const validation = validateGeneratedHtml(event.payload.html);
-            console.debug('[HomePage] 验证结果:', validation);
 
-            console.debug('[HomePage] 调用 updateEntryFile');
             updateEntryFile(event.payload.html);
-            console.debug('[HomePage] updateEntryFile 完成');
             updateProjectStatus(validation.ok ? 'ready' : 'draft');
 
             // 组合完整的 LLM 输出（分析 + 生成内容）
@@ -1046,7 +1032,6 @@ export default function HomePage() {
           if (sessionId) {
             // Phase 3：保存服务端会话 ID，供工程师暂停时调用 /interrupt
             serverSessionIdRef.current = sessionId;
-            console.debug('[HomePage] 分析完成，自动继续生成');
             // 保持生成状态
             setIsGenerating(true);
             // 异步继续生成
@@ -1069,7 +1054,6 @@ export default function HomePage() {
         case 'clarification_required': {
           // Phase 2：意图澄清机制
           const { sessionId, reason, questions } = event.payload;
-          console.debug('[HomePage] 需要澄清:', reason, questions);
 
           // 设置等待澄清状态
           useChatStore.getState().setAwaitingClarification(
@@ -1088,7 +1072,6 @@ export default function HomePage() {
         case 'engineer_pause': {
           // Phase 3：工程师阶段暂停（结对编程）
           const { sessionId, currentFiles, message } = event.payload;
-          console.debug('[HomePage] 工程师暂停:', message, Object.keys(currentFiles));
 
           // 保存暂停状态
           setEngineerPaused({ sessionId, currentFiles, message });
@@ -1152,28 +1135,12 @@ export default function HomePage() {
     // 推断意图类型（如果没有指定）
     const intentType: 'create' | 'modify' | 'analyze' | 'diagnose' = opts?.intentOverride ?? (isIteration ? 'modify' : 'create');
 
-    // 调试日志：追踪 framework 参数传递
-    console.debug('[HomePage] runGeneration 参数追踪:', {
-      selectedFramework,
-      projectFramework: project.framework,
-      isIteration,
-      priorChatLength: priorChat.length,
-      entryContentLength: entryContent.length,
-      hasSubstantialContent,
-      willUseFramework: isIteration ? (project.framework ?? selectedFramework) : selectedFramework,
-      runId,
-      intentType,
-    });
-
     // 添加用户消息到持久化层（包含图片、runId、意图类型）
     addMessage({ role: 'user', content: userMessage, images: opts?.images, runId, intentType });
     updateProjectStatus('generating');
 
     // 后台提取项目偏好：从用户消息中识别纠正（如"不要渐变"）与风格偏好（如"深色模式"）
-    const extractedPrefs = extractPreferences(project.id, userMessage);
-    if (extractedPrefs.length > 0) {
-      console.debug('[HomePage] 已提取项目偏好:', extractedPrefs.map(p => `${p.key}=${p.value}`));
-    }
+    extractPreferences(project.id, userMessage);
 
     // 获取 AI API
     const baseURL = getEffectiveBaseURL();
@@ -1238,15 +1205,6 @@ export default function HomePage() {
         // 项目知识库：携带 projectId 时服务端把该项目的资料注入工程师 prompt
         projectId: project.id,
       };
-
-      // 调试日志：最终发送的 generateOpts
-      console.debug('[HomePage] 最终 generateOpts:', {
-        framework: generateOpts.framework,
-        hasCurrentFiles: !!generateOpts.currentFiles,
-        hasChatTurns: !!generateOpts.chatTurns,
-        chatTurnsLength: generateOpts.chatTurns?.length || 0,
-        projectId: generateOpts.projectId,
-      });
 
       await api.generateStream(llmPrompt, handleStreamEvent, generateOpts);
     } catch (error) {

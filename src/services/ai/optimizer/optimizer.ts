@@ -183,13 +183,6 @@ export class PromptOptimizer {
         },
       });
 
-      console.log('[PromptOptimizer] 发起优化请求', {
-        userPrompt: input.userPrompt.slice(0, 50),
-        hasTemplateHint: Boolean(input.templateHint),
-        hasExistingContext: Boolean(input.existingContext),
-        locale: input.locale,
-      });
-
       // 后端负责：组装 prompt（模板在后端有镜像副本）+ 调用 LLM + SSE 流式返回
       const response = await apiFetch('/api/llm/optimize', {
         method: 'POST',
@@ -207,8 +200,6 @@ export class PromptOptimizer {
         }),
         signal: controller.signal,
       });
-
-      console.log('[PromptOptimizer] 后端响应状态', response.status);
 
       if (!response.ok) {
         const bodyText = await response.text().catch(() => '');
@@ -290,12 +281,6 @@ export class PromptOptimizer {
           payload: { runId, result },
         });
 
-        console.log('[PromptOptimizer] 优化完成', {
-          appTitle: result.appTitle,
-          appType: result.appType,
-          coreFeatures: result.coreFeatures.length,
-        });
-
         return result;
       } catch (error) {
         if (error instanceof OptimizerError) {
@@ -319,7 +304,8 @@ export class PromptOptimizer {
       // 已发过事件的 OptimizerError 直接上抛
       if (error instanceof OptimizerError) {
         if (error.code === 'CANCELLED') {
-          console.log('[PromptOptimizer] 用户取消');
+          // 用户取消（降级为 debug 级别，正常控制台不可见）
+          console.debug('[PromptOptimizer] 用户取消');
         } else {
           console.error('[PromptOptimizer] 优化失败', error.message);
         }
