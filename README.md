@@ -1,12 +1,32 @@
-# Atoms Demo
+# Litpp Atoms
 
-> AI Agent 驱动的代码生成平台，对标 atoms.dev
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![GitHub Stars](https://img.shields.io/github/stars/litpp/atoms?style=social)](https://github.com/litpp/atoms)
+
+> AI Agent 驱动的代码生成平台，用自然语言构建可交互的 Web 应用
 
 **在线体验**：<https://atoms.litpp.com>
 
 ## 项目介绍
 
-Atoms Demo 是一个 AI App Builder：用户用一段自然语言描述需求，由角色化 Agent 流水线（需求分析、用户批准、代码生成、代码审查）生成自包含的单文件 HTML 应用，在 iframe 沙箱中实时预览，并通过多轮对话持续迭代。前后端分离：React SPA 负责界面与本地持久化，Hono 后端负责会话认证、项目存储与 LLM 流式代理，LLM 密钥由服务端持有，前端零密钥。
+Litpp Atoms 是一个开源的 AI App Builder：用户用一段自然语言描述需求，由角色化 Agent 流水线（需求分析、用户批准、代码生成、代码审查）生成自包含的单文件 HTML 应用，在 iframe 沙箱中实时预览，并通过多轮对话持续迭代。
+
+**核心亮点**：
+- 🔥 **零门槛启动**：支持演示模式，无需 LLM API Key 即可体验完整流程
+- 🤖 **多 Agent 协作**：需求分析、代码生成、代码审查三阶段流水线
+- 🎯 **Human-in-the-loop**：批准流程确保生成符合预期
+- 📦 **自托管友好**：Docker + SQLite，一键部署
+
+**开源版 vs 商业版**：
+
+| 功能 | 开源版 | 商业版（计划中） |
+|------|--------|------------------|
+| 核心生成能力 | ✅ | ✅ |
+| 本地运行 | ✅ | ✅ |
+| 自备 API Key | ✅ | 可选 |
+| 云端托管 | ❌ | ✅ |
+| 团队协作 | ❌ | ✅ |
+| SSO/SAML | ❌ | ✅ |
 
 ## 功能特性
 
@@ -238,4 +258,17 @@ Atoms Demo 由多 Agent 团队协作开发：
 
 ## 许可证
 
-ISC
+[Apache License 2.0](LICENSE)
+
+## 贡献指南
+
+欢迎贡献代码、报告 Bug 或提出功能建议！请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解如何参与。
+
+## 社区
+
+- **GitHub Discussions**：提问、分享想法
+- **问题反馈**：[GitHub Issues](https://github.com/litpp/atoms/issues)
+
+---
+
+**Star ⭐ 本项目以支持开源发展！**
